@@ -334,3 +334,71 @@ code { background: var(--surface-2); padding: .05rem .3rem; border-radius: 4px; 
 }
 .accounts-layout > *, .planner-grid > *, .dash-grid > * { min-width: 0; }
 .pill.wrap { white-space: normal; }
+
+/* ---------- account views (table / board / cards) ---------- */
+.page-head { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; margin-bottom: .75rem; }
+.page-head h1 { margin: 0; }
+.filters { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .9rem; }
+.filters input[type=search] { flex: 1 1 260px; width: auto; }
+.filters select { width: auto; flex: 0 1 auto; }
+
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 2px; }
+.seg button {
+  border: none; background: none; font: inherit; color: var(--muted); cursor: pointer;
+  padding: .32rem .7rem; border-radius: 7px; font-weight: 500; white-space: nowrap;
+}
+.seg button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.board-type { margin-bottom: .75rem; }
+
+.table-card { padding: 0; overflow: hidden; }
+.acct-table { min-width: 860px; }
+.acct-table th { background: var(--surface); position: sticky; top: 0; }
+.th-sort { border: none; background: none; font: inherit; color: inherit; cursor: pointer; padding: 0; text-transform: inherit; }
+.th-sort.on { color: var(--text); }
+.click-row { cursor: pointer; }
+.click-row:hover td { background: var(--surface-2); }
+.acct-table td:first-child, .acct-table th:first-child { padding-left: 1rem; }
+.sticky-col { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+.num { text-align: right; white-space: nowrap; }
+
+.acard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .75rem; }
+.acard {
+  display: flex; flex-direction: column; gap: .35rem; text-align: left; font: inherit; color: inherit;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: .85rem .95rem; cursor: pointer; box-shadow: var(--shadow);
+}
+.acard:hover { border-color: var(--accent); }
+.acard-name { font-size: 1rem; }
+.acard-dates { display: flex; gap: .9rem; flex-wrap: wrap; color: var(--muted); margin-top: auto; padding-top: .35rem; border-top: 1px solid var(--border); }
+
+.board { display: flex; gap: .75rem; overflow-x: auto; padding-bottom: .5rem; align-items: flex-start; -webkit-overflow-scrolling: touch; }
+.kcol { flex: 0 0 250px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; max-height: calc(100vh - 230px); }
+.kcol header { padding: .6rem .75rem; border-bottom: 1px solid var(--border); }
+.kcol-body { padding: .5rem; display: flex; flex-direction: column; gap: .5rem; overflow-y: auto; min-height: 70px; }
+.kcol.drop { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.kcol-empty { color: var(--muted); font-size: .8rem; text-align: center; padding: 1rem 0; }
+.kcard { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .55rem .65rem; cursor: pointer; box-shadow: var(--shadow); }
+.kcard[draggable=true] { cursor: grab; }
+.kcard:hover { border-color: var(--accent); }
+.kcard.dragging { opacity: .45; }
+.kcard-stage { margin-top: .4rem; padding: .25rem .4rem; }
+
+.record { max-width: 1000px; margin: 0 auto; }
+.back-btn { margin-bottom: .75rem; }
+.lists-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 1rem; align-items: start; }
+.list-head { margin-bottom: .75rem; }
+
+.plan-row.auto input[data-plan=name] { border-style: dashed; border-color: var(--warn); }
+.plan-due { grid-column: 3 / -1; font-size: .72rem; color: var(--warn); margin-top: -.1rem; }
+.plan-due.overdue { color: var(--danger); }
+
+@media (max-width: 900px) {
+  .lists-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .filters select { flex: 1 1 45%; }
+  .page-head .seg { order: 2; width: 100%; }
+  .page-head .seg button { flex: 1; }
+  .plan-due { grid-column: 2 / -1; }
+  .kcol { flex-basis: 78vw; }
+}

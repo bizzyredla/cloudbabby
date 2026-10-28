@@ -16,7 +16,15 @@ No install, no build step: open `index.html` in a browser.
   G&A Partners, Engage PEO, BBSI, Extensis Group, Questco, Infiniti HR, ADP Workforce Now, Paycor,
   Paylocity, Paycom, Deel), or type any other vendor
 - Website, industry, deal/annual value, tags, free-form notes
-- **Next follow-up date** on every account
+- **Next follow-up date** and **next revisit date** (with a purpose note) on every account
+- Three layouts for accounts, shared by the Accounts page and every list. The choice is remembered per device:
+  - **Table**: sortable columns (click a header) for stage, contact, vendors, value, follow-up,
+    revisit and last touch
+  - **Board**: a pipeline by stage, with separate prospect and partner pipelines and stage value
+    totals. Drag a card to change its stage (on phones, use the stage picker on the card).
+    Stage changes are logged to history
+  - **Cards**: a compact grid, and the default on phones
+- Clicking any account opens its full record page
 - **Key dates** (renewals, contract end, QBRs, decision dates, etc.) that can be marked done
 - **History timeline** of calls, emails, meetings, demos and notes. Logging an activity can also
   set the next follow-up, update the stage, and add the follow-up to your planner
@@ -45,7 +53,9 @@ No install, no build step: open `index.html` in a browser.
   - 25 calls / emails / LinkedIn touches
   - 5 visits
   - 5 channel accounts (suggestions limited to partner accounts)
-  - 5 revisits
+  - 5 revisits. Accounts whose revisit date is that day (or overdue, on today's page) fill in
+    automatically. Checking one off logs the visit, clears the due date and asks when to go back
+    (14 / 30 / 60 / 90 days or a date you pick)
 
   Each row has an account, a type, a note, and a checkbox. Account names autocomplete from your
   accounts, and checking off a row for an existing account logs it to that account's history.

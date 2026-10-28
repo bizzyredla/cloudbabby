@@ -79,7 +79,15 @@
 
   // ---------- state ----------
   let state = load();
-  const ui = { selectedId: null, search: '', typeFilter: 'all', stageFilter: 'all', vendorFilter: 'all', sort: 'followup', plannerDate: today(), listId: null };
+  const ui = { search: '', typeFilter: 'all', stageFilter: 'all', vendorFilter: 'all', sort: 'followup', sortDir: 1, plannerDate: today(), listId: null, navs: 0 };
+  // Per-device view preferences (layout choice), not synced.
+  const PREFS_KEY = 'minicrm.prefs';
+  try { Object.assign(ui, JSON.parse(localStorage.getItem(PREFS_KEY)) || {}); } catch (e) { /* defaults */ }
+  ui.accountView ||= matchMedia('(max-width: 700px)').matches ? 'cards' : 'table';
+  ui.boardType ||= 'prospect';
+  const savePrefs = () => {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType })); } catch (e) { /* ignore */ }
+  };
 
   function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], deleted: {} }; }
 
@@ -231,31 +239,33 @@
     return [...acct.activities].sort((a, b) => b.date.localeCompare(a.date))[0];
   }
 
-  /** Every dated, still-open item across accounts: follow-ups and key dates. */
+  /** Every dated, still-open item across accounts: follow-ups, revisits and key dates. */
   function upcomingItems() {
     const items = [];
     for (const a of state.accounts) {
       if (a.nextFollowUp) items.push({ kind: 'followup', date: a.nextFollowUp, label: 'Follow up', account: a });
+      if (a.revisitDate) items.push({ kind: 'revisit', date: a.revisitDate, label: 'Revisit', account: a });
       for (const k of a.keyDates) if (!k.done) items.push({ kind: 'keydate', date: k.date, label: k.label, account: a, keyDate: k });
     }
     return items.sort((x, y) => x.date.localeCompare(y.date));
   }
 
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, planner: renderPlanner, lists: renderLists };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists };
+  const TAB_FOR = { account: 'accounts' };
 
   function route() {
     const [name, arg] = location.hash.replace('#', '').split('/');
     const view = views[name] ? name : 'dashboard';
-    if (view === 'accounts' && arg) ui.selectedId = arg;
+    if (view === 'account') ui.recordId = arg;
     if (view === 'planner' && arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)) ui.plannerDate = arg;
     if (view === 'lists' && arg) ui.listId = decodeURIComponent(arg);
-    $$('#tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
+    $$('#tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === (TAB_FOR[view] || view)));
     views[view]();
   }
   const rerender = () => route();
   const go = (hash) => { if (location.hash === '#' + hash) rerender(); else location.hash = hash; };
-  window.addEventListener('hashchange', route);
+  window.addEventListener('hashchange', () => { ui.navs++; route(); window.scrollTo(0, 0); });
 
   // ---------- dashboard ----------
   function renderDashboard() {
@@ -328,7 +338,7 @@
               <div class="date-chip"><b>${fromISO(r.date).getDate()}</b>${fmtDate(r.date, { month: 'short' })}</div>
               <div class="grow">
                 <div class="title">${esc(r.kind)}: ${esc(r.summary)}</div>
-                <div class="small muted"><a href="#accounts/${r.account.id}">${esc(r.account.name)}</a></div>
+                <div class="small muted"><a href="#account/${r.account.id}">${esc(r.account.name)}</a></div>
               </div>
             </li>`).join('')}</ul>` : '<div class="empty">No activity logged yet.</div>'}
         </div>
@@ -337,7 +347,7 @@
           ${quiet.length ? `<ul class="list">${quiet.map((a) => `
             <li>
               <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span>
-              <div class="grow"><a class="title" href="#accounts/${a.id}">${esc(a.name)}</a>
+              <div class="grow"><a class="title" href="#account/${a.id}">${esc(a.name)}</a>
                 <div class="small muted">${esc(a.stage)} · last touch ${lastActivity(a) ? relDays(lastActivity(a).date) : 'never'}</div></div>
               <button class="btn sm ghost" data-act="log" data-id="${a.id}">Log / schedule</button>
             </li>`).join('')}</ul>` : '<div class="empty">Every active account has a next step.</div>'}
@@ -356,7 +366,7 @@
       `${syncCfg ? ' on this device AND every synced device' : ' on this device'}.\n\nExport a backup first if you might need it.\n\nType DELETE to confirm.`);
     if ((typed || '').trim().toUpperCase() !== 'DELETE') { if (typed !== null) toast('Nothing was deleted'); return; }
     state.accounts = []; state.tasks = []; state.lists = []; state.days = {};
-    ui.selectedId = null; ui.listId = null;
+    ui.listId = null;
     save(); toast('All data erased'); go('dashboard');
   }
 
@@ -366,98 +376,219 @@
       <li>
         <div class="date-chip ${dueClass(i.date)}"><b>${fromISO(i.date).getDate()}</b>${fmtDate(i.date, { month: 'short' })}</div>
         <div class="grow">
-          <div class="title">${esc(i.label)} — <a href="#accounts/${i.account.id}">${esc(i.account.name)}</a></div>
+          <div class="title">${esc(i.label)} — <a href="#account/${i.account.id}">${esc(i.account.name)}</a></div>
           <div class="small muted"><span class="pill ${i.account.type}">${i.account.type === 'partner' ? 'Partner' : 'Prospect'}</span> ${relDays(i.date)}</div>
         </div>
-        ${i.kind === 'followup'
-          ? `<button class="btn sm ghost" data-act="log" data-id="${i.account.id}">Log</button>`
+        ${i.kind === 'followup' ? `<button class="btn sm ghost" data-act="log" data-id="${i.account.id}">Log</button>`
+          : i.kind === 'revisit' ? `<a class="btn sm ghost" href="#planner/${i.date > today() ? i.date : today()}">Planner</a>`
           : `<button class="btn sm ghost" data-act="keydate-done" data-id="${i.account.id}" data-kid="${i.keyDate.id}">Done</button>`}
       </li>`).join('')}</ul>`;
   }
 
   // ---------- accounts ----------
+  const FAR = '9999-12-31';
+  const stageIndex = (a) => STAGES[a.type].indexOf(a.stage) + (a.type === 'partner' ? 100 : 0);
+  const SORTERS = {
+    name: (x, y) => x.name.localeCompare(y.name),
+    stage: (x, y) => stageIndex(x) - stageIndex(y),
+    value: (x, y) => (Number(y.value) || 0) - (Number(x.value) || 0),
+    followup: (x, y) => (x.nextFollowUp || FAR).localeCompare(y.nextFollowUp || FAR),
+    revisit: (x, y) => (x.revisitDate || FAR).localeCompare(y.revisitDate || FAR),
+    lasttouch: (x, y) => ((lastActivity(y) || {}).date || '').localeCompare((lastActivity(x) || {}).date || ''),
+    updated: (x, y) => (y.updatedAt || '').localeCompare(x.updatedAt || ''),
+  };
+  const SORT_LABELS = { followup: 'Next follow-up', revisit: 'Next revisit', name: 'Name', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', updated: 'Recently updated' };
+  const sortAccounts = (list) => list.sort((x, y) => SORTERS[ui.sort](x, y) * ui.sortDir || x.name.localeCompare(y.name));
+
   function filteredAccounts() {
     const q = ui.search.trim().toLowerCase();
-    let list = state.accounts.filter((a) => {
+    return sortAccounts(state.accounts.filter((a) => {
       if (ui.typeFilter !== 'all' && a.type !== ui.typeFilter) return false;
       if (ui.stageFilter !== 'all' && a.stage !== ui.stageFilter) return false;
       if (ui.vendorFilter !== 'all' && !a.vendors.includes(ui.vendorFilter)) return false;
       return !q || haystack(a).includes(q);
+    }));
+  }
+
+  const typePill = (a) => `<span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span>`;
+  const dueChip = (iso) => iso
+    ? `<span class="pill ${dueClass(iso)}" title="${esc(relDays(iso))}">${fmtDate(iso, { month: 'short', day: 'numeric' })}</span>`
+    : '<span class="muted">—</span>';
+
+  const VIEW_MODES = [['table', '☰', 'Table'], ['board', '▥', 'Board'], ['cards', '▦', 'Cards']];
+  const viewSwitcher = () => `
+    <div class="seg" role="group" aria-label="Layout">
+      ${VIEW_MODES.map(([v, icon, label]) => `<button type="button" class="${ui.accountView === v ? 'active' : ''}" data-act="set-view" data-mode="${v}" aria-pressed="${ui.accountView === v}"><span aria-hidden="true">${icon}</span> ${label}</button>`).join('')}
+    </div>`;
+
+  /** One renderer for every collection of accounts (Accounts page and Lists), in the chosen layout. */
+  function accountCollection(list, emptyMsg = 'No accounts match.') {
+    if (ui.accountView === 'board') return accountBoard(list);
+    if (!list.length) return `<div class="card empty">${emptyMsg}</div>`;
+    return ui.accountView === 'cards' ? accountCards(list) : accountTable(list);
+  }
+
+  function accountTable(list) {
+    const th = (label, key) => key
+      ? `<th><button type="button" class="th-sort ${ui.sort === key ? 'on' : ''}" data-act="sort" data-key="${key}">${label}${ui.sort === key ? (ui.sortDir > 0 ? ' ▲' : ' ▼') : ''}</button></th>`
+      : `<th>${label}</th>`;
+    return `
+      <div class="card table-card">
+        <div class="table-wrap">
+          <table class="table acct-table">
+            <thead><tr>${th('Account', 'name')}${th('Stage', 'stage')}${th('Primary contact')}${th('Current vendors')}${th('Value', 'value')}${th('Follow-up', 'followup')}${th('Revisit', 'revisit')}${th('Last touch', 'lasttouch')}</tr></thead>
+            <tbody>${list.map((a) => {
+              const p = primaryContact(a);
+              const last = lastActivity(a);
+              return `<tr class="click-row" data-act="open-account" data-id="${a.id}">
+                <td class="sticky-col"><strong>${esc(a.name)}</strong><div>${typePill(a)}</div></td>
+                <td>${esc(a.stage)}</td>
+                <td>${p ? `${esc(p.name)}${p.title ? `<div class="small muted">${esc(p.title)}</div>` : ''}` : '<span class="muted">—</span>'}${a.contacts.length > 1 ? `<div class="small muted">+${a.contacts.length - 1} more</div>` : ''}</td>
+                <td>${vendorPills(a) || '<span class="muted">—</span>'}</td>
+                <td class="num">${a.value ? money(a.value) : '<span class="muted">—</span>'}</td>
+                <td>${dueChip(a.nextFollowUp)}</td>
+                <td>${dueChip(a.revisitDate)}</td>
+                <td class="small">${last ? `${esc(relDays(last.date))}<div class="muted">${esc(last.kind)}</div>` : '<span class="muted">Never</span>'}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function accountCards(list) {
+    return `<div class="acard-grid">${list.map((a) => {
+      const p = primaryContact(a);
+      return `
+        <button type="button" class="acard" data-act="open-account" data-id="${a.id}">
+          <div class="row spread"><strong class="acard-name">${esc(a.name)}</strong>${typePill(a)}</div>
+          <div class="small muted">${esc(a.stage)}${a.value ? ' · ' + money(a.value) : ''}${a.industry ? ' · ' + esc(a.industry) : ''}</div>
+          ${p ? `<div class="small">${esc(p.name)}${p.title ? ` <span class="muted">· ${esc(p.title)}</span>` : ''}${a.contacts.length > 1 ? ` <span class="muted">+${a.contacts.length - 1}</span>` : ''}</div>` : ''}
+          ${a.vendors.length ? `<div class="row">${vendorPills(a)}</div>` : ''}
+          <div class="acard-dates small">
+            <span>Follow-up ${dueChip(a.nextFollowUp)}</span>
+            <span>Revisit ${dueChip(a.revisitDate)}</span>
+          </div>
+        </button>`;
+    }).join('')}</div>`;
+  }
+
+  function accountBoard(list) {
+    const fixedType = ui.typeFilter !== 'all' ? ui.typeFilter : null;
+    const type = fixedType || ui.boardType;
+    const items = list.filter((a) => a.type === type);
+    const touchUI = matchMedia('(pointer: coarse)').matches;
+    return `
+      ${fixedType ? '' : `
+      <div class="seg board-type" role="group" aria-label="Pipeline">
+        <button type="button" class="${type === 'prospect' ? 'active' : ''}" data-act="board-type" data-type="prospect">Prospect pipeline (${list.filter((a) => a.type === 'prospect').length})</button>
+        <button type="button" class="${type === 'partner' ? 'active' : ''}" data-act="board-type" data-type="partner">Partner pipeline (${list.filter((a) => a.type === 'partner').length})</button>
+      </div>`}
+      <div class="board">
+        ${STAGES[type].map((stage) => {
+          const col = sortAccounts(items.filter((a) => a.stage === stage));
+          const total = col.reduce((n, a) => n + (Number(a.value) || 0), 0);
+          return `
+            <section class="kcol" data-stage="${esc(stage)}">
+              <header><strong>${esc(stage)}</strong> <span class="pill">${col.length}</span>${total ? `<div class="small muted">${money(total)}</div>` : ''}</header>
+              <div class="kcol-body">
+                ${col.map((a) => {
+                  const p = primaryContact(a);
+                  return `
+                  <div class="kcard" draggable="${!touchUI}" data-id="${a.id}" data-act="open-account">
+                    <strong>${esc(a.name)}</strong>
+                    ${p ? `<div class="small muted">${esc(p.name)}</div>` : ''}
+                    ${a.vendors.length ? `<div class="small">${esc(a.vendors.join(', '))}</div>` : ''}
+                    <div class="row small" style="margin-top:.3rem">${a.value ? `<span>${money(a.value)}</span>` : ''}${a.nextFollowUp ? dueChip(a.nextFollowUp) : ''}</div>
+                    ${touchUI ? `<select class="kcard-stage" data-id="${a.id}" aria-label="Move ${esc(a.name)} to stage">${STAGES[type].map((s2) => opt(s2, s2, a.stage)).join('')}</select>` : ''}
+                  </div>`;
+                }).join('') || '<div class="kcol-empty">Drop here</div>'}
+              </div>
+            </section>`;
+        }).join('')}
+      </div>`;
+  }
+
+  /** Move an account to a new stage and record the change in its history. */
+  function moveStage(id, stage) {
+    const a = getAccount(id);
+    if (!a || a.stage === stage) return;
+    a.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Stage changed: ${a.stage} → ${stage}`, notes: '', createdAt: new Date().toISOString() });
+    a.stage = stage;
+    touch(a); save(); rerender();
+    toast(`${a.name} moved to ${stage}`);
+  }
+
+  function bindCollection() {
+    $$('.kcard-stage').forEach((sel) => {
+      sel.addEventListener('click', (e) => e.stopPropagation());
+      sel.addEventListener('change', (e) => moveStage(e.target.dataset.id, e.target.value));
     });
-    const far = '9999-12-31';
-    const sorters = {
-      followup: (x, y) => (x.nextFollowUp || far).localeCompare(y.nextFollowUp || far),
-      name: (x, y) => x.name.localeCompare(y.name),
-      updated: (x, y) => (y.updatedAt || '').localeCompare(x.updatedAt || ''),
-      value: (x, y) => (Number(y.value) || 0) - (Number(x.value) || 0),
-    };
-    return list.sort(sorters[ui.sort]);
+    $$('.kcard[draggable=true]').forEach((card) => card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', card.dataset.id);
+      e.dataTransfer.effectAllowed = 'move';
+      card.classList.add('dragging');
+    }));
+    $$('.kcol').forEach((col) => {
+      col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drop'); });
+      col.addEventListener('dragleave', (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove('drop'); });
+      col.addEventListener('drop', (e) => {
+        e.preventDefault(); col.classList.remove('drop');
+        moveStage(e.dataTransfer.getData('text/plain'), col.dataset.stage);
+      });
+    });
   }
 
   function renderAccounts() {
     const list = filteredAccounts();
-    if (ui.selectedId && !getAccount(ui.selectedId)) ui.selectedId = null;
-    if (!ui.selectedId && list.length) ui.selectedId = list[0].id;
     const stages = ui.typeFilter === 'all' ? [...STAGES.prospect, ...STAGES.partner] : STAGES[ui.typeFilter];
 
     $('#view').innerHTML = `
-      <div class="accounts-layout">
-        <div class="card">
-          <div class="row spread" style="margin-bottom:.75rem">
-            <h2 style="margin:0">Accounts <span class="muted small">(${list.length})</span></h2>
-            <button class="btn sm" data-act="new-account">+ New</button>
-          </div>
-          <div class="toolbar">
-            <input type="search" id="acct-search" placeholder="Search name, contacts, vendors, tags, notes…" value="${esc(ui.search)}">
-          </div>
-          <div class="toolbar">
-            <select id="acct-type">
-              <option value="all">All types</option>
-              <option value="partner" ${ui.typeFilter === 'partner' ? 'selected' : ''}>Partners</option>
-              <option value="prospect" ${ui.typeFilter === 'prospect' ? 'selected' : ''}>Prospects</option>
-            </select>
-            <select id="acct-stage">
-              <option value="all">All stages</option>
-              ${stages.map((s) => `<option ${ui.stageFilter === s ? 'selected' : ''}>${s}</option>`).join('')}
-            </select>
-            <select id="acct-vendor" title="Current vendor">
-              <option value="all">All vendors</option>
-              ${allVendors().map((v) => `<option ${ui.vendorFilter === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
-            </select>
-            <select id="acct-sort" title="Sort">
-              <option value="followup" ${ui.sort === 'followup' ? 'selected' : ''}>Next follow-up</option>
-              <option value="name" ${ui.sort === 'name' ? 'selected' : ''}>Name</option>
-              <option value="updated" ${ui.sort === 'updated' ? 'selected' : ''}>Recently updated</option>
-              <option value="value" ${ui.sort === 'value' ? 'selected' : ''}>Value</option>
-            </select>
-          </div>
-          <div class="acct-list">
-            ${list.length ? list.map((a) => `
-              <button class="acct-item ${a.id === ui.selectedId ? 'active' : ''}" data-act="select" data-id="${a.id}">
-                <div class="row spread"><span class="name">${esc(a.name)}</span>
-                  <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span></div>
-                <div class="meta">${esc(a.stage)}${primaryContact(a) ? ' · ' + esc(primaryContact(a).name) : ''}${a.contacts.length > 1 ? ` +${a.contacts.length - 1}` : ''}</div>
-                ${a.vendors.length ? `<div class="meta">Vendor: ${esc(a.vendors.join(', '))}</div>` : ''}
-                <div class="meta">${a.nextFollowUp
-                  ? `Next: <span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp, { month: 'short', day: 'numeric' })} (${relDays(a.nextFollowUp)})</span>`
-                  : 'No follow-up set'}</div>
-              </button>`).join('') : '<div class="empty">No accounts match.</div>'}
-          </div>
-        </div>
-        <div>${ui.selectedId ? accountDetail(getAccount(ui.selectedId)) : '<div class="card empty">Select or create an account.</div>'}</div>
-      </div>`;
+      <div class="page-head">
+        <h1>Accounts <span class="muted small">(${list.length})</span></h1>
+        <div class="row">${viewSwitcher()}<button class="btn" data-act="new-account">+ New account</button></div>
+      </div>
+      <div class="filters">
+        <input type="search" id="acct-search" placeholder="Search name, contacts, vendors, tags, notes…" value="${esc(ui.search)}">
+        <select id="acct-type" aria-label="Type">
+          <option value="all">All types</option>
+          <option value="partner" ${ui.typeFilter === 'partner' ? 'selected' : ''}>Partners</option>
+          <option value="prospect" ${ui.typeFilter === 'prospect' ? 'selected' : ''}>Prospects</option>
+        </select>
+        <select id="acct-stage" aria-label="Stage">
+          <option value="all">All stages</option>
+          ${stages.map((x) => `<option ${ui.stageFilter === x ? 'selected' : ''}>${x}</option>`).join('')}
+        </select>
+        <select id="acct-vendor" aria-label="Current vendor">
+          <option value="all">All vendors</option>
+          ${allVendors().map((v) => `<option ${ui.vendorFilter === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+        </select>
+        <select id="acct-sort" aria-label="Sort">
+          ${Object.entries(SORT_LABELS).map(([k, l]) => `<option value="${k}" ${ui.sort === k ? 'selected' : ''}>Sort: ${l}</option>`).join('')}
+        </select>
+      </div>
+      ${accountCollection(list, state.accounts.length ? 'No accounts match these filters.' : 'No accounts yet. Click "+ New account" to add one.')}`;
 
-    const search = $('#acct-search');
-    search.addEventListener('input', (e) => {
+    $('#acct-search').addEventListener('input', (e) => {
       ui.search = e.target.value;
       const pos = e.target.selectionStart;
       renderAccounts();
-      const s = $('#acct-search'); s.focus(); s.setSelectionRange(pos, pos);
+      const el = $('#acct-search'); el.focus(); el.setSelectionRange(pos, pos);
     });
     $('#acct-type').addEventListener('change', (e) => { ui.typeFilter = e.target.value; ui.stageFilter = 'all'; renderAccounts(); });
     $('#acct-stage').addEventListener('change', (e) => { ui.stageFilter = e.target.value; renderAccounts(); });
-    $('#acct-sort').addEventListener('change', (e) => { ui.sort = e.target.value; renderAccounts(); });
+    $('#acct-sort').addEventListener('change', (e) => { ui.sort = e.target.value; ui.sortDir = 1; renderAccounts(); });
     $('#acct-vendor').addEventListener('change', (e) => { ui.vendorFilter = e.target.value; renderAccounts(); });
+    bindCollection();
+  }
+
+  function renderAccountRecord() {
+    const a = getAccount(ui.recordId);
+    $('#view').innerHTML = `
+      <div class="record">
+        <button class="btn ghost sm back-btn" data-act="back">← Back</button>
+        ${a ? accountDetail(a) : '<div class="card empty">This account no longer exists.</div>'}
+      </div>`;
   }
 
   function accountDetail(a) {
@@ -488,6 +619,7 @@
           <div><span>Industry</span>${esc(a.industry) || '—'}</div>
           <div><span>${a.type === 'partner' ? 'Annual value' : 'Deal value'}</span>${money(a.value)}</div>
           <div><span>Next follow-up</span>${a.nextFollowUp ? `<span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp)}</span> <span class="small muted">${relDays(a.nextFollowUp)}</span>` : '—'}</div>
+          <div><span>Next revisit</span>${a.revisitDate ? `<span class="pill ${dueClass(a.revisitDate)}">${fmtDate(a.revisitDate)}</span> <span class="small muted">${relDays(a.revisitDate)}</span>${a.revisitNote ? `<div class="small muted">${esc(a.revisitNote)}</div>` : ''}` : '—'}</div>
           <div><span>Last touch</span>${last ? `${fmtDate(last.date)} <span class="small muted">(${esc(last.kind)})</span>` : 'Never'}</div>
           <div><span>Added</span>${fmtDate((a.createdAt || '').slice(0, 10) || null)}</div>
         </div>
@@ -572,7 +704,7 @@
     const unscheduled = tasks.filter((x) => !x.time);
     const doneCount = tasks.filter((x) => x.done).length;
     // Account items due this day; on today's page also pull in anything overdue.
-    const due = upcomingItems().filter((i) => i.date === d || (d === t && i.date < t));
+    const due = upcomingItems().filter((i) => i.kind !== 'revisit' && (i.date === d || (d === t && i.date < t)));
     const nowHour = d === t ? new Date().getHours() : -1;
 
     const hours = [];
@@ -629,7 +761,7 @@
             ${due.length ? `<div class="stack">${due.map((i) => `
               <div class="task auto">
                 <div class="t-main">
-                  <div class="t-title">${esc(i.label)} — <a href="#accounts/${i.account.id}">${esc(i.account.name)}</a></div>
+                  <div class="t-title">${esc(i.label)} — <a href="#account/${i.account.id}">${esc(i.account.name)}</a></div>
                   <div class="t-sub">${i.date < d ? `<span class="pill overdue">overdue ${relDays(i.date).replace(' ago', '')}</span>` : ''} ${esc(i.account.stage)}${(() => { const c = primaryContact(i.account); return c ? ' · ' + esc(c.name) + (c.phone ? ' · ' + esc(c.phone) : '') : ''; })()}</div>
                 </div>
                 ${i.kind === 'followup'
@@ -673,8 +805,28 @@
   }
 
   // ---------- daily activity plan ----------
+  /** Accounts whose revisit falls on day d (or is overdue, on today's page) and aren't already listed. */
+  function dueRevisits(d, rows) {
+    const listed = new Set(rows.map((r) => r.name.trim().toLowerCase()).filter(Boolean));
+    return state.accounts
+      .filter((a) => a.revisitDate && (a.revisitDate === d || (d === today() && a.revisitDate < d)) && !listed.has(a.name.trim().toLowerCase()))
+      .sort((x, y) => x.revisitDate.localeCompare(y.revisitDate));
+  }
+
+  /** Revisit rows as displayed: due accounts are pre-filled into empty slots until you touch them. */
+  function revisitRows(d, plan) {
+    const rows = plan.revisits.map((r) => ({ ...r }));
+    for (const a of dueRevisits(d, plan.revisits)) {
+      const auto = { name: a.name, kind: 'Visit', note: a.revisitNote || '', done: false, auto: a.revisitDate };
+      const slot = rows.findIndex((r) => !r.name.trim() && !r.auto);
+      if (slot === -1) rows.push(auto); else rows[slot] = auto;
+    }
+    return rows;
+  }
+
   function planSection(d) {
     const plan = getPlan(d);
+    plan.revisits = revisitRows(d, plan);
     const total = PLAN_SECTIONS.reduce((n, sec) => n + planStats(plan, sec.key).target, 0);
     const done = PLAN_SECTIONS.reduce((n, sec) => n + planStats(plan, sec.key).done, 0);
     const pending = PLAN_SECTIONS.some((sec) => plan[sec.key].some((r) => r.name.trim() && !r.done));
@@ -718,7 +870,7 @@
   function planRow(sec, r, i) {
     const acct = findAccountByName(r.name);
     return `
-      <div class="plan-row ${r.done ? 'done' : ''}" data-sec="${sec.key}" data-i="${i}">
+      <div class="plan-row ${r.done ? 'done' : ''} ${r.auto ? 'auto' : ''}" data-sec="${sec.key}" data-i="${i}" ${r.auto ? `data-auto="${esc(JSON.stringify({ name: r.name, kind: r.kind, note: r.note }))}"` : ''}>
         <span class="plan-num">${i + 1}</span>
         <input type="checkbox" data-plan="done" ${r.done ? 'checked' : ''} aria-label="Done">
         <input data-plan="name" list="${sec.partners ? 'dl-partners' : 'dl-accounts'}" placeholder="Account / contact" value="${esc(r.name)}">
@@ -726,7 +878,8 @@
           ? `<select data-plan="kind">${sec.kinds.map((k) => `<option ${k === r.kind ? 'selected' : ''}>${k}</option>`).join('')}</select>`
           : '<span class="plan-kind"></span>'}
         <input data-plan="note" placeholder="Note / outcome" value="${esc(r.note)}">
-        <span class="plan-link">${acct ? `<a href="#accounts/${acct.id}" title="Open ${esc(acct.name)}">↗</a>` : ''}</span>
+        <span class="plan-link">${acct ? `<a href="#account/${acct.id}" title="Open ${esc(acct.name)}">↗</a>` : ''}</span>
+        ${r.auto ? `<span class="plan-due ${dueClass(r.auto)}">Revisit due ${esc(relDays(r.auto))}</span>` : ''}
       </div>`;
   }
 
@@ -735,7 +888,15 @@
       const rowEl = el.closest('.plan-row');
       const sec = PLAN_SECTIONS.find((x) => x.key === rowEl.dataset.sec);
       const plan = getPlan(d, true);
-      return { rowEl, sec, row: plan[sec.key][Number(rowEl.dataset.i)], plan };
+      const i = Number(rowEl.dataset.i);
+      const rows = plan[sec.key];
+      while (rows.length <= i) rows.push(blankPlanRow(sec));
+      if (rowEl.dataset.auto) { // first touch on a pre-filled revisit: make it a real row
+        Object.assign(rows[i], JSON.parse(rowEl.dataset.auto));
+        delete rowEl.dataset.auto;
+        rowEl.classList.remove('auto');
+      }
+      return { rowEl, sec, row: rows[i], plan };
     };
 
     $$('.plan-row [data-plan]').forEach((el) => {
@@ -748,16 +909,57 @@
           syncPlanActivity(d, sec, row);
           rowEl.classList.toggle('done', row.done);
           updatePlanCounts(plan);
+          if (sec.key === 'revisits') {
+            const acct = settleRevisit(d, row);
+            if (acct && row.done) { save(); return nextRevisitForm(acct, d); }
+          }
         } else {
           row[field] = el.value;
           if (field === 'name') {
             const acct = findAccountByName(row.name);
-            $('.plan-link', rowEl).innerHTML = acct ? `<a href="#accounts/${acct.id}" title="Open ${esc(acct.name)}">↗</a>` : '';
+            $('.plan-link', rowEl).innerHTML = acct ? `<a href="#account/${acct.id}" title="Open ${esc(acct.name)}">↗</a>` : '';
           }
         }
         save();
       });
     });
+  }
+
+  /** Completing a revisit clears the account's due revisit date; un-checking puts it back. */
+  function settleRevisit(d, row) {
+    const acct = findAccountByName(row.name);
+    if (!acct) return null;
+    if (row.done && acct.revisitDate && acct.revisitDate <= d) {
+      row.clearedRevisit = acct.revisitDate;
+      acct.revisitDate = '';
+      touch(acct);
+    } else if (!row.done && row.clearedRevisit) {
+      if (!acct.revisitDate) acct.revisitDate = row.clearedRevisit;
+      delete row.clearedRevisit;
+      touch(acct);
+    }
+    return acct;
+  }
+
+  function nextRevisitForm(acct, d) {
+    openModal(`Revisit done: ${acct.name}`, `
+      <p class="small muted" style="margin:0">Logged to the account's history. When should you go back?</p>
+      <div class="row">
+        ${[14, 30, 60, 90].map((n) => `<button type="button" class="btn sm ghost" data-days="${n}">${n} days</button>`).join('')}
+      </div>
+      <div class="grid-2">
+        ${field('Next revisit date', `<input name="revisitDate" type="date" value="${addDays(d, 30)}">`)}
+        ${field('Purpose (optional)', `<input name="revisitNote" value="${esc(acct.revisitNote)}" placeholder="e.g. Bring renewal quote">`)}
+      </div>`, (data) => {
+      acct.revisitDate = data.revisitDate;
+      acct.revisitNote = data.revisitNote;
+      touch(acct);
+      if (data.revisitDate) toast(`Next revisit ${fmtDate(data.revisitDate, { month: 'short', day: 'numeric' })}`);
+    }, 'Set revisit');
+    $$('[data-days]', modalForm).forEach((b) => b.addEventListener('click', () => {
+      $('[name=revisitDate]', modalForm).value = addDays(d, Number(b.dataset.days));
+    }));
+    $('[data-close]', modalForm).textContent = 'No revisit';
   }
 
   /** Mirror a checked plan row into the matching account's history (and remove it on uncheck). */
@@ -816,7 +1018,7 @@
         <input type="checkbox" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="Done">
         <div class="t-main">
           <div class="t-title">${esc(x.title)}</div>
-          <div class="t-sub">${x.time ? fmtTime(x.time) : 'Anytime'}${x.duration ? ` · ${x.duration} min` : ''}${acct ? ` · <a href="#accounts/${acct.id}">${esc(acct.name)}</a>` : ''}${x.priority === 'high' ? ' · <span class="pill high">High</span>' : ''}</div>
+          <div class="t-sub">${x.time ? fmtTime(x.time) : 'Anytime'}${x.duration ? ` · ${x.duration} min` : ''}${acct ? ` · <a href="#account/${acct.id}">${esc(acct.name)}</a>` : ''}${x.priority === 'high' ? ' · <span class="pill high">High</span>' : ''}</div>
           ${x.notes ? `<div class="t-sub" style="white-space:pre-wrap">${esc(x.notes)}</div>` : ''}
         </div>
         <button class="icon-btn" data-act="edit-task" data-tid="${x.id}" title="Edit">✎</button>
@@ -848,9 +1050,7 @@
     return state.lists.find((l) => l.id === id) || null;
   }
 
-  const listAccounts = (list) => state.accounts
-    .filter((a) => matchesCriteria(a, { ...emptyCriteria(), ...list.criteria }))
-    .sort((x, y) => x.name.localeCompare(y.name));
+  const listAccounts = (list) => sortAccounts(state.accounts.filter((a) => matchesCriteria(a, { ...emptyCriteria(), ...list.criteria })));
 
   function criteriaSummary(c) {
     const parts = [];
@@ -877,7 +1077,7 @@
       </button>`;
 
     $('#view').innerHTML = `
-      <div class="accounts-layout">
+      <div class="lists-layout">
         <div class="card">
           <div class="row spread" style="margin-bottom:.5rem">
             <h2 style="margin:0">My lists</h2>
@@ -897,13 +1097,16 @@
         </div>
         <div>${current ? listDetail(current) : '<div class="card empty">Create a list, or pick a vendor group.</div>'}</div>
       </div>`;
+    const sortSel = $('#list-sort');
+    if (sortSel) sortSel.addEventListener('change', (e) => { ui.sort = e.target.value; ui.sortDir = 1; renderLists(); });
+    bindCollection();
   }
 
   function listDetail(list) {
     const rows = listAccounts(list);
     const c = { ...emptyCriteria(), ...list.criteria };
     return `
-      <div class="card stack">
+      <div class="card stack list-head">
         <div class="detail-head">
           <div>
             <h1 style="margin:0">${esc(list.name)} <span class="muted small">(${rows.length})</span></h1>
@@ -916,24 +1119,11 @@
               <button class="btn danger" data-act="del-list" data-lid="${list.id}">Delete</button>`}
           </div>
         </div>
-        ${rows.length ? `
-        <div class="table-wrap">
-          <table class="table">
-            <thead><tr><th>Account</th><th>Stage</th><th>Primary contact</th><th>Current vendors</th><th>Next follow-up</th></tr></thead>
-            <tbody>${rows.map((a) => {
-              const p = primaryContact(a);
-              return `<tr>
-                <td><a href="#accounts/${a.id}"><strong>${esc(a.name)}</strong></a><div><span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span></div></td>
-                <td>${esc(a.stage)}</td>
-                <td>${p ? `${esc(p.name)}${p.title ? `<div class="small muted">${esc(p.title)}</div>` : ''}${p.phone ? `<div class="small"><a href="tel:${esc(p.phone)}">${esc(p.phone)}</a></div>` : ''}` : '—'}
-                  ${a.contacts.length > 1 ? `<div class="small muted">+${a.contacts.length - 1} more</div>` : ''}</td>
-                <td>${vendorPills(a) || '—'}</td>
-                <td>${a.nextFollowUp ? `<span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp, { month: 'short', day: 'numeric' })}</span>` : '—'}</td>
-              </tr>`;
-            }).join('')}</tbody>
-          </table>
-        </div>` : '<div class="empty">No accounts match this list yet.</div>'}
-      </div>`;
+        <div class="row spread">${viewSwitcher()}
+          <select id="list-sort" aria-label="Sort">${Object.entries(SORT_LABELS).map(([k, l]) => `<option value="${k}" ${ui.sort === k ? 'selected' : ''}>Sort: ${l}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="list-results">${accountCollection(rows, 'No accounts match this list yet.')}</div>`;
   }
 
   const readCriteria = (fd) => ({
@@ -980,11 +1170,11 @@
     const list = resolveList(ui.listId);
     if (!list) return;
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Account', 'Type', 'Stage', 'Industry', 'Value', 'Current vendors', 'Primary contact', 'Title', 'Email', 'Phone', 'Other contacts', 'Next follow-up', 'Tags']];
+    const rows = [['Account', 'Type', 'Stage', 'Industry', 'Value', 'Current vendors', 'Primary contact', 'Title', 'Email', 'Phone', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
     for (const a of listAccounts(list)) {
       const p = primaryContact(a) || {};
       rows.push([a.name, a.type, a.stage, a.industry, a.value, a.vendors.join('; '), p.name, p.title, p.email, p.phone,
-        a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.tags]);
+        a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.tags]);
     }
     downloadFile(`${list.name.replace(/[^\w-]+/g, '-')}-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
   }
@@ -1042,6 +1232,8 @@
         ${field('Website', `<input name="website" value="${esc(a.website)}">`)}
         ${field('Industry', `<input name="industry" value="${esc(a.industry)}">`)}
         ${field('Next follow-up', `<input name="nextFollowUp" type="date" value="${esc(a.nextFollowUp)}">`)}
+        ${field('Next revisit date', `<input name="revisitDate" type="date" value="${esc(a.revisitDate)}">`)}
+        ${field('Revisit purpose', `<input name="revisitNote" value="${esc(a.revisitNote)}" placeholder="e.g. Drop off benefits comparison">`)}
         ${field('Tags (comma separated)', `<input name="tags" value="${esc(a.tags)}">`)}
         ${field('Notes', `<textarea name="notes" rows="4">${esc(a.notes)}</textarea>`, 'span-2')}
       </div>`, (data) => {
@@ -1057,8 +1249,7 @@
           ? [{ id: uid(), name: c_name || c_email || c_phone, title: c_title, email: c_email, phone: c_phone, role: '', notes: '', primary: true }] : [];
         const acct = { id: uid(), ...fields, contacts, activities: [], keyDates: [], createdAt: now, updatedAt: now };
         state.accounts.push(acct);
-        ui.selectedId = acct.id;
-        location.hash = `accounts/${acct.id}`;
+        location.hash = `account/${acct.id}`;
         toast('Account created');
       }
     });
@@ -1221,10 +1412,18 @@
         if (confirm(`Delete ${acct.name} and all its history? Planner tasks will be unlinked.`)) {
           state.accounts = state.accounts.filter((a) => a.id !== id);
           state.tasks.forEach((x) => { if (x.accountId === id) x.accountId = ''; });
-          ui.selectedId = null; save(); go('accounts');
+          save(); go('accounts');
         }
         return;
-      case 'select': ui.selectedId = id; go(`accounts/${id}`); return;
+      case 'open-account':
+        if (e.target.closest('a, select, input')) return;
+        return go(`account/${id}`);
+      case 'back': return ui.navs > 0 ? history.back() : go('accounts');
+      case 'set-view': ui.accountView = el.dataset.mode; savePrefs(); return rerender();
+      case 'board-type': ui.boardType = el.dataset.type; savePrefs(); return rerender();
+      case 'sort':
+        if (ui.sort === el.dataset.key) ui.sortDir = -ui.sortDir; else { ui.sort = el.dataset.key; ui.sortDir = 1; }
+        return rerender();
       case 'edit-notes': return notesForm(acct);
       case 'log': return activityForm(acct);
       case 'edit-activity': return activityForm(acct, acct.activities.find((h) => h.id === hid));
@@ -1400,7 +1599,9 @@
     Object.assign(plan.visits[0], { name: 'Northwind Logistics', note: 'Drop off proposal binder' });
     Object.assign(plan.channel[0], { name: 'BrightPath Consulting', kind: 'Call', note: 'Webinar prep' });
     Object.assign(plan.channel[1], { name: 'Summit Tech Alliance', kind: 'Email', note: 'Onboarding agenda' });
-    Object.assign(plan.revisits[0], { name: 'Helix Health', note: 'Bring security packet' });
+    helix.revisitDate = t; helix.revisitNote = 'Bring security packet';
+    oak.revisitDate = addDays(t, -1); oak.revisitNote = 'Meet plant HR lead';
+    northwind.revisitDate = addDays(t, 10); northwind.revisitNote = 'Benefits comparison review';
     save(); toast('Sample data loaded'); rerender();
   }
 
