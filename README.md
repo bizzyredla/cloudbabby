@@ -65,10 +65,21 @@ No install, no build step: open `index.html` in a browser.
 - Built-in "By current vendor" groups with counts
 - Export any list to CSV
 
+**Everywhere**
+- Search accounts and contacts from any screen (🔍, or press `/` or Ctrl/⌘-K on a computer)
+- Settings (sliders icon): cloud sync, export/import backup, load sample data, erase all data
+- On phones, a bottom tab bar like a native app. Updates install themselves on the next launch
+- A red banner appears if sync ever stops (for example an expired GitHub token), so you never
+  unknowingly work unsynced
+- Stage changes are logged to history whether they're made on the board, in Edit, or while
+  logging an activity. You're warned before creating two accounts with the same name
+
 **Dashboard**
-- Partner and prospect counts, open pipeline value, overdue and due-today counts
-- Needs attention (overdue and today), next 14 days, recent activity, and active accounts
-  with no follow-up scheduled
+- **Today**: activity-plan progress per section (calls/emails/LinkedIn, visits, channel, revisits),
+  cadence steps due, follow-ups due, overdue
+- **Book**: prospects, partners, open pipeline, people in cadences
+- Needs attention (overdue and today), next 14 days, recent activity, and active accounts with
+  no next step (no follow-up and nobody in a cadence)
 
 **Daily planner**
 - Hour-by-hour schedule (7 AM–7 PM); click an hour to add a task
@@ -104,8 +115,8 @@ The same steps work on Android in Chrome (menu, then **Install app**).
 
 ## Data
 
-Every change is saved instantly on the device (`localStorage`). Use **Export** to save a JSON backup
-and **Import** to restore it. **Erase all data…** (bottom of the Dashboard) wipes everything; when
+Every change is saved instantly on the device (`localStorage`). In **Settings**, use **Export backup**
+to save a JSON copy and **Import backup** to restore it. **Erase all data…** wipes everything; when
 sync is on, the erase also clears the cloud copy and every synced device.
 
 ### Cloud sync (phone + computer)

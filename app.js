@@ -364,9 +364,13 @@
       .flatMap((a) => a.activities.map((act) => ({ ...act, account: a })))
       .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || ''))
       .slice(0, 8);
+    // Accounts with a contact in a running cadence already have a next touch.
+    const inCadence = new Set(liveEnrollments().filter((p) => p.e.status !== 'finished').map((p) => p.acct.id));
     const quiet = state.accounts
-      .filter((a) => !['Lost', 'Inactive'].includes(a.stage) && !a.nextFollowUp)
+      .filter((a) => !['Lost', 'Inactive', 'Won'].includes(a.stage) && !a.nextFollowUp && !inCadence.has(a.id))
       .slice(0, 6);
+    const stepsDue = dueSteps(t);
+    const PLAN_SHORT = { outreach: 'Calls / Email / LI', visits: 'Visits', channel: 'Channel', revisits: 'Revisits' };
 
     $('#view').innerHTML = `
       <div class="row spread" style="margin-bottom:1rem">
@@ -390,14 +394,25 @@
           </div>
         </div>` : ''}
 
+      <div class="dash-label">Today</div>
+      <div class="stats today-stats">
+        <a class="card stat plan-stat" href="#planner/${t}">
+          <div class="row spread"><div><div class="num">${planDone}<span class="muted">/${planTotal}</span></div><div class="label">Activity plan</div></div></div>
+          <div class="mini-bars">${PLAN_SECTIONS.map((sec) => {
+            const st = planStats(todaysPlan, sec.key);
+            return `<div class="mini-bar"><span>${PLAN_SHORT[sec.key]}</span><div class="progress"><div style="width:${Math.round((st.done / st.target) * 100)}%"></div></div><b>${st.done}/${st.target}</b></div>`;
+          }).join('')}</div>
+        </a>
+        <a class="card stat ${stepsDue.length ? 'warn' : ''}" href="#cadences"><div class="num">${stepsDue.length}</div><div class="label">Cadence steps due</div></a>
+        <div class="card stat ${dueToday.length ? 'warn' : ''}"><div class="num">${dueToday.length}</div><div class="label">Follow-ups & dates due</div></div>
+        <div class="card stat ${overdue.length ? 'alert' : ''}"><div class="num">${overdue.length}</div><div class="label">Overdue</div></div>
+      </div>
+      <div class="dash-label">Book</div>
       <div class="stats">
-        <div class="card stat"><div class="num">${partners.length}</div><div class="label">Partner accounts</div></div>
-        <div class="card stat"><div class="num">${prospects.length}</div><div class="label">Prospect accounts</div></div>
+        <a class="card stat" href="#accounts"><div class="num">${prospects.length}</div><div class="label">Prospects</div></a>
+        <a class="card stat" href="#accounts"><div class="num">${partners.length}</div><div class="label">Partners</div></a>
         <div class="card stat"><div class="num">${money(openPipeline)}</div><div class="label">Open prospect pipeline</div></div>
-        <div class="card stat ${overdue.length ? 'alert' : ''}"><div class="num">${overdue.length}</div><div class="label">Overdue items</div></div>
-        <div class="card stat"><div class="num">${dueToday.length}</div><div class="label">Due today</div></div>
-        <a class="card stat ${dueSteps(t).length ? 'alert' : ''}" href="#cadences" style="text-decoration:none;color:inherit"><div class="num">${dueSteps(t).length}</div><div class="label">Cadence steps due</div></a>
-        <a class="card stat" href="#planner/${t}" style="text-decoration:none;color:inherit"><div class="num">${planDone}/${planTotal}</div><div class="label">Today's activity plan</div></a>
+        <a class="card stat" href="#cadences"><div class="num">${liveEnrollments().filter((p) => p.e.status === 'active').length}</div><div class="label">People in cadences</div></a>
       </div>
 
       <div class="dash-grid">
@@ -430,11 +445,7 @@
               <button class="btn sm ghost" data-act="log" data-id="${a.id}">Log / schedule</button>
             </li>`).join('')}</ul>` : '<div class="empty">Every active account has a next step.</div>'}
         </div>
-      </div>
-      ${state.accounts.length || state.tasks.length ? `
-      <div class="row" style="justify-content:flex-end;margin-top:1.5rem">
-        <button class="btn danger sm" data-act="erase-all">Erase all data…</button>
-      </div>` : ''}`;
+      </div>`;
   }
 
   /** Remove every record. Tombstones carry the erase to other synced devices. */
@@ -589,11 +600,17 @@
       </div>`;
   }
 
+  /** Record a stage change in the account's history (from the board, edit form or activity log). */
+  function logStageChange(a, from, to) {
+    if (!from || !to || from === to) return;
+    a.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Stage changed: ${from} → ${to}`, notes: '', createdAt: new Date().toISOString() });
+  }
+
   /** Move an account to a new stage and record the change in its history. */
   function moveStage(id, stage) {
     const a = getAccount(id);
     if (!a || a.stage === stage) return;
-    a.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Stage changed: ${a.stage} → ${stage}`, notes: '', createdAt: new Date().toISOString() });
+    logStageChange(a, a.stage, stage);
     a.stage = stage;
     touch(a); save(); rerender();
     toast(`${a.name} moved to ${stage}`);
@@ -626,7 +643,7 @@
     $('#view').innerHTML = `
       <div class="page-head">
         <h1>Accounts <span class="muted small">(${list.length})</span></h1>
-        <div class="row">${viewSwitcher()}<button class="btn" data-act="new-account">+ New account</button></div>
+        <div class="row">${viewSwitcher()}<button class="btn ghost" data-act="accounts-csv" title="Export the accounts shown">Export CSV</button><button class="btn" data-act="new-account">+ New account</button></div>
       </div>
       <div class="filters">
         <input type="search" id="acct-search" placeholder="Search name, contacts, vendors, tags, notes…" value="${esc(ui.search)}">
@@ -1283,15 +1300,18 @@
 
   function exportListCsv() {
     const list = resolveList(ui.listId);
-    if (!list) return;
+    if (list) accountsCsv(list.name, listAccounts(list));
+  }
+
+  function accountsCsv(title, accounts) {
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const rows = [['Account', 'Type', 'Stage', 'Industry', 'Employees', 'Location', 'Value', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
-    for (const a of listAccounts(list)) {
+    for (const a of accounts) {
       const p = primaryContact(a) || {};
       rows.push([a.name, a.type, a.stage, a.industry, a.employees, a.location, a.value, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone,
         a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.tags]);
     }
-    downloadFile(`${list.name.replace(/[^\w-]+/g, '-')}-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
+    downloadFile(`${title.replace(/[^\w-]+/g, '-')}-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
   }
 
   // ---------- cadences ----------
@@ -1945,7 +1965,10 @@
       if (!data.name.trim()) return false;
       const { c_name, c_title, c_email, c_phone, ...fields } = data;
       fields.vendors = JSON.parse(fields.vendors || '[]');
+      const dup = state.accounts.find((x) => x !== existing && x.name.trim().toLowerCase() === data.name.trim().toLowerCase());
+      if (dup && !confirm(`An account named "${dup.name}" already exists. The planner and cadences match accounts by name, so duplicates can get mixed up. Save anyway?`)) return false;
       if (existing) {
+        logStageChange(existing, existing.stage, fields.stage);
         Object.assign(existing, fields); touch(existing);
         toast('Account updated');
       } else {
@@ -2067,6 +2090,7 @@
       } else {
         acct.activities.push({ id: uid(), date: data.date, kind: data.kind, summary: data.summary, notes: data.notes, contactId: data.contactId || '', createdAt: new Date().toISOString() });
         acct.nextFollowUp = data.nextFollowUp || '';
+        logStageChange(acct, acct.stage, data.stage);
         acct.stage = data.stage;
         if (data.addTask && data.nextFollowUp) {
           state.tasks.push({ id: uid(), date: data.nextFollowUp, time: '', title: `Follow up: ${acct.name}`, accountId: acct.id, priority: 'med', notes: data.summary, done: false });
@@ -2211,6 +2235,8 @@
         state.lists = state.lists.filter((x) => x !== l); ui.listId = null; save(); go('lists'); return;
       }
       case 'list-csv': return exportListCsv();
+      case 'accounts-csv': return accountsCsv('accounts', filteredAccounts());
+      case 'open-sync': return syncSettings();
       case 'load-sample': loadSample(); return;
       case 'erase-all': eraseAll(); return;
       case 'cad-template': return cadenceForm(null, CADENCE_TEMPLATES[Number(el.dataset.tpl)]);
@@ -2252,8 +2278,83 @@
     URL.revokeObjectURL(a.href);
   }
 
-  $('#btn-export').addEventListener('click', () =>
-    downloadFile(`minicrm-backup-${today()}.json`, JSON.stringify(state, null, 2), 'application/json'));
+  const exportBackup = () => downloadFile(`minicrm-backup-${today()}.json`, JSON.stringify(state, null, 2), 'application/json');
+
+  function openSettings() {
+    openModal('Settings', `
+      <section class="set-sec">
+        <h3>Cloud sync</h3>
+        <div id="sync-live">${syncStatusHtml()}</div>
+        <button type="button" class="btn ghost sm" id="set-sync">${syncCfg ? 'Sync settings' : 'Set up sync'}</button>
+      </section>
+      <section class="set-sec">
+        <h3>Backup</h3>
+        <p class="small muted">${syncCfg ? 'Sync already keeps every version in your private GitHub repository. ' : 'Without sync, your data lives only on this device. '}You can also download a copy, or restore one.</p>
+        <div class="row">
+          <button type="button" class="btn ghost sm" id="set-export">Export backup</button>
+          <button type="button" class="btn ghost sm" id="set-import">Import backup…</button>
+        </div>
+      </section>
+      <section class="set-sec">
+        <h3>Data</h3>
+        <div class="row">
+          ${state.accounts.length ? '' : '<button type="button" class="btn ghost sm" id="set-sample">Load sample data</button>'}
+          <button type="button" class="btn danger sm" id="set-erase">Erase all data…</button>
+        </div>
+      </section>
+      <p class="small muted" style="margin:0">Tip: press <kbd>/</kbd> to search from anywhere on a computer.</p>`, () => {}, 'Done');
+    modalForm.querySelector('.modal-actions [data-close]').remove();
+    $('#set-sync').addEventListener('click', syncSettings);
+    $('#set-export').addEventListener('click', exportBackup);
+    $('#set-import').addEventListener('click', () => { modal.close(); $('#file-import').click(); });
+    $('#set-erase').addEventListener('click', () => { modal.close(); eraseAll(); });
+    const sample = $('#set-sample');
+    if (sample) sample.addEventListener('click', () => { modal.close(); loadSample(); });
+  }
+
+  /** Quick search across accounts and contacts, from anywhere. */
+  function openSearch() {
+    openModal('Search', `
+      <input id="gs-input" type="search" placeholder="Accounts, contacts, vendors, phone, email…" autocomplete="off" autocapitalize="off">
+      <div id="gs-results" class="gs-results"></div>`, () => {}, 'Close');
+    modalForm.querySelector('.modal-actions').remove();
+    const input = $('#gs-input');
+    const results = $('#gs-results');
+    const draw = () => {
+      const q = input.value.trim().toLowerCase();
+      if (!q) { results.innerHTML = '<div class="small muted">Type to search your accounts and contacts.</div>'; return; }
+      const accts = state.accounts.filter((a) => haystack(a).includes(q)).slice(0, 8);
+      const people = state.accounts.flatMap((a) => a.contacts.map((c) => ({ a, c })))
+        .filter(({ c }) => [c.name, c.title, c.email, c.phone, c.mobile].join(' ').toLowerCase().includes(q)).slice(0, 8);
+      results.innerHTML = (accts.length ? `<div class="gs-h">Accounts</div>${accts.map((a) => `
+          <a class="gs-item" href="#account/${a.id}" data-close>
+            <span class="grow"><strong>${esc(a.name)}</strong><span class="small muted"> · ${esc(a.stage)}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</span></span>${typePill(a)}
+          </a>`).join('')}` : '')
+        + (people.length ? `<div class="gs-h">Contacts</div>${people.map(({ a, c }) => `
+          <a class="gs-item" href="#account/${a.id}" data-close>
+            <span class="avatar sm">${esc(initials(c.name))}</span>
+            <span class="grow"><strong>${esc(c.name)}</strong><span class="small muted">${c.title ? ' · ' + esc(c.title) : ''} · ${esc(a.name)}</span></span>
+          </a>`).join('')}` : '')
+        || '<div class="empty">No matches.</div>';
+    };
+    input.addEventListener('input', draw);
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const first = $('.gs-item', results);
+      if (first) { modal.close(); location.hash = first.getAttribute('href').slice(1); }
+    });
+    draw();
+    input.focus();
+  }
+
+  $('#btn-settings').addEventListener('click', openSettings);
+  $('#btn-search').addEventListener('click', openSearch);
+  document.addEventListener('keydown', (e) => {
+    const typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
+    if (modal.open) return;
+    if ((e.key === '/' && !typing) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) { e.preventDefault(); openSearch(); }
+  });
 
   $('#file-import').addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -2496,8 +2597,14 @@
     sync.status = status;
     sync.message = message;
     const btn = $('#btn-sync');
-    btn.textContent = SYNC_LABELS[status];
+    const [icon, ...words] = SYNC_LABELS[status].split(' ');
+    btn.innerHTML = `<span class="sync-ic">${icon}</span><span class="sync-tx">${words.join(' ')}</span>`;
     btn.className = `btn ghost sync-${status}`;
+    const banner = $('#sync-banner');
+    banner.hidden = status !== 'error';
+    if (status === 'error') {
+      banner.innerHTML = `<span>⚠ Sync has stopped: ${esc(message)} Your changes are safe on this device.</span><button class="btn sm" data-act="open-sync">Fix sync</button>`;
+    }
     btn.title = status === 'error' ? message
       : status === 'offline' ? 'No connection. Changes are saved on this device and will sync when you are back online.'
       : sync.last ? `Last synced ${sync.last.toLocaleTimeString()}` : '';
@@ -2598,6 +2705,7 @@
     if (sync.needsRender && !(el && el.matches('input, textarea, select')) && !modal.open) { sync.needsRender = false; rerender(); }
   }, 250));
 
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   setSyncStatus(syncCfg ? 'pending' : 'off');
   route();
   syncNow();

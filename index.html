@@ -18,20 +18,20 @@
   <header class="topbar">
     <div class="brand">Mini CRM</div>
     <nav class="tabs" id="tabs">
-      <a href="#dashboard" data-view="dashboard">Dashboard</a>
-      <a href="#accounts" data-view="accounts">Accounts</a>
-      <a href="#planner" data-view="planner"><span class="hide-sm">Daily </span>Planner</a>
-      <a href="#lists" data-view="lists">Lists</a>
-      <a href="#cadences" data-view="cadences">Cadences</a>
+      <a href="#dashboard" data-view="dashboard"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span class="t-full">Dashboard</span><span class="t-short">Home</span></a>
+      <a href="#accounts" data-view="accounts"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M8 8h3M8 12h3M8 16h3M3 21h18"/></svg><span>Accounts</span></a>
+      <a href="#planner" data-view="planner"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg><span class="t-full">Daily Planner</span><span class="t-short">Planner</span></a>
+      <a href="#lists" data-view="lists"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg><span>Lists</span></a>
+      <a href="#cadences" data-view="cadences"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg><span>Cadences</span></a>
     </nav>
     <div class="topbar-actions">
+      <button class="btn ghost icon-only" id="btn-search" type="button" title="Search (press /)" aria-label="Search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
       <button class="btn ghost" id="btn-sync" type="button">☁ Set up sync</button>
-      <button class="btn ghost" id="btn-export" title="Download a JSON backup">Export</button>
-      <label class="btn ghost" title="Restore from a JSON backup">
-        Import<input type="file" id="file-import" accept="application/json" hidden>
-      </label>
+      <button class="btn ghost icon-only" id="btn-settings" type="button" title="Settings" aria-label="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg></button>
     </div>
+    <input type="file" id="file-import" accept="application/json" hidden>
   </header>
+  <div id="sync-banner" class="sync-banner" hidden></div>
 
   <main id="view"></main>
 
@@ -44,6 +44,12 @@
   <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+      // When a new version installs, reload once so updates show on the first launch.
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (hadController && !reloading) { reloading = true; location.reload(); }
+      });
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }
   </script>
