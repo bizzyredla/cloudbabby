@@ -9,7 +9,14 @@
     prospect: ['New', 'Contacted', 'Qualified', 'Proposal', 'Negotiation', 'Won', 'Lost'],
     partner: ['Onboarding', 'Active', 'Strategic', 'At Risk', 'Inactive'],
   };
-  const ACTIVITY_KINDS = ['Call', 'Email', 'Meeting', 'Demo', 'Note', 'Other'];
+  const ACTIVITY_KINDS = ['Call', 'Email', 'LinkedIn', 'Visit', 'Meeting', 'Demo', 'Note', 'Other'];
+  // Daily activity plan targets shown on the planner.
+  const PLAN_SECTIONS = [
+    { key: 'outreach', label: 'Calls / Emails / LinkedIn', short: 'Outreach', count: 25, kinds: ['Call', 'Email', 'LinkedIn'] },
+    { key: 'visits', label: 'Visits', short: 'Visit', count: 5, kinds: ['Visit'] },
+    { key: 'channel', label: 'Channel accounts', short: 'Channel account touch', count: 5, kinds: ['Call', 'Email', 'LinkedIn', 'Visit', 'Meeting'], partners: true },
+    { key: 'revisits', label: 'Revisits', short: 'Revisit', count: 5, kinds: ['Visit'] },
+  ];
   const PRIORITIES = { high: 'High', med: 'Medium', low: 'Low' };
   const DAY_START = 7;
   const DAY_END = 19;
@@ -83,6 +90,31 @@
 
   const getAccount = (id) => state.accounts.find((a) => a.id === id);
   const getDay = (iso) => state.days[iso] || { priorities: ['', '', ''], notes: '' };
+  const findAccountByName = (name) => {
+    const n = (name || '').trim().toLowerCase();
+    return n ? state.accounts.find((a) => a.name.trim().toLowerCase() === n) : null;
+  };
+
+  const blankPlanRow = (sec) => ({ name: '', kind: sec.kinds[0], note: '', done: false });
+
+  /** Plan rows for a day, padded to each section's target count. Read-only unless `persist`. */
+  function getPlan(iso, persist = false) {
+    const stored = getDay(iso).plan || {};
+    const plan = {};
+    for (const sec of PLAN_SECTIONS) {
+      const rows = (stored[sec.key] || []).slice();
+      while (rows.length < sec.count) rows.push(blankPlanRow(sec));
+      plan[sec.key] = rows;
+    }
+    if (persist) state.days[iso] = { ...getDay(iso), plan };
+    return plan;
+  }
+
+  const planStats = (plan, key) => {
+    const rows = plan[key];
+    const sec = PLAN_SECTIONS.find((x) => x.key === key);
+    return { done: rows.filter((r) => r.done).length, target: Math.max(sec.count, rows.length) };
+  };
 
   function touch(acct) { acct.updatedAt = new Date().toISOString(); }
 
@@ -123,6 +155,9 @@
     const dueToday = items.filter((i) => i.date === t);
     const upcoming = items.filter((i) => i.date > t && daysBetween(t, i.date) <= 14);
     const todaysTasks = state.tasks.filter((x) => x.date === t);
+    const todaysPlan = getPlan(t);
+    const planDone = PLAN_SECTIONS.reduce((n, sec) => n + planStats(todaysPlan, sec.key).done, 0);
+    const planTotal = PLAN_SECTIONS.reduce((n, sec) => n + planStats(todaysPlan, sec.key).target, 0);
     const partners = state.accounts.filter((a) => a.type === 'partner');
     const prospects = state.accounts.filter((a) => a.type === 'prospect');
     const openPipeline = prospects
@@ -164,6 +199,7 @@
         <div class="card stat"><div class="num">${money(openPipeline)}</div><div class="label">Open prospect pipeline</div></div>
         <div class="card stat ${overdue.length ? 'alert' : ''}"><div class="num">${overdue.length}</div><div class="label">Overdue items</div></div>
         <div class="card stat"><div class="num">${dueToday.length}</div><div class="label">Due today</div></div>
+        <a class="card stat" href="#planner/${t}" style="text-decoration:none;color:inherit"><div class="num">${planDone}/${planTotal}</div><div class="label">Today's activity plan</div></a>
       </div>
 
       <div class="dash-grid">
@@ -468,7 +504,9 @@
           ${tasks.some((x) => !x.done) ? `
           <button class="btn ghost" data-act="carry-over" style="width:100%">Move unfinished tasks to ${esc(fmtDate(addDays(d, 1), { weekday: 'short', month: 'short', day: 'numeric' }))}</button>` : ''}
         </div>
-      </div>`;
+      </div>
+
+      ${planSection(d)}`;
 
     $('#planner-date').addEventListener('change', (e) => { if (e.target.value) location.hash = `planner/${e.target.value}`; });
     $$('[data-prio]').forEach((inp) => inp.addEventListener('input', (e) => {
@@ -484,6 +522,144 @@
       const task = state.tasks.find((x) => x.id === e.target.dataset.id);
       task.done = e.target.checked; save(); renderPlanner();
     }));
+    bindPlan(d);
+  }
+
+  // ---------- daily activity plan ----------
+  function planSection(d) {
+    const plan = getPlan(d);
+    const total = PLAN_SECTIONS.reduce((n, sec) => n + planStats(plan, sec.key).target, 0);
+    const done = PLAN_SECTIONS.reduce((n, sec) => n + planStats(plan, sec.key).done, 0);
+    const pending = PLAN_SECTIONS.some((sec) => plan[sec.key].some((r) => r.name.trim() && !r.done));
+    const block = (sec) => {
+      const st = planStats(plan, sec.key);
+      return `
+        <details class="plan-block" open>
+          <summary>
+            <span class="plan-title">${esc(sec.label)}</span>
+            <span class="pill" id="plan-count-${sec.key}">${st.done}/${st.target}</span>
+          </summary>
+          <div class="progress"><div id="plan-bar-${sec.key}" style="width:${Math.round((st.done / st.target) * 100)}%"></div></div>
+          <div class="plan-rows">
+            ${plan[sec.key].map((r, i) => planRow(sec, r, i)).join('')}
+          </div>
+          <button class="btn sm ghost" data-act="plan-add" data-sec="${sec.key}">+ Add row</button>
+        </details>`;
+    };
+    const [outreach, ...rest] = PLAN_SECTIONS;
+    return `
+      <div class="card plan-card">
+        <div class="row spread" style="margin-bottom:.75rem">
+          <div>
+            <h2 style="margin:0">Daily activity plan</h2>
+            <div class="small muted">Type an account name (suggestions come from your accounts). Checking off a row for an existing account logs it to that account's history.</div>
+          </div>
+          <div class="row">
+            <span class="pill" id="plan-count-total">${done}/${total} done</span>
+            ${pending ? `<button class="btn sm ghost" data-act="plan-carry">Copy unfinished to ${esc(fmtDate(addDays(d, 1), { weekday: 'short', month: 'short', day: 'numeric' }))}</button>` : ''}
+          </div>
+        </div>
+        <datalist id="dl-accounts">${state.accounts.map((a) => `<option value="${esc(a.name)}">`).join('')}</datalist>
+        <datalist id="dl-partners">${state.accounts.filter((a) => a.type === 'partner').map((a) => `<option value="${esc(a.name)}">`).join('')}</datalist>
+        <div class="plan-grid">
+          <div>${block(outreach)}</div>
+          <div class="stack">${rest.map(block).join('')}</div>
+        </div>
+      </div>`;
+  }
+
+  function planRow(sec, r, i) {
+    const acct = findAccountByName(r.name);
+    return `
+      <div class="plan-row ${r.done ? 'done' : ''}" data-sec="${sec.key}" data-i="${i}">
+        <span class="plan-num">${i + 1}</span>
+        <input type="checkbox" data-plan="done" ${r.done ? 'checked' : ''} aria-label="Done">
+        <input data-plan="name" list="${sec.partners ? 'dl-partners' : 'dl-accounts'}" placeholder="Account / contact" value="${esc(r.name)}">
+        ${sec.kinds.length > 1
+          ? `<select data-plan="kind">${sec.kinds.map((k) => `<option ${k === r.kind ? 'selected' : ''}>${k}</option>`).join('')}</select>`
+          : '<span class="plan-kind"></span>'}
+        <input data-plan="note" placeholder="Note / outcome" value="${esc(r.note)}">
+        <span class="plan-link">${acct ? `<a href="#accounts/${acct.id}" title="Open ${esc(acct.name)}">↗</a>` : ''}</span>
+      </div>`;
+  }
+
+  function bindPlan(d) {
+    const rowOf = (el) => {
+      const rowEl = el.closest('.plan-row');
+      const sec = PLAN_SECTIONS.find((x) => x.key === rowEl.dataset.sec);
+      const plan = getPlan(d, true);
+      return { rowEl, sec, row: plan[sec.key][Number(rowEl.dataset.i)], plan };
+    };
+
+    $$('.plan-row [data-plan]').forEach((el) => {
+      const evt = el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input';
+      el.addEventListener(evt, () => {
+        const { rowEl, sec, row, plan } = rowOf(el);
+        const field = el.dataset.plan;
+        if (field === 'done') {
+          row.done = el.checked;
+          syncPlanActivity(d, sec, row);
+          rowEl.classList.toggle('done', row.done);
+          updatePlanCounts(plan);
+        } else {
+          row[field] = el.value;
+          if (field === 'name') {
+            const acct = findAccountByName(row.name);
+            $('.plan-link', rowEl).innerHTML = acct ? `<a href="#accounts/${acct.id}" title="Open ${esc(acct.name)}">↗</a>` : '';
+          }
+        }
+        save();
+      });
+    });
+  }
+
+  /** Mirror a checked plan row into the matching account's history (and remove it on uncheck). */
+  function syncPlanActivity(d, sec, row) {
+    const acct = findAccountByName(row.name);
+    if (row.activityId) {
+      for (const a of state.accounts) a.activities = a.activities.filter((h) => h.id !== row.activityId);
+      delete row.activityId;
+    }
+    if (row.done && acct) {
+      row.activityId = uid();
+      acct.activities.push({
+        id: row.activityId, date: d, kind: row.kind,
+        summary: `${sec.short}${row.note ? ': ' + row.note : ''}`, notes: '', createdAt: new Date().toISOString(),
+      });
+      touch(acct);
+    }
+  }
+
+  function updatePlanCounts(plan) {
+    let done = 0, total = 0;
+    for (const sec of PLAN_SECTIONS) {
+      const st = planStats(plan, sec.key);
+      done += st.done; total += st.target;
+      $(`#plan-count-${sec.key}`).textContent = `${st.done}/${st.target}`;
+      $(`#plan-bar-${sec.key}`).style.width = `${Math.round((st.done / st.target) * 100)}%`;
+    }
+    $('#plan-count-total').textContent = `${done}/${total} done`;
+  }
+
+  /** Copy unfinished, named rows into the next day's empty slots (skipping ones already there). */
+  function carryPlan(d) {
+    const next = addDays(d, 1);
+    const from = getPlan(d);
+    const to = getPlan(next, true);
+    let copied = 0;
+    for (const sec of PLAN_SECTIONS) {
+      const target = to[sec.key];
+      const existing = new Set(target.map((r) => r.name.trim().toLowerCase()).filter(Boolean));
+      for (const r of from[sec.key]) {
+        const key = r.name.trim().toLowerCase();
+        if (!key || r.done || existing.has(key)) continue;
+        const copy = { name: r.name, kind: r.kind, note: r.note, done: false };
+        const slot = target.findIndex((x) => !x.name.trim());
+        if (slot === -1) target.push(copy); else target[slot] = copy;
+        existing.add(key); copied++;
+      }
+    }
+    return { next, copied };
   }
 
   function taskCard(x) {
@@ -691,6 +867,17 @@
         save(); toast(`Moved ${moving.length} task${moving.length === 1 ? '' : 's'} to ${fmtDate(next, { month: 'short', day: 'numeric' })}`); rerender();
         return;
       }
+      case 'plan-add': {
+        const sec = PLAN_SECTIONS.find((x) => x.key === el.dataset.sec);
+        getPlan(ui.plannerDate, true)[sec.key].push(blankPlanRow(sec));
+        save(); rerender(); return;
+      }
+      case 'plan-carry': {
+        const { next, copied } = carryPlan(ui.plannerDate);
+        save(); rerender();
+        toast(`Copied ${copied} item${copied === 1 ? '' : 's'} to ${fmtDate(next, { month: 'short', day: 'numeric' })}`);
+        return;
+      }
       case 'load-sample': loadSample(); return;
     }
   });
@@ -769,6 +956,14 @@
       { id: uid(), date: addDays(t, 1), time: '11:00', duration: 60, title: 'Summit technical onboarding', accountId: summit.id, priority: 'med', notes: '', done: false },
     );
     state.days[t] = { priorities: ['Move Northwind to Negotiation', 'Unblock Helix on HIPAA', 'Prep BrightPath webinar'], notes: '' };
+    const plan = getPlan(t, true);
+    Object.assign(plan.outreach[0], { name: 'Helix Health', kind: 'Call', note: 'HIPAA follow-up' });
+    Object.assign(plan.outreach[1], { name: 'Oak & Iron Manufacturing', kind: 'LinkedIn', note: 'Connect with Chris' });
+    Object.assign(plan.outreach[2], { name: 'Northwind Logistics', kind: 'Email', note: 'Send pricing options' });
+    Object.assign(plan.visits[0], { name: 'Northwind Logistics', note: 'Drop off proposal binder' });
+    Object.assign(plan.channel[0], { name: 'BrightPath Consulting', kind: 'Call', note: 'Webinar prep' });
+    Object.assign(plan.channel[1], { name: 'Summit Tech Alliance', kind: 'Email', note: 'Onboarding agenda' });
+    Object.assign(plan.revisits[0], { name: 'Helix Health', note: 'Bring security packet' });
     save(); toast('Sample data loaded'); rerender();
   }
 

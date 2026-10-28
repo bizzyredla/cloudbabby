@@ -28,6 +28,16 @@ No install, no build step: open `index.html` in a browser.
   shows overdue items)
 - Top-3 priorities, day notes and a progress bar
 - Move unfinished tasks to the next day in one click
+- **Daily activity plan** with target slots for each day:
+  - 25 calls / emails / LinkedIn touches
+  - 5 visits
+  - 5 channel accounts (suggestions limited to partner accounts)
+  - 5 revisits
+
+  Each row has an account, a type, a note, and a checkbox. Account names autocomplete from your
+  accounts, and checking off a row for an existing account logs it to that account's history.
+  Unchecking removes the entry. Use "+ Add row" to go past a target, and copy unfinished rows to
+  the next day in one click. The dashboard shows today's plan progress.
 
 ## Data
 
