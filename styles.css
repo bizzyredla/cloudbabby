@@ -652,3 +652,7 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
   .today-stats .stat .label { font-size: .75rem; }
 }
 @media print { .tabs, .sync-banner { display: none !important; } }
+
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
+.modal-head h2 { margin: 0; }
+.modal-x { font-size: 1.05rem; padding: .2rem .45rem; margin: -.2rem -.35rem 0 0; }

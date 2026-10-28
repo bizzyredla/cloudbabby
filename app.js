@@ -331,7 +331,8 @@
   const TAB_FOR = { account: 'accounts' };
 
   function route() {
-    const [name, arg] = location.hash.replace('#', '').split('/');
+    let [name, arg] = location.hash.replace('#', '').split('/');
+    if (name === 'accounts' && arg) name = 'account'; // older links to an account record
     const view = views[name] ? name : 'dashboard';
     if (view === 'account') ui.recordId = arg;
     if (view === 'planner' && arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)) ui.plannerDate = arg;
@@ -1083,7 +1084,7 @@
     $$('[data-days]', modalForm).forEach((b) => b.addEventListener('click', () => {
       $('[name=revisitDate]', modalForm).value = addDays(d, Number(b.dataset.days));
     }));
-    $('[data-close]', modalForm).textContent = 'No revisit';
+    $('.modal-actions [data-close]', modalForm).textContent = 'No revisit';
   }
 
   /** Mirror a checked plan row into the matching account's history (and remove it on uncheck). */
@@ -1322,6 +1323,7 @@
   const stepType = (s) => STEP_TYPES[s.type] || STEP_TYPES.task;
   const stepIcon = (s, cls = '') => `<span class="st-icon st-${s.type} ${cls}" title="${esc(stepType(s).label)}">${stepType(s).icon}</span>`;
   const cadenceDays = (cad) => cad.steps.length ? cad.steps[cad.steps.length - 1].day : 0;
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const initials = (name) => (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join('');
 
   const isWeekend = (iso) => [0, 6].includes(fromISO(iso).getDay());
@@ -1431,7 +1433,7 @@
                 <strong>${esc(t.name)}</strong>
                 <span class="small muted">${esc(t.description)}</span>
                 <span class="tpl-steps">${t.steps.map((s) => stepIcon({ type: s[1] })).join('')}</span>
-                <span class="small muted">${t.steps.length} steps · ${t.steps[t.steps.length - 1][0]} days</span>
+                <span class="small muted">${plural(t.steps.length, 'step')} · ${plural(t.steps[t.steps.length - 1][0], 'day')}</span>
               </button>`).join('')}
             <button type="button" class="tpl-card blank" data-act="cad-new"><strong>+ Blank cadence</strong><span class="small muted">Start from scratch</span></button>
           </div>
@@ -1474,7 +1476,7 @@
           <div>
             <h2 style="margin:0">${esc(cad.name)}</h2>
             ${cad.description ? `<div class="muted small" style="margin-top:.2rem">${esc(cad.description)}</div>` : ''}
-            <div class="small muted" style="margin-top:.35rem">${cad.steps.length} steps · ${cadenceDays(cad)} days${cad.skipWeekends ? ' · skips weekends' : ''}</div>
+            <div class="small muted" style="margin-top:.35rem">${plural(cad.steps.length, 'step')} · ${plural(cadenceDays(cad), 'day')}${cad.skipWeekends ? ' · skips weekends' : ''}</div>
           </div>
           <div class="row">
             <button class="btn" data-act="cad-add-people">+ Add people</button>
@@ -1797,7 +1799,7 @@
     if (!choices.length) { toast(`${contact.name} is already in every cadence`); return; }
     openModal(`Add ${contact.name} to a cadence`, `
       <div class="grid-2">
-        ${field('Cadence', `<select name="cad">${choices.map((c) => opt(c.id, `${c.name} (${c.steps.length} steps)`, ui.cadenceId)).join('')}</select>`)}
+        ${field('Cadence', `<select name="cad">${choices.map((c) => opt(c.id, `${c.name} (${plural(c.steps.length, 'step')})`, ui.cadenceId)).join('')}</select>`)}
         ${field('Start date', `<input name="start" type="date" value="${today()}">`)}
       </div>`, (data) => {
       const cad = cadenceById(data.cad);
@@ -1810,7 +1812,7 @@
     const src = existing || (template ? {
       name: template.name, description: template.description, color: template.color, skipWeekends: true,
       steps: template.steps.map(([day, type, title, subject, body]) => ({ id: uid(), day, type, title, subject, body })),
-    } : { name: '', description: '', color: CADENCE_COLORS[state.cadences.length % CADENCE_COLORS.length], skipWeekends: true, steps: [{ id: uid(), day: 1, type: 'email', title: 'Intro email', subject: '', body: '' }] });
+    } : { name: '', description: '', color: CADENCE_COLORS.find((c) => !state.cadences.some((x) => x.color === c)) || CADENCE_COLORS[state.cadences.length % CADENCE_COLORS.length], skipWeekends: true, steps: [{ id: uid(), day: 1, type: 'email', title: 'Intro email', subject: '', body: '' }] });
     const stepRow = (s) => `
       <div class="step-edit">
         <input type="hidden" name="s_id" value="${esc(s.id || uid())}">
@@ -1900,7 +1902,7 @@
   function openModal(title, bodyHtml, onSubmit, submitLabel = 'Save', opts = {}) {
     modal.classList.toggle('wide', !!opts.wide);
     modalForm.innerHTML = `
-      <h2>${esc(title)}</h2>
+      <div class="modal-head"><h2>${esc(title)}</h2><button type="button" class="icon-btn modal-x" data-close aria-label="Close">✕</button></div>
       <div class="stack" style="margin-top:.75rem">${bodyHtml}</div>
       <div class="modal-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
