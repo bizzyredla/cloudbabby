@@ -45,8 +45,10 @@
 
 * { box-sizing: border-box; }
 
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
+  -webkit-tap-highlight-color: transparent;
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
@@ -63,6 +65,7 @@ h3 { font-size: .95rem; }
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
   padding: .6rem 1rem;
+  padding: calc(.6rem + env(safe-area-inset-top)) calc(1rem + env(safe-area-inset-right)) .6rem calc(1rem + env(safe-area-inset-left));
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
@@ -75,7 +78,10 @@ h3 { font-size: .95rem; }
 .tabs a.active { background: var(--accent-soft); color: var(--accent); }
 .topbar-actions { display: flex; gap: .4rem; }
 
-main { max-width: 1240px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+main {
+  max-width: 1240px; margin: 0 auto;
+  padding: 1.25rem calc(1rem + env(safe-area-inset-right)) calc(3rem + env(safe-area-inset-bottom)) calc(1rem + env(safe-area-inset-left));
+}
 
 /* ---------- generic ---------- */
 .btn {
@@ -288,4 +294,9 @@ dialog::backdrop { background: rgba(10, 14, 22, .45); }
   .plan-row [data-plan=kind], .plan-row .plan-kind { grid-area: kind; }
   .plan-row [data-plan=note] { grid-area: note; }
   .plan-row .plan-link { grid-area: link; }
+}
+
+/* iOS zooms into inputs smaller than 16px on focus; keep them at 16px on touch devices. */
+@media (pointer: coarse) {
+  input, select, textarea, .plan-row input, .plan-row select { font-size: 16px; }
 }

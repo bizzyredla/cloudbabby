@@ -39,6 +39,18 @@ No install, no build step: open `index.html` in a browser.
   Unchecking removes the entry. Use "+ Add row" to go past a target, and copy unfinished rows to
   the next day in one click. The dashboard shows today's plan progress.
 
+## Install on iPhone / iPad
+
+Mini CRM is an installable web app (PWA). Once it's served from an HTTPS address (for example
+GitHub Pages or Netlify):
+
+1. Open the address in **Safari** on the iPhone.
+2. Tap the **Share** button, then **Add to Home Screen**, then **Add**.
+3. Launch it from the new home-screen icon. It opens full screen and works offline.
+
+Installed apps keep their data separately from Safari, so open it from the icon each time.
+The same steps work on Android in Chrome (menu, then **Install app**).
+
 ## Data
 
 Data is saved in your browser's `localStorage` on this device only. Use **Export** to download a
@@ -50,3 +62,4 @@ On first launch, click **Load sample data** to explore with example accounts.
 - `index.html`: page shell
 - `styles.css`: styles (light/dark mode, responsive)
 - `app.js`: all app logic
+- `manifest.webmanifest`, `sw.js`, `icons/`: home-screen install and offline support
