@@ -67,7 +67,8 @@ The same steps work on Android in Chrome (menu, then **Install app**).
 ## Data
 
 Every change is saved instantly on the device (`localStorage`). Use **Export** to save a JSON backup
-and **Import** to restore it.
+and **Import** to restore it. **Erase all data…** (bottom of the Dashboard) wipes everything; when
+sync is on, the erase also clears the cloud copy and every synced device.
 
 ### Cloud sync (phone + computer)
 

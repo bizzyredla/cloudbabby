@@ -180,6 +180,7 @@
 
     const days = { ...L.days };
     for (const [d, day] of Object.entries(R.days)) days[d] = newer(days[d], day);
+    for (const [d, day] of Object.entries(days)) if (!alive('d:' + d, day)) delete days[d];
 
     return { ...emptyState(), accounts: merged, tasks: mergeList(L.tasks, R.tasks, 't:'), days, lists: mergeList(L.lists, R.lists, 'l:'), deleted };
   }
@@ -341,7 +342,22 @@
               <button class="btn sm ghost" data-act="log" data-id="${a.id}">Log / schedule</button>
             </li>`).join('')}</ul>` : '<div class="empty">Every active account has a next step.</div>'}
         </div>
-      </div>`;
+      </div>
+      ${state.accounts.length || state.tasks.length ? `
+      <div class="row" style="justify-content:flex-end;margin-top:1.5rem">
+        <button class="btn danger sm" data-act="erase-all">Erase all data…</button>
+      </div>` : ''}`;
+  }
+
+  /** Remove every record. Tombstones carry the erase to other synced devices. */
+  function eraseAll() {
+    const typed = prompt(
+      `This permanently deletes all ${state.accounts.length} accounts, tasks, planner days and lists` +
+      `${syncCfg ? ' on this device AND every synced device' : ' on this device'}.\n\nExport a backup first if you might need it.\n\nType DELETE to confirm.`);
+    if ((typed || '').trim().toUpperCase() !== 'DELETE') { if (typed !== null) toast('Nothing was deleted'); return; }
+    state.accounts = []; state.tasks = []; state.lists = []; state.days = {};
+    ui.selectedId = null; ui.listId = null;
+    save(); toast('All data erased'); go('dashboard');
   }
 
   function itemList(items, emptyMsg) {
@@ -1277,6 +1293,7 @@
       }
       case 'list-csv': return exportListCsv();
       case 'load-sample': loadSample(); return;
+      case 'erase-all': eraseAll(); return;
     }
   });
 
