@@ -53,8 +53,23 @@ The same steps work on Android in Chrome (menu, then **Install app**).
 
 ## Data
 
-Data is saved in your browser's `localStorage` on this device only. Use **Export** to download a
-JSON backup and **Import** to restore it or move it to another browser or computer.
+Every change is saved instantly on the device (`localStorage`). Use **Export** to save a JSON backup
+and **Import** to restore it.
+
+### Cloud sync (phone + computer)
+
+Tap **☁ Set up sync** to keep the same data on every device. Data is stored as
+`minicrm-data.json` in a **private** GitHub repository that you own:
+
+1. Create a private repository (e.g. `crm-data`) with a README.
+2. Create a fine-grained token at github.com/settings/personal-access-tokens/new with
+   access to only that repository and **Contents: Read and write**.
+3. In Mini CRM on each device, tap **☁ Set up sync** and enter `owner/repo` and the token.
+
+The app syncs a few seconds after each change, when it's reopened, every minute while it's open,
+and as soon as a lost connection comes back. Offline edits are kept and uploaded later. Edits from
+different devices merge record by record (newest edit wins, deletions carry over), and every sync is
+a commit, so the repository history is also a full backup. Public repositories are refused.
 On first launch, click **Load sample data** to explore with example accounts.
 
 ## Files

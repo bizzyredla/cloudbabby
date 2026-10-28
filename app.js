@@ -73,20 +73,95 @@
   let state = load();
   const ui = { selectedId: null, search: '', typeFilter: 'all', stageFilter: 'all', sort: 'followup', plannerDate: today() };
 
-  function emptyState() { return { accounts: [], tasks: [], days: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, deleted: {} }; }
+
+  function normalize(data) {
+    const st = { ...emptyState(), ...data };
+    st.accounts.forEach((a) => { a.activities ||= []; a.keyDates ||= []; });
+    return st;
+  }
 
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return { ...emptyState(), ...JSON.parse(raw) };
+      if (raw) return normalize(JSON.parse(raw));
     } catch (e) { console.warn('Could not read saved data', e); }
     return emptyState();
   }
 
-  function save() {
+  /** Persist locally. `track` stamps what changed so sync can merge it with other devices. */
+  function save({ track = true } = {}) {
+    if (track) stampChanges();
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch (e) { toast('Could not save — browser storage is unavailable. Use Export to keep a copy.'); }
+    if (track && syncCfg) { setSyncStatus('pending'); scheduleSync(); }
   }
+
+  // ---------- change tracking ----------
+  // Every record carries `_ts`, the time of its last local change. Removed records leave a
+  // tombstone in state.deleted so other devices drop them too. Changes are found by diffing
+  // each record against a snapshot taken at the previous save.
+  function* records(st) {
+    for (const a of st.accounts) {
+      const { activities, keyDates, _ts, ...fields } = a;
+      yield ['a:' + a.id, a, fields];
+      for (const h of activities) yield ['h:' + h.id, h, { ...h, _ts: undefined }];
+      for (const k of keyDates) yield ['k:' + k.id, k, { ...k, _ts: undefined }];
+    }
+    for (const t of st.tasks) yield ['t:' + t.id, t, { ...t, _ts: undefined }];
+    for (const [d, day] of Object.entries(st.days)) yield ['d:' + d, day, { ...day, _ts: undefined }];
+  }
+
+  function fingerprints(st) {
+    const m = new Map();
+    for (const [key, , fields] of records(st)) m.set(key, JSON.stringify(fields));
+    return m;
+  }
+
+  let snapshot = fingerprints(state);
+
+  function stampChanges() {
+    const now = Date.now();
+    const next = new Map();
+    for (const [key, obj, fields] of records(state)) {
+      const fp = JSON.stringify(fields);
+      next.set(key, fp);
+      if (snapshot.get(key) !== fp) obj._ts = now;
+    }
+    for (const key of snapshot.keys()) if (!next.has(key)) state.deleted[key] = now;
+    snapshot = next;
+  }
+
+  /** Combine two copies record by record: newest edit wins, deletions win over older edits. */
+  function mergeStates(L, R) {
+    const deleted = { ...L.deleted };
+    for (const [k, v] of Object.entries(R.deleted)) deleted[k] = Math.max(deleted[k] || 0, v);
+    const alive = (key, x) => !(deleted[key] >= (x._ts || 0));
+    const newer = (x, y) => (!x ? y : !y ? x : (x._ts || 0) >= (y._ts || 0) ? x : y);
+    const mergeList = (a, b, prefix) => {
+      const m = new Map();
+      for (const x of [...a, ...b]) m.set(x.id, newer(m.get(x.id), x));
+      return [...m.values()].filter((x) => alive(prefix + x.id, x));
+    };
+
+    const accounts = new Map();
+    for (const a of [...L.accounts, ...R.accounts]) {
+      const prev = accounts.get(a.id);
+      accounts.set(a.id, prev
+        ? { ...newer(prev, a), activities: [...prev.activities, ...a.activities], keyDates: [...prev.keyDates, ...a.keyDates] }
+        : { ...a });
+    }
+    const merged = [...accounts.values()].filter((a) => alive('a:' + a.id, a)).map((a) => ({
+      ...a, activities: mergeList(a.activities, [], 'h:'), keyDates: mergeList(a.keyDates, [], 'k:'),
+    }));
+
+    const days = { ...L.days };
+    for (const [d, day] of Object.entries(R.days)) days[d] = newer(days[d], day);
+
+    return { ...emptyState(), accounts: merged, tasks: mergeList(L.tasks, R.tasks, 't:'), days, deleted };
+  }
+
+  const toPayload = (st) => ({ version: 1, accounts: st.accounts, tasks: st.tasks, days: st.days, deleted: st.deleted });
 
   const getAccount = (id) => state.accounts.find((a) => a.id === id);
   const getDay = (iso) => state.days[iso] || { priorities: ['', '', ''], notes: '' };
@@ -702,6 +777,7 @@
     if (modalSubmit && modalSubmit(data) === false) return;
     modal.close(); save(); rerender();
   });
+  modal.addEventListener('close', () => { if (sync.again) scheduleSync(300); });
   modalForm.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) modal.close(); });
 
   const field = (label, html, cls = '') => `<label class="field ${cls}"><span>${label}</span>${html}</label>`;
@@ -883,11 +959,18 @@
   });
 
   // ---------- import / export ----------
-  $('#btn-export').addEventListener('click', () => {
+  $('#btn-export').addEventListener('click', async () => {
+    const name = `minicrm-backup-${today()}.json`;
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    // On phones, the share sheet ("Save to Files") is more reliable than a download link.
+    const file = new File([blob], name, { type: 'application/json' });
+    if (matchMedia('(pointer: coarse)').matches && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: name }); } catch (e) { /* cancelled */ }
+      return;
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `minicrm-backup-${today()}.json`;
+    a.download = name;
     a.click();
     URL.revokeObjectURL(a.href);
   });
@@ -900,8 +983,8 @@
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.accounts)) throw new Error('missing accounts');
       if (!confirm('Replace all current data with this backup?')) return;
-      state = { ...emptyState(), ...data };
-      state.accounts.forEach((a) => { a.activities ||= []; a.keyDates ||= []; });
+      // Keep tombstones so the restore also replaces the copy on other synced devices.
+      state = normalize({ ...data, deleted: { ...state.deleted, ...(data.deleted || {}) } });
       save(); toast('Backup restored'); rerender();
     } catch (err) {
       alert('That file is not a valid Mini CRM backup.');
@@ -967,5 +1050,224 @@
     save(); toast('Sample data loaded'); rerender();
   }
 
+  // ---------- cloud sync (private GitHub repository) ----------
+  const SYNC_KEY = 'minicrm.sync';
+  const SYNC_FILE = 'minicrm-data.json';
+  const sync = { status: 'off', message: '', last: null, timer: null, running: false, again: false, needsRender: false };
+  let syncCfg = null;
+  try { syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)); } catch (e) { /* none */ }
+
+  const b64encode = (str) => {
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  };
+  const b64decode = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), (c) => c.charCodeAt(0)));
+
+  function gh(path, opts = {}, cfg = syncCfg) {
+    return fetch(`https://api.github.com${path}`, {
+      ...opts,
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${cfg.token}`,
+        ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+    });
+  }
+
+  async function ghError(res) {
+    let detail = '';
+    try { detail = (await res.json()).message || ''; } catch (e) { /* no body */ }
+    const msg = res.status === 401 ? 'GitHub token is invalid or expired. Reconnect sync with a new token.'
+      : res.status === 403 ? `GitHub refused access (${detail || 'permission denied'}). The token needs Contents: Read and write.`
+      : res.status === 404 ? 'Repository not found. Check the name, and that the token was given access to it.'
+      : `GitHub error ${res.status}${detail ? ': ' + detail : ''}`;
+    return Object.assign(new Error(msg), { status: res.status });
+  }
+
+  async function pullRemote(cfg = syncCfg) {
+    const res = await gh(`/repos/${cfg.repo}/contents/${SYNC_FILE}`, {}, cfg);
+    if (res.status === 404) return null;
+    if (!res.ok) throw await ghError(res);
+    const meta = await res.json();
+    let content = meta.content;
+    if (!content) { // files over 1 MB come back without inline content
+      const blob = await gh(`/repos/${cfg.repo}/git/blobs/${meta.sha}`, {}, cfg);
+      if (!blob.ok) throw await ghError(blob);
+      content = (await blob.json()).content;
+    }
+    return { sha: meta.sha, data: normalize(JSON.parse(b64decode(content))) };
+  }
+
+  /** Returns the new sha, or null when the file changed underneath us (caller re-pulls). */
+  async function pushRemote(payload, sha) {
+    const res = await gh(`/repos/${syncCfg.repo}/contents/${SYNC_FILE}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        message: `Mini CRM sync ${new Date().toISOString()}`,
+        content: b64encode(JSON.stringify(payload, null, 1)),
+        ...(sha ? { sha } : {}),
+      }),
+    });
+    if (res.status === 409 || res.status === 422) return null;
+    if (!res.ok) throw await ghError(res);
+    return (await res.json()).content.sha;
+  }
+
+  function applyMerged(merged) {
+    if (JSON.stringify(toPayload(merged)) === JSON.stringify(toPayload(state))) return;
+    state = merged;
+    snapshot = fingerprints(state);
+    save({ track: false });
+    const el = document.activeElement;
+    if (el && el.matches('input, textarea, select')) sync.needsRender = true;
+    else rerender();
+  }
+
+  function scheduleSync(ms = 2000) {
+    clearTimeout(sync.timer);
+    sync.timer = setTimeout(syncNow, ms);
+  }
+
+  async function syncNow() {
+    if (!syncCfg) return;
+    if (sync.running || modal.open) { sync.again = true; return; } // never swap state under an open form
+    if (!navigator.onLine) { setSyncStatus('offline'); return; }
+    sync.running = true;
+    setSyncStatus('syncing');
+    try {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const remote = await pullRemote();
+        if (modal.open) { sync.again = true; break; }
+        applyMerged(remote ? mergeStates(state, remote.data) : state);
+        const payload = toPayload(state);
+        if (remote && JSON.stringify(toPayload(remote.data)) === JSON.stringify(payload)) break;
+        if (await pushRemote(payload, remote && remote.sha)) break;
+      }
+      sync.last = new Date();
+      setSyncStatus(sync.again ? 'pending' : 'idle');
+    } catch (e) {
+      setSyncStatus(navigator.onLine ? 'error' : 'offline', e.message);
+    } finally {
+      sync.running = false;
+      if (sync.again && !modal.open) { sync.again = false; scheduleSync(500); }
+    }
+  }
+
+  const SYNC_LABELS = {
+    off: '☁ Set up sync', pending: '↑ Saving…', syncing: '⟳ Syncing…', idle: '✓ Synced',
+    offline: '⚠ Offline', error: '⚠ Sync error',
+  };
+
+  function setSyncStatus(status, message = '') {
+    sync.status = status;
+    sync.message = message;
+    const btn = $('#btn-sync');
+    btn.textContent = SYNC_LABELS[status];
+    btn.className = `btn ghost sync-${status}`;
+    btn.title = status === 'error' ? message
+      : status === 'offline' ? 'No connection. Changes are saved on this device and will sync when you are back online.'
+      : sync.last ? `Last synced ${sync.last.toLocaleTimeString()}` : '';
+    const live = $('#sync-live');
+    if (live) live.innerHTML = syncStatusHtml();
+  }
+
+  function syncStatusHtml() {
+    const when = sync.last ? `Last synced ${sync.last.toLocaleString()}` : 'Not synced yet this session';
+    return `<strong>${esc(SYNC_LABELS[sync.status])}</strong> · <span class="muted">${esc(when)}</span>
+      ${sync.message ? `<div class="sync-error">${esc(sync.message)}</div>` : ''}`;
+  }
+
+  function syncSettings() {
+    if (syncCfg) {
+      openModal('Cloud sync', `
+        <div id="sync-live">${syncStatusHtml()}</div>
+        <p class="small">Syncing with private repository <strong>${esc(syncCfg.repo)}</strong>.
+          Changes save automatically and sync within a few seconds whenever you're online.
+          Every sync is also kept in that repository's history, so it doubles as a backup.</p>
+        <div class="row">
+          <button type="button" class="btn ghost" id="sync-now">Sync now</button>
+          <button type="button" class="btn danger" id="sync-disconnect">Disconnect this device</button>
+        </div>`, () => {}, 'Done');
+      $('#sync-now').addEventListener('click', () => { modal.close(); syncNow(); });
+      $('#sync-disconnect').addEventListener('click', () => {
+        if (!confirm('Stop syncing on this device? Your data stays on this device and in the cloud.')) return;
+        syncCfg = null;
+        localStorage.removeItem(SYNC_KEY);
+        modal.close(); setSyncStatus('off'); toast('Sync disconnected');
+      });
+      return;
+    }
+
+    openModal('Set up cloud sync', `
+      <p class="small">Keep the same data on your phone and computer by saving it to a <strong>private</strong>
+        GitHub repository. Do this once on each device, using the same repository.</p>
+      <ol class="small sync-steps">
+        <li>Create a private repository, e.g. <code>crm-data</code>: <a href="https://github.com/new" target="_blank" rel="noopener">github.com/new</a>.
+          Choose <em>Private</em> and tick <em>Add a README file</em>.</li>
+        <li>Create a token: <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>.
+          Under <em>Repository access</em> pick <em>Only select repositories</em> → your data repository.
+          Under <em>Permissions</em>, set <em>Contents</em> to <em>Read and write</em>. Generate and copy it.</li>
+        <li>Paste both below. Save the token in your Passwords app too, so you can paste it on your other device.</li>
+      </ol>
+      ${field('Repository (owner/name)', `<input name="repo" required placeholder="yourname/crm-data" autocapitalize="off" autocorrect="off" spellcheck="false">`)}
+      ${field('Access token', `<input name="token" type="password" required placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false">`)}
+      <div id="sync-connect-msg"></div>`, (data) => { connectSync(data); return false; }, 'Connect');
+  }
+
+  async function connectSync(data) {
+    const msg = $('#sync-connect-msg');
+    const show = (html) => { msg.innerHTML = html; };
+    const cfg = {
+      repo: data.repo.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, ''),
+      token: data.token.trim(),
+    };
+    if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo)) return show('<div class="sync-error">Enter the repository as owner/name, e.g. yourname/crm-data.</div>');
+    show('<div class="muted">Checking…</div>');
+    try {
+      const res = await gh(`/repos/${cfg.repo}`, {}, cfg);
+      if (!res.ok) throw await ghError(res);
+      if (!(await res.json()).private) {
+        return show('<div class="sync-error">That repository is public, so anyone could read your CRM data. Use a private repository.</div>');
+      }
+      const remote = await pullRemote(cfg);
+      const localHasData = state.accounts.length || state.tasks.length;
+      const remoteHasData = remote && (remote.data.accounts.length || remote.data.tasks.length);
+
+      const finish = (useCloud) => {
+        syncCfg = cfg;
+        localStorage.setItem(SYNC_KEY, JSON.stringify(cfg));
+        if (useCloud) { state = remote.data; snapshot = fingerprints(state); save({ track: false }); }
+        modal.close(); rerender(); syncNow();
+        toast('Sync connected');
+      };
+
+      if (!(localHasData && remoteHasData)) return finish(!!remoteHasData);
+      openModal('Cloud data found', `
+        <p>This repository already has Mini CRM data, and this device has data too.</p>
+        <label class="row"><input type="radio" name="mode" value="cloud" checked style="width:auto">
+          <span><strong>Use the cloud data</strong>: replace what's on this device. Best if this device only has test or sample data.</span></label>
+        <label class="row"><input type="radio" name="mode" value="merge" style="width:auto">
+          <span><strong>Merge both</strong>: keep everything from this device and the cloud.</span></label>`,
+      (choice) => { finish(choice.mode === 'cloud'); return false; }, 'Continue');
+    } catch (e) {
+      show(`<div class="sync-error">${esc(e.message || 'Could not reach GitHub. Check your connection.')}</div>`);
+    }
+  }
+
+  $('#btn-sync').addEventListener('click', syncSettings);
+  window.addEventListener('online', () => syncNow());
+  window.addEventListener('offline', () => syncCfg && setSyncStatus('offline'));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(); });
+  setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 60000);
+  document.addEventListener('focusout', () => setTimeout(() => {
+    const el = document.activeElement;
+    if (sync.needsRender && !(el && el.matches('input, textarea, select')) && !modal.open) { sync.needsRender = false; rerender(); }
+  }, 250));
+
+  setSyncStatus(syncCfg ? 'pending' : 'off');
   route();
+  syncNow();
 })();
