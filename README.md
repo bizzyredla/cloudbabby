@@ -9,12 +9,25 @@ No install, no build step: open `index.html` in a browser.
 - Partner vs. prospect accounts with their own stages
   - Prospect: New → Contacted → Qualified → Proposal → Negotiation → Won / Lost
   - Partner: Onboarding → Active → Strategic → At Risk → Inactive
-- Contact, title, email, phone, website, industry, deal/annual value, tags, free-form notes
+- **Multiple contacts** per account: name, title, email, phone, role in the deal (decision maker,
+  champion, HR…), notes, and one marked primary. Activities can be logged against a contact
+- **Current vendors**: pick from a dropdown of the top 20 TriNet competitors (ADP TotalSource,
+  Insperity, Paychex PEO, Justworks, Rippling PEO, Gusto, Vensure, CoAdvantage, Sequoia One,
+  G&A Partners, Engage PEO, BBSI, Extensis Group, Questco, Infiniti HR, ADP Workforce Now, Paycor,
+  Paylocity, Paycom, Deel), or type any other vendor
+- Website, industry, deal/annual value, tags, free-form notes
 - **Next follow-up date** on every account
 - **Key dates** (renewals, contract end, QBRs, decision dates, etc.) that can be marked done
 - **History timeline** of calls, emails, meetings, demos and notes. Logging an activity can also
   set the next follow-up, update the stage, and add the follow-up to your planner
-- Search, filter by type or stage, and sort by next follow-up, name, last update or value
+- Search (including contacts and vendors), filter by type, stage or vendor, and sort by next
+  follow-up, name, last update or value
+
+**Lists**
+- Saved lists that update automatically, built from account type, current vendors, tags, stages
+  and text, e.g. "Prospects on ADP TotalSource" or "#enterprise partners"
+- Built-in "By current vendor" groups with counts
+- Export any list to CSV
 
 **Dashboard**
 - Partner and prospect counts, open pipeline value, overdue and due-today counts

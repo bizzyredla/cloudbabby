@@ -18,6 +18,14 @@
     { key: 'revisits', label: 'Revisits', short: 'Revisit', count: 5, kinds: ['Visit'] },
   ];
   const PRIORITIES = { high: 'High', med: 'Medium', low: 'Low' };
+  // Top TriNet competitors (PEOs and HR/payroll platforms), offered as "current vendor" choices.
+  const COMPETITORS = [
+    'ADP TotalSource', 'Insperity', 'Paychex PEO', 'Justworks', 'Rippling PEO', 'Gusto', 'Vensure Employer Services',
+    'CoAdvantage', 'Sequoia One', 'G&A Partners', 'Engage PEO', 'BBSI', 'Extensis Group', 'Questco', 'Infiniti HR',
+    'ADP Workforce Now', 'Paycor', 'Paylocity', 'Paycom', 'Deel',
+  ];
+  const NO_VENDOR = 'None / in-house';
+  const CONTACT_ROLES = ['Decision maker', 'Champion', 'Influencer', 'HR', 'Finance', 'Operations', 'Executive', 'Other'];
   const DAY_START = 7;
   const DAY_END = 19;
 
@@ -71,13 +79,26 @@
 
   // ---------- state ----------
   let state = load();
-  const ui = { selectedId: null, search: '', typeFilter: 'all', stageFilter: 'all', sort: 'followup', plannerDate: today() };
+  const ui = { selectedId: null, search: '', typeFilter: 'all', stageFilter: 'all', vendorFilter: 'all', sort: 'followup', plannerDate: today(), listId: null };
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], deleted: {} }; }
+
+  /** Fill in missing collections and move the old single-contact fields into `contacts`. */
+  function migrateAccount(a) {
+    a.activities ||= []; a.keyDates ||= []; a.vendors ||= [];
+    if (!a.contacts) {
+      // Deterministic id so devices that migrate the same account separately still merge cleanly.
+      a.contacts = a.contact || a.email || a.phone
+        ? [{ id: 'c-' + a.id, name: a.contact || '', title: a.title || '', email: a.email || '', phone: a.phone || '', role: '', notes: '', primary: true }]
+        : [];
+      delete a.contact; delete a.title; delete a.email; delete a.phone;
+    }
+    return a;
+  }
 
   function normalize(data) {
     const st = { ...emptyState(), ...data };
-    st.accounts.forEach((a) => { a.activities ||= []; a.keyDates ||= []; });
+    st.accounts.forEach(migrateAccount);
     return st;
   }
 
@@ -103,11 +124,13 @@
   // each record against a snapshot taken at the previous save.
   function* records(st) {
     for (const a of st.accounts) {
-      const { activities, keyDates, _ts, ...fields } = a;
+      const { activities, keyDates, contacts, _ts, ...fields } = a;
       yield ['a:' + a.id, a, fields];
       for (const h of activities) yield ['h:' + h.id, h, { ...h, _ts: undefined }];
       for (const k of keyDates) yield ['k:' + k.id, k, { ...k, _ts: undefined }];
+      for (const c of contacts) yield ['c:' + c.id, c, { ...c, _ts: undefined }];
     }
+    for (const l of st.lists) yield ['l:' + l.id, l, { ...l, _ts: undefined }];
     for (const t of st.tasks) yield ['t:' + t.id, t, { ...t, _ts: undefined }];
     for (const [d, day] of Object.entries(st.days)) yield ['d:' + d, day, { ...day, _ts: undefined }];
   }
@@ -148,22 +171,32 @@
     for (const a of [...L.accounts, ...R.accounts]) {
       const prev = accounts.get(a.id);
       accounts.set(a.id, prev
-        ? { ...newer(prev, a), activities: [...prev.activities, ...a.activities], keyDates: [...prev.keyDates, ...a.keyDates] }
+        ? { ...newer(prev, a), activities: [...prev.activities, ...a.activities], keyDates: [...prev.keyDates, ...a.keyDates], contacts: [...prev.contacts, ...a.contacts] }
         : { ...a });
     }
     const merged = [...accounts.values()].filter((a) => alive('a:' + a.id, a)).map((a) => ({
-      ...a, activities: mergeList(a.activities, [], 'h:'), keyDates: mergeList(a.keyDates, [], 'k:'),
+      ...a, activities: mergeList(a.activities, [], 'h:'), keyDates: mergeList(a.keyDates, [], 'k:'), contacts: mergeList(a.contacts, [], 'c:'),
     }));
 
     const days = { ...L.days };
     for (const [d, day] of Object.entries(R.days)) days[d] = newer(days[d], day);
 
-    return { ...emptyState(), accounts: merged, tasks: mergeList(L.tasks, R.tasks, 't:'), days, deleted };
+    return { ...emptyState(), accounts: merged, tasks: mergeList(L.tasks, R.tasks, 't:'), days, lists: mergeList(L.lists, R.lists, 'l:'), deleted };
   }
 
-  const toPayload = (st) => ({ version: 1, accounts: st.accounts, tasks: st.tasks, days: st.days, deleted: st.deleted });
+  const toPayload = (st) => ({ version: 1, accounts: st.accounts, tasks: st.tasks, days: st.days, lists: st.lists, deleted: st.deleted });
 
   const getAccount = (id) => state.accounts.find((a) => a.id === id);
+  const primaryContact = (a) => a.contacts.find((c) => c.primary) || a.contacts[0] || null;
+  const tagList = (a) => (a.tags || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const allTags = () => [...new Set(state.accounts.flatMap((a) => tagList(a).map((x) => x.toLowerCase())))].sort();
+  const allVendors = () => {
+    const used = new Set(state.accounts.flatMap((a) => a.vendors));
+    return [...COMPETITORS, ...[...used].filter((v) => !COMPETITORS.includes(v) && v !== NO_VENDOR).sort(), NO_VENDOR];
+  };
+  const haystack = (a) => [a.name, a.industry, a.tags, a.notes, ...a.vendors,
+    ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone])].join(' ').toLowerCase();
+  const vendorPills = (a) => a.vendors.map((v) => `<span class="pill vendor">${esc(v)}</span>`).join(' ');
   const getDay = (iso) => state.days[iso] || { priorities: ['', '', ''], notes: '' };
   const findAccountByName = (name) => {
     const n = (name || '').trim().toLowerCase();
@@ -208,13 +241,14 @@
   }
 
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, planner: renderPlanner };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, planner: renderPlanner, lists: renderLists };
 
   function route() {
     const [name, arg] = location.hash.replace('#', '').split('/');
     const view = views[name] ? name : 'dashboard';
     if (view === 'accounts' && arg) ui.selectedId = arg;
     if (view === 'planner' && arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)) ui.plannerDate = arg;
+    if (view === 'lists' && arg) ui.listId = decodeURIComponent(arg);
     $$('#tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
     views[view]();
   }
@@ -331,9 +365,8 @@
     let list = state.accounts.filter((a) => {
       if (ui.typeFilter !== 'all' && a.type !== ui.typeFilter) return false;
       if (ui.stageFilter !== 'all' && a.stage !== ui.stageFilter) return false;
-      if (!q) return true;
-      return [a.name, a.contact, a.email, a.industry, a.tags, a.notes]
-        .some((f) => (f || '').toLowerCase().includes(q));
+      if (ui.vendorFilter !== 'all' && !a.vendors.includes(ui.vendorFilter)) return false;
+      return !q || haystack(a).includes(q);
     });
     const far = '9999-12-31';
     const sorters = {
@@ -359,7 +392,7 @@
             <button class="btn sm" data-act="new-account">+ New</button>
           </div>
           <div class="toolbar">
-            <input type="search" id="acct-search" placeholder="Search name, contact, tags, notes…" value="${esc(ui.search)}">
+            <input type="search" id="acct-search" placeholder="Search name, contacts, vendors, tags, notes…" value="${esc(ui.search)}">
           </div>
           <div class="toolbar">
             <select id="acct-type">
@@ -370,6 +403,10 @@
             <select id="acct-stage">
               <option value="all">All stages</option>
               ${stages.map((s) => `<option ${ui.stageFilter === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+            <select id="acct-vendor" title="Current vendor">
+              <option value="all">All vendors</option>
+              ${allVendors().map((v) => `<option ${ui.vendorFilter === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
             </select>
             <select id="acct-sort" title="Sort">
               <option value="followup" ${ui.sort === 'followup' ? 'selected' : ''}>Next follow-up</option>
@@ -383,7 +420,8 @@
               <button class="acct-item ${a.id === ui.selectedId ? 'active' : ''}" data-act="select" data-id="${a.id}">
                 <div class="row spread"><span class="name">${esc(a.name)}</span>
                   <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span></div>
-                <div class="meta">${esc(a.stage)}${a.contact ? ' · ' + esc(a.contact) : ''}</div>
+                <div class="meta">${esc(a.stage)}${primaryContact(a) ? ' · ' + esc(primaryContact(a).name) : ''}${a.contacts.length > 1 ? ` +${a.contacts.length - 1}` : ''}</div>
+                ${a.vendors.length ? `<div class="meta">Vendor: ${esc(a.vendors.join(', '))}</div>` : ''}
                 <div class="meta">${a.nextFollowUp
                   ? `Next: <span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp, { month: 'short', day: 'numeric' })} (${relDays(a.nextFollowUp)})</span>`
                   : 'No follow-up set'}</div>
@@ -403,6 +441,7 @@
     $('#acct-type').addEventListener('change', (e) => { ui.typeFilter = e.target.value; ui.stageFilter = 'all'; renderAccounts(); });
     $('#acct-stage').addEventListener('change', (e) => { ui.stageFilter = e.target.value; renderAccounts(); });
     $('#acct-sort').addEventListener('change', (e) => { ui.sort = e.target.value; renderAccounts(); });
+    $('#acct-vendor').addEventListener('change', (e) => { ui.vendorFilter = e.target.value; renderAccounts(); });
   }
 
   function accountDetail(a) {
@@ -418,7 +457,7 @@
         <div class="detail-head">
           <div>
             <div class="row"><h1 style="margin:0">${esc(a.name)}</h1><span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span><span class="pill">${esc(a.stage)}</span></div>
-            ${a.tags ? `<div class="row small muted" style="margin-top:.35rem">${a.tags.split(',').map((x) => x.trim()).filter(Boolean).map((x) => `<span class="pill">#${esc(x)}</span>`).join('')}</div>` : ''}
+            ${a.tags ? `<div class="row small muted" style="margin-top:.35rem">${tagList(a).map((x) => `<span class="pill">#${esc(x)}</span>`).join('')}</div>` : ''}
           </div>
           <div class="row">
             <button class="btn" data-act="log" data-id="${a.id}">+ Log activity</button>
@@ -428,15 +467,32 @@
         </div>
 
         <div class="facts">
-          <div><span>Primary contact</span>${esc(a.contact) || '—'}${a.title ? `<div class="small muted">${esc(a.title)}</div>` : ''}</div>
-          <div><span>Email</span>${a.email ? `<a href="mailto:${esc(a.email)}">${esc(a.email)}</a>` : '—'}</div>
-          <div><span>Phone</span>${a.phone ? `<a href="tel:${esc(a.phone)}">${esc(a.phone)}</a>` : '—'}</div>
+          <div class="span-all"><span>Current vendors</span>${a.vendors.length ? vendorPills(a) : '—'}</div>
           <div><span>Website</span>${a.website ? `<a href="${esc(/^https?:/.test(a.website) ? a.website : 'https://' + a.website)}" target="_blank" rel="noopener">${esc(a.website)}</a>` : '—'}</div>
           <div><span>Industry</span>${esc(a.industry) || '—'}</div>
           <div><span>${a.type === 'partner' ? 'Annual value' : 'Deal value'}</span>${money(a.value)}</div>
           <div><span>Next follow-up</span>${a.nextFollowUp ? `<span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp)}</span> <span class="small muted">${relDays(a.nextFollowUp)}</span>` : '—'}</div>
           <div><span>Last touch</span>${last ? `${fmtDate(last.date)} <span class="small muted">(${esc(last.kind)})</span>` : 'Never'}</div>
           <div><span>Added</span>${fmtDate((a.createdAt || '').slice(0, 10) || null)}</div>
+        </div>
+
+        <div>
+          <div class="section-head"><h2 style="margin:0">Contacts <span class="muted small">(${a.contacts.length})</span></h2><button class="btn sm ghost" data-act="new-contact" data-id="${a.id}">+ Add contact</button></div>
+          ${a.contacts.length ? `<div class="contact-grid">${[...a.contacts].sort((x, y) => (y.primary ? 1 : 0) - (x.primary ? 1 : 0)).map((c) => `
+            <div class="contact-card">
+              <div class="row spread">
+                <div><strong>${esc(c.name)}</strong> ${c.primary ? '<span class="pill primary">Primary</span>' : ''}</div>
+                <div class="row" style="gap:0">
+                  ${c.primary ? '' : `<button class="icon-btn" data-act="primary-contact" data-id="${a.id}" data-cid="${c.id}" title="Make primary">★</button>`}
+                  <button class="icon-btn" data-act="edit-contact" data-id="${a.id}" data-cid="${c.id}" title="Edit">✎</button>
+                  <button class="icon-btn" data-act="del-contact" data-id="${a.id}" data-cid="${c.id}" title="Delete">✕</button>
+                </div>
+              </div>
+              ${c.title || c.role ? `<div class="small muted">${esc([c.title, c.role].filter(Boolean).join(' · '))}</div>` : ''}
+              ${c.email ? `<div class="small"><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>` : ''}
+              ${c.phone ? `<div class="small"><a href="tel:${esc(c.phone)}">${esc(c.phone)}</a></div>` : ''}
+              ${c.notes ? `<div class="small muted" style="white-space:pre-wrap;margin-top:.25rem">${esc(c.notes)}</div>` : ''}
+            </div>`).join('')}</div>` : '<div class="empty">No contacts yet. Add the decision maker, champion, HR lead…</div>'}
         </div>
 
         <div>
@@ -479,7 +535,7 @@
                   <button class="icon-btn" data-act="del-activity" data-id="${a.id}" data-hid="${h.id}" title="Delete">✕</button>
                 </div>
               </div>
-              <div class="when">${fmtDate(h.date)} · ${relDays(h.date)}</div>
+              <div class="when">${fmtDate(h.date)} · ${relDays(h.date)}${(() => { const c = h.contactId && a.contacts.find((x) => x.id === h.contactId); return c ? ' · with ' + esc(c.name) : ''; })()}</div>
               ${h.notes ? `<div class="body">${esc(h.notes)}</div>` : ''}
             </li>`).join('')}</ul>` : '<div class="empty">No history yet — log your first call, email or meeting.</div>'}
         </div>
@@ -558,7 +614,7 @@
               <div class="task auto">
                 <div class="t-main">
                   <div class="t-title">${esc(i.label)} — <a href="#accounts/${i.account.id}">${esc(i.account.name)}</a></div>
-                  <div class="t-sub">${i.date < d ? `<span class="pill overdue">overdue ${relDays(i.date).replace(' ago', '')}</span>` : ''} ${esc(i.account.stage)}${i.account.contact ? ' · ' + esc(i.account.contact) : ''}${i.account.phone ? ' · ' + esc(i.account.phone) : ''}</div>
+                  <div class="t-sub">${i.date < d ? `<span class="pill overdue">overdue ${relDays(i.date).replace(' ago', '')}</span>` : ''} ${esc(i.account.stage)}${(() => { const c = primaryContact(i.account); return c ? ' · ' + esc(c.name) + (c.phone ? ' · ' + esc(c.phone) : '') : ''; })()}</div>
                 </div>
                 ${i.kind === 'followup'
                   ? `<button class="btn sm ghost" data-act="log" data-id="${i.account.id}">Log</button>`
@@ -752,6 +808,171 @@
       </div>`;
   }
 
+  // ---------- lists ----------
+  // Saved lists are filters: an account matches when it meets every filled-in section and any
+  // value ticked within a section. Built-in "vendor:<name>" lists group accounts by current vendor.
+  const VENDOR_LIST = 'vendor:';
+  const emptyCriteria = () => ({ type: 'all', stages: [], tags: [], vendors: [], text: '' });
+
+  function matchesCriteria(a, c) {
+    if (c.type !== 'all' && a.type !== c.type) return false;
+    if (c.stages.length && !c.stages.includes(a.stage)) return false;
+    if (c.tags.length && !tagList(a).some((t) => c.tags.includes(t.toLowerCase()))) return false;
+    if (c.vendors.length && !a.vendors.some((v) => c.vendors.includes(v))) return false;
+    if (c.text && !haystack(a).includes(c.text.toLowerCase())) return false;
+    return true;
+  }
+
+  function resolveList(id) {
+    if (!id) return null;
+    if (id.startsWith(VENDOR_LIST)) {
+      const v = id.slice(VENDOR_LIST.length);
+      return { id, name: `Current vendor: ${v}`, builtIn: true, criteria: { ...emptyCriteria(), vendors: [v] } };
+    }
+    return state.lists.find((l) => l.id === id) || null;
+  }
+
+  const listAccounts = (list) => state.accounts
+    .filter((a) => matchesCriteria(a, { ...emptyCriteria(), ...list.criteria }))
+    .sort((x, y) => x.name.localeCompare(y.name));
+
+  function criteriaSummary(c) {
+    const parts = [];
+    if (c.type !== 'all') parts.push(c.type === 'partner' ? 'Partners only' : 'Prospects only');
+    if (c.vendors.length) {
+      parts.push('Vendor: ' + (c.vendors.length > 3 ? `${c.vendors.slice(0, 2).join(' or ')} or ${c.vendors.length - 2} others` : c.vendors.join(' or ')));
+    }
+    if (c.tags.length) parts.push('Tag: ' + c.tags.map((t) => '#' + t).join(' or '));
+    if (c.stages.length) parts.push('Stage: ' + c.stages.join(' or '));
+    if (c.text) parts.push(`Contains "${c.text}"`);
+    return parts.length ? parts : ['All accounts'];
+  }
+
+  function renderLists() {
+    const vendorCounts = new Map();
+    for (const a of state.accounts) for (const v of a.vendors) vendorCounts.set(v, (vendorCounts.get(v) || 0) + 1);
+    const vendorGroups = [...vendorCounts].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));
+    if (!resolveList(ui.listId)) ui.listId = state.lists[0] ? state.lists[0].id : vendorGroups[0] ? VENDOR_LIST + vendorGroups[0][0] : null;
+    const current = resolveList(ui.listId);
+    const item = (id, name, count, sub = '') => `
+      <button class="acct-item ${id === ui.listId ? 'active' : ''}" data-act="open-list" data-lid="${esc(id)}">
+        <div class="row spread"><span class="name">${esc(name)}</span><span class="pill">${count}</span></div>
+        ${sub ? `<div class="meta">${esc(sub)}</div>` : ''}
+      </button>`;
+
+    $('#view').innerHTML = `
+      <div class="accounts-layout">
+        <div class="card">
+          <div class="row spread" style="margin-bottom:.5rem">
+            <h2 style="margin:0">My lists</h2>
+            <button class="btn sm" data-act="new-list">+ New list</button>
+          </div>
+          <div class="acct-list" style="max-height:none">
+            ${state.lists.length
+              ? state.lists.map((l) => item(l.id, l.name, listAccounts(l).length, criteriaSummary({ ...emptyCriteria(), ...l.criteria }).join(' · '))).join('')
+              : '<div class="empty">Create a list from tags, vendors, stages or type, e.g. "Prospects on ADP TotalSource".</div>'}
+          </div>
+          <h3 style="margin-top:1rem">By current vendor</h3>
+          <div class="acct-list" style="max-height:none">
+            ${vendorGroups.length
+              ? vendorGroups.map(([v, n]) => item(VENDOR_LIST + v, v, n)).join('')
+              : '<div class="empty">Add current vendors on your accounts to group them here.</div>'}
+          </div>
+        </div>
+        <div>${current ? listDetail(current) : '<div class="card empty">Create a list, or pick a vendor group.</div>'}</div>
+      </div>`;
+  }
+
+  function listDetail(list) {
+    const rows = listAccounts(list);
+    const c = { ...emptyCriteria(), ...list.criteria };
+    return `
+      <div class="card stack">
+        <div class="detail-head">
+          <div>
+            <h1 style="margin:0">${esc(list.name)} <span class="muted small">(${rows.length})</span></h1>
+            <div class="row" style="margin-top:.4rem">${criteriaSummary(c).map((x) => `<span class="pill wrap">${esc(x)}</span>`).join('')}</div>
+          </div>
+          <div class="row">
+            <button class="btn ghost" data-act="list-csv">Export CSV</button>
+            ${list.builtIn ? '' : `
+              <button class="btn ghost" data-act="edit-list" data-lid="${list.id}">Edit</button>
+              <button class="btn danger" data-act="del-list" data-lid="${list.id}">Delete</button>`}
+          </div>
+        </div>
+        ${rows.length ? `
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Account</th><th>Stage</th><th>Primary contact</th><th>Current vendors</th><th>Next follow-up</th></tr></thead>
+            <tbody>${rows.map((a) => {
+              const p = primaryContact(a);
+              return `<tr>
+                <td><a href="#accounts/${a.id}"><strong>${esc(a.name)}</strong></a><div><span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span></div></td>
+                <td>${esc(a.stage)}</td>
+                <td>${p ? `${esc(p.name)}${p.title ? `<div class="small muted">${esc(p.title)}</div>` : ''}${p.phone ? `<div class="small"><a href="tel:${esc(p.phone)}">${esc(p.phone)}</a></div>` : ''}` : '—'}
+                  ${a.contacts.length > 1 ? `<div class="small muted">+${a.contacts.length - 1} more</div>` : ''}</td>
+                <td>${vendorPills(a) || '—'}</td>
+                <td>${a.nextFollowUp ? `<span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp, { month: 'short', day: 'numeric' })}</span>` : '—'}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+        </div>` : '<div class="empty">No accounts match this list yet.</div>'}
+      </div>`;
+  }
+
+  const readCriteria = (fd) => ({
+    type: fd.get('type') || 'all', vendors: fd.getAll('vendors'), tags: fd.getAll('tags'),
+    stages: fd.getAll('stages'), text: (fd.get('text') || '').trim(),
+  });
+
+  function listForm(existing) {
+    const l = existing || { name: '', criteria: emptyCriteria() };
+    const c = { ...emptyCriteria(), ...l.criteria };
+    const checks = (name, values, chosen, label = (v) => v) => values.length
+      ? `<div class="check-grid">${values.map((v) => `<label><input type="checkbox" name="${name}" value="${esc(v)}" ${chosen.includes(v) ? 'checked' : ''}> ${esc(label(v))}</label>`).join('')}</div>`
+      : '<div class="small muted">None in use yet. Add tags on your accounts.</div>';
+    openModal(existing ? 'Edit list' : 'New list', `
+      ${field('List name *', `<input name="name" required value="${esc(l.name)}" placeholder="e.g. Prospects on ADP TotalSource">`)}
+      <p class="small muted" style="margin:0">Accounts are included when they match <strong>every</strong> section you fill in,
+        and <strong>any</strong> box ticked within a section. Leave a section empty to ignore it. Lists update automatically.</p>
+      ${field('Account type', `<select name="type">${opt('all', 'Partners & prospects', c.type)}${opt('prospect', 'Prospects only', c.type)}${opt('partner', 'Partners only', c.type)}</select>`)}
+      <div class="field"><span>Current vendor is any of</span>${checks('vendors', allVendors(), c.vendors)}</div>
+      <div class="field"><span>Tagged with any of</span>${checks('tags', allTags(), c.tags, (t) => '#' + t)}</div>
+      <div class="field"><span>Stage is any of</span>${checks('stages', [...STAGES.prospect, ...STAGES.partner], c.stages)}</div>
+      ${field('Name, contacts or notes contain', `<input name="text" value="${esc(c.text)}">`)}
+      <div class="small" id="list-preview"></div>`, (data, fd) => {
+      if (!data.name.trim()) return false;
+      const criteria = readCriteria(fd);
+      if (existing) Object.assign(existing, { name: data.name.trim(), criteria });
+      else {
+        const created = { id: uid(), name: data.name.trim(), criteria };
+        state.lists.push(created);
+        ui.listId = created.id;
+        location.hash = `lists/${created.id}`;
+      }
+      toast(existing ? 'List updated' : 'List created');
+    });
+    const preview = () => {
+      const n = state.accounts.filter((a) => matchesCriteria(a, readCriteria(new FormData(modalForm)))).length;
+      $('#list-preview').innerHTML = `Currently matches <strong>${n}</strong> account${n === 1 ? '' : 's'}.`;
+    };
+    modalForm.oninput = preview;
+    preview();
+  }
+
+  function exportListCsv() {
+    const list = resolveList(ui.listId);
+    if (!list) return;
+    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [['Account', 'Type', 'Stage', 'Industry', 'Value', 'Current vendors', 'Primary contact', 'Title', 'Email', 'Phone', 'Other contacts', 'Next follow-up', 'Tags']];
+    for (const a of listAccounts(list)) {
+      const p = primaryContact(a) || {};
+      rows.push([a.name, a.type, a.stage, a.industry, a.value, a.vendors.join('; '), p.name, p.title, p.email, p.phone,
+        a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.tags]);
+    }
+    downloadFile(`${list.name.replace(/[^\w-]+/g, '-')}-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
+  }
+
   // ---------- modal ----------
   const modal = $('#modal');
   const modalForm = $('#modal-form');
@@ -766,6 +987,7 @@
         <button type="submit" class="btn">${esc(submitLabel)}</button>
       </div>`;
     modalSubmit = onSubmit;
+    modalForm.oninput = null;
     modal.showModal();
     const first = modalForm.querySelector('input:not([type=hidden]), select, textarea');
     if (first) first.focus();
@@ -773,8 +995,9 @@
 
   modalForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    const data = Object.fromEntries(new FormData(modalForm).entries());
-    if (modalSubmit && modalSubmit(data) === false) return;
+    const fd = new FormData(modalForm);
+    const data = Object.fromEntries(fd.entries());
+    if (modalSubmit && modalSubmit(data, fd) === false) return;
     modal.close(); save(); rerender();
   });
   modal.addEventListener('close', () => { if (sync.again) scheduleSync(300); });
@@ -793,10 +1016,13 @@
         ${field('Type', `<select name="type" id="f-type">${opt('prospect', 'Prospect', a.type)}${opt('partner', 'Partner', a.type)}</select>`)}
         ${field('Stage / status', `<select name="stage" id="f-stage">${STAGES[a.type].map((s) => opt(s, s, a.stage)).join('')}</select>`)}
         ${field(a.type === 'partner' ? 'Annual value ($)' : 'Deal value ($)', `<input name="value" type="number" min="0" step="any" value="${esc(a.value)}">`)}
-        ${field('Primary contact', `<input name="contact" value="${esc(a.contact)}">`)}
-        ${field('Contact title', `<input name="title" value="${esc(a.title)}">`)}
-        ${field('Email', `<input name="email" type="email" value="${esc(a.email)}">`)}
-        ${field('Phone', `<input name="phone" value="${esc(a.phone)}">`)}
+        ${existing ? '' : `
+        ${field('Primary contact', `<input name="c_name">`)}
+        ${field('Contact title', `<input name="c_title">`)}
+        ${field('Contact email', `<input name="c_email" type="email">`)}
+        ${field('Contact phone', `<input name="c_phone" type="tel">`)}
+        <div class="small muted span-2">You can add more contacts from the account page.</div>`}
+        <div class="field span-2"><span>Current vendors</span>${vendorPicker(a.vendors || [])}</div>
         ${field('Website', `<input name="website" value="${esc(a.website)}">`)}
         ${field('Industry', `<input name="industry" value="${esc(a.industry)}">`)}
         ${field('Next follow-up', `<input name="nextFollowUp" type="date" value="${esc(a.nextFollowUp)}">`)}
@@ -804,12 +1030,16 @@
         ${field('Notes', `<textarea name="notes" rows="4">${esc(a.notes)}</textarea>`, 'span-2')}
       </div>`, (data) => {
       if (!data.name.trim()) return false;
+      const { c_name, c_title, c_email, c_phone, ...fields } = data;
+      fields.vendors = JSON.parse(fields.vendors || '[]');
       if (existing) {
-        Object.assign(existing, data); touch(existing);
+        Object.assign(existing, fields); touch(existing);
         toast('Account updated');
       } else {
         const now = new Date().toISOString();
-        const acct = { id: uid(), ...data, activities: [], keyDates: [], createdAt: now, updatedAt: now };
+        const contacts = c_name || c_email || c_phone
+          ? [{ id: uid(), name: c_name || c_email || c_phone, title: c_title, email: c_email, phone: c_phone, role: '', notes: '', primary: true }] : [];
+        const acct = { id: uid(), ...fields, contacts, activities: [], keyDates: [], createdAt: now, updatedAt: now };
         state.accounts.push(acct);
         ui.selectedId = acct.id;
         location.hash = `accounts/${acct.id}`;
@@ -819,6 +1049,77 @@
     $('#f-type').addEventListener('change', (e) => {
       $('#f-stage').innerHTML = STAGES[e.target.value].map((s) => opt(s, s, '')).join('');
     });
+    bindVendorPicker();
+  }
+
+  /** Chips + dropdown for an account's current vendors; the chosen list lives in a hidden input. */
+  function vendorPicker(selected) {
+    return `
+      <div class="vendor-picker">
+        <input type="hidden" name="vendors" id="vp-value" value="${esc(JSON.stringify(selected))}">
+        <div class="row" id="vp-chips"></div>
+        <div class="row" style="margin-top:.35rem">
+          <select id="vp-select" style="flex:1"></select>
+        </div>
+        <div class="row" id="vp-other" hidden style="margin-top:.35rem">
+          <input id="vp-other-input" placeholder="Vendor name" style="flex:1">
+          <button type="button" class="btn sm" id="vp-other-add">Add</button>
+        </div>
+      </div>`;
+  }
+
+  function bindVendorPicker() {
+    const value = $('#vp-value');
+    const get = () => JSON.parse(value.value);
+    const set = (list) => { value.value = JSON.stringify(list); draw(); };
+    const add = (v) => { v = v.trim(); if (v && !get().includes(v)) set([...get(), v]); };
+    function draw() {
+      const chosen = get();
+      $('#vp-chips').innerHTML = chosen.length
+        ? chosen.map((v, i) => `<span class="pill vendor chip">${esc(v)} <button type="button" class="chip-x" data-i="${i}" aria-label="Remove ${esc(v)}">✕</button></span>`).join('')
+        : '<span class="small muted">No vendors selected</span>';
+      $('#vp-select').innerHTML = `<option value="">+ Add a current vendor…</option>
+        <optgroup label="Top TriNet competitors">${COMPETITORS.filter((v) => !chosen.includes(v)).map((v) => `<option>${esc(v)}</option>`).join('')}</optgroup>
+        ${allVendors().filter((v) => !COMPETITORS.includes(v) && !chosen.includes(v)).map((v) => `<option>${esc(v)}</option>`).join('')}
+        <option value="__other">Other (type a name)…</option>`;
+    }
+    $('#vp-chips').addEventListener('click', (e) => {
+      const x = e.target.closest('.chip-x');
+      if (x) set(get().filter((_, i) => i !== Number(x.dataset.i)));
+    });
+    $('#vp-select').addEventListener('change', (e) => {
+      const v = e.target.value;
+      if (v === '__other') { $('#vp-other').hidden = false; $('#vp-other-input').focus(); e.target.value = ''; return; }
+      if (v) add(v);
+    });
+    const addOther = () => { add($('#vp-other-input').value); $('#vp-other-input').value = ''; $('#vp-other').hidden = true; };
+    $('#vp-other-add').addEventListener('click', addOther);
+    $('#vp-other-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addOther(); } });
+    draw();
+  }
+
+  function contactForm(acct, existing) {
+    const c = existing || { primary: acct.contacts.length === 0 };
+    openModal(`${existing ? 'Edit' : 'Add'} contact — ${acct.name}`, `
+      <div class="grid-2">
+        ${field('Name *', `<input name="name" required value="${esc(c.name)}">`)}
+        ${field('Title', `<input name="title" value="${esc(c.title)}" placeholder="e.g. HR Director">`)}
+        ${field('Email', `<input name="email" type="email" value="${esc(c.email)}">`)}
+        ${field('Phone', `<input name="phone" type="tel" value="${esc(c.phone)}">`)}
+        ${field('Role in deal', `<select name="role"><option value="">—</option>${CONTACT_ROLES.map((r) => opt(r, r, c.role)).join('')}</select>`)}
+        <label class="row small" style="align-self:end"><input type="checkbox" name="primary" style="width:auto" ${c.primary ? 'checked' : ''}> Primary contact</label>
+        ${field('Notes', `<textarea name="notes" rows="3">${esc(c.notes)}</textarea>`, 'span-2')}
+      </div>`, (data) => {
+      if (!data.name.trim()) return false;
+      const fields = { name: data.name, title: data.title, email: data.email, phone: data.phone, role: data.role, notes: data.notes, primary: !!data.primary };
+      let target = existing;
+      if (existing) Object.assign(existing, fields);
+      else acct.contacts.push(target = { id: uid(), ...fields });
+      if (target.primary) acct.contacts.forEach((x) => { if (x !== target) x.primary = false; });
+      else if (!acct.contacts.some((x) => x.primary)) acct.contacts[0].primary = true;
+      touch(acct);
+      toast(existing ? 'Contact updated' : 'Contact added');
+    });
   }
 
   function activityForm(acct, existing) {
@@ -827,6 +1128,7 @@
       <div class="grid-2">
         ${field('Date', `<input name="date" type="date" required value="${esc(h.date)}">`)}
         ${field('Type', `<select name="kind">${ACTIVITY_KINDS.map((k) => opt(k, k, h.kind)).join('')}</select>`)}
+        ${acct.contacts.length ? field('With contact', `<select name="contactId"><option value="">—</option>${acct.contacts.map((c) => opt(c.id, c.name, h.contactId ?? (primaryContact(acct) || {}).id)).join('')}</select>`, 'span-2') : ''}
         ${field('Summary *', `<input name="summary" required placeholder="e.g. Discovery call with VP Sales" value="${esc(h.summary)}">`, 'span-2')}
         ${field('Notes', `<textarea name="notes" rows="5" placeholder="What was discussed, decisions, objections, next steps…">${esc(h.notes)}</textarea>`, 'span-2')}
         ${existing ? '' : `
@@ -836,9 +1138,9 @@
       </div>`, (data) => {
       if (!data.summary.trim()) return false;
       if (existing) {
-        Object.assign(existing, { date: data.date, kind: data.kind, summary: data.summary, notes: data.notes });
+        Object.assign(existing, { date: data.date, kind: data.kind, summary: data.summary, notes: data.notes, contactId: data.contactId || '' });
       } else {
-        acct.activities.push({ id: uid(), date: data.date, kind: data.kind, summary: data.summary, notes: data.notes, createdAt: new Date().toISOString() });
+        acct.activities.push({ id: uid(), date: data.date, kind: data.kind, summary: data.summary, notes: data.notes, contactId: data.contactId || '', createdAt: new Date().toISOString() });
         acct.nextFollowUp = data.nextFollowUp || '';
         acct.stage = data.stage;
         if (data.addTask && data.nextFollowUp) {
@@ -893,7 +1195,7 @@
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (!el || el.closest('#modal-form')) return;
-    const { act, id, kid, hid, tid } = el.dataset;
+    const { act, id, kid, hid, tid, cid } = el.dataset;
     const acct = id && getAccount(id);
 
     switch (act) {
@@ -954,16 +1256,35 @@
         toast(`Copied ${copied} item${copied === 1 ? '' : 's'} to ${fmtDate(next, { month: 'short', day: 'numeric' })}`);
         return;
       }
+      case 'new-contact': return contactForm(acct);
+      case 'edit-contact': return contactForm(acct, acct.contacts.find((c) => c.id === cid));
+      case 'primary-contact':
+        acct.contacts.forEach((c) => { c.primary = c.id === cid; }); touch(acct); save(); rerender(); return;
+      case 'del-contact': {
+        const c = acct.contacts.find((x) => x.id === cid);
+        if (!confirm(`Remove ${c.name} from ${acct.name}?`)) return;
+        acct.contacts = acct.contacts.filter((x) => x.id !== cid);
+        if (c.primary && acct.contacts[0]) acct.contacts[0].primary = true;
+        touch(acct); save(); rerender(); return;
+      }
+      case 'open-list': ui.listId = el.dataset.lid; return go(`lists/${encodeURIComponent(el.dataset.lid)}`);
+      case 'new-list': return listForm();
+      case 'edit-list': return listForm(state.lists.find((l) => l.id === el.dataset.lid));
+      case 'del-list': {
+        const l = state.lists.find((x) => x.id === el.dataset.lid);
+        if (!confirm(`Delete the list "${l.name}"? Accounts are not affected.`)) return;
+        state.lists = state.lists.filter((x) => x !== l); ui.listId = null; save(); go('lists'); return;
+      }
+      case 'list-csv': return exportListCsv();
       case 'load-sample': loadSample(); return;
     }
   });
 
   // ---------- import / export ----------
-  $('#btn-export').addEventListener('click', async () => {
-    const name = `minicrm-backup-${today()}.json`;
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  async function downloadFile(name, text, type) {
+    const blob = new Blob([text], { type });
     // On phones, the share sheet ("Save to Files") is more reliable than a download link.
-    const file = new File([blob], name, { type: 'application/json' });
+    const file = new File([blob], name, { type });
     if (matchMedia('(pointer: coarse)').matches && navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file], title: name }); } catch (e) { /* cancelled */ }
       return;
@@ -973,7 +1294,10 @@
     a.download = name;
     a.click();
     URL.revokeObjectURL(a.href);
-  });
+  }
+
+  $('#btn-export').addEventListener('click', () =>
+    downloadFile(`minicrm-backup-${today()}.json`, JSON.stringify(state, null, 2), 'application/json'));
 
   $('#file-import').addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -1030,7 +1354,20 @@
       value: 22000, nextFollowUp: '', activities: [], keyDates: [],
     });
 
+    [northwind, brightpath, helix, summit, oak].forEach(migrateAccount);
+    const contact = (name, title, role, email = '', phone = '') => ({ id: uid(), name, title, role, email, phone, notes: '', primary: false });
+    northwind.contacts[0].role = 'Champion';
+    northwind.contacts.push(contact('Mark Chen', 'CFO', 'Decision maker', 'mark@northwind.example'), contact('Lisa Park', 'HR Manager', 'Influencer', 'lisa@northwind.example', '555-0143'));
+    helix.contacts.push(contact('Tom Reyes', 'COO', 'Decision maker', 'tom@helix.example'));
+    northwind.vendors = ['ADP TotalSource'];
+    helix.vendors = ['Paychex PEO', 'Gusto'];
+    oak.vendors = ['Insperity'];
+    summit.vendors = ['Justworks'];
     state.accounts.push(northwind, brightpath, helix, summit, oak);
+    state.lists.push(
+      { id: uid(), name: 'Prospects on a competitor PEO', criteria: { ...emptyCriteria(), type: 'prospect', vendors: COMPETITORS } },
+      { id: uid(), name: 'Enterprise accounts', criteria: { ...emptyCriteria(), tags: ['enterprise'] } },
+    );
     state.tasks.push(
       { id: uid(), date: t, time: '09:00', duration: 30, title: 'Pipeline review & inbox', accountId: '', priority: 'med', notes: '', done: false },
       { id: uid(), date: t, time: '10:30', duration: 45, title: 'Proposal walkthrough with Dana', accountId: northwind.id, priority: 'high', notes: 'Bring pricing options A/B', done: false },
