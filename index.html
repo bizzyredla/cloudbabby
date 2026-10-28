@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mini CRM</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Mini CRM</div>
+    <nav class="tabs" id="tabs">
+      <a href="#dashboard" data-view="dashboard">Dashboard</a>
+      <a href="#accounts" data-view="accounts">Accounts</a>
+      <a href="#planner" data-view="planner">Daily Planner</a>
+    </nav>
+    <div class="topbar-actions">
+      <button class="btn ghost" id="btn-export" title="Download a JSON backup">Export</button>
+      <label class="btn ghost" title="Restore from a JSON backup">
+        Import<input type="file" id="file-import" accept="application/json" hidden>
+      </label>
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <dialog id="modal">
+    <form method="dialog" id="modal-form"></form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
