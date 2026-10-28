@@ -31,9 +31,37 @@ No install, no build step: open `index.html` in a browser.
 - Search (including contacts and vendors), filter by type, stage or vendor, and sort by next
   follow-up, name, last update or value
 
+**Cadences** (sequences)
+- Multiple cadences, e.g. Insperity Renewal, ADP TotalSource Nurture, New Prospect Intro. Starter
+  templates are included and every step is editable
+- Steps have a day, type (Email, Call, LinkedIn, Visit, Text, Task), name, email subject and
+  script, with merge fields: {{first_name}}, {{company}}, {{vendor}}, {{title}}, {{industry}},
+  {{employees}}, {{renewal_date}}. Weekends can be skipped automatically
+- Enroll contacts one by one (⇉ on a contact card) or in bulk from any saved list or vendor group
+- Each cadence shows stats (active, due, overdue, paused, replied/meetings, success rate), a
+  visual step track with how many people are at each step, a "Due now" queue, and everyone's
+  progress bar, last touch, next touch and status
+- Tap a person for their full start-to-finish timeline: completed steps with dates and outcomes,
+  the current step, and planned dates for the rest. You can pause, resume, skip, finish or restart
+- "Do it" opens the step with one-tap actions (Open in Mail with subject and body filled in, Call,
+  Text, LinkedIn, Directions) and the merged script. Log the outcome and either continue (the
+  next step is scheduled automatically) or finish as meeting booked, replied, not interested or
+  bad data
+- Completed steps are logged to the account history (with the contact) and counted in the daily
+  activity plan. Due steps show on the Planner and Dashboard
+- Contacts marked "Left company" or "Do not contact" can't be enrolled and are taken out of
+  running cadences
+
+**Contact & account fields**
+- Contacts: title, role in deal, email, direct phone, mobile, LinkedIn URL, preferred channel,
+  time zone, status, primary flag, notes
+- Accounts: industry, employees, value, website, city/state, lead source, current vendors,
+  **vendor renewal date**, follow-up and revisit dates, tags, notes. Forms are grouped into
+  compact sections, and secondary details fold away on the account page
+
 **Lists**
-- Saved lists that update automatically, built from account type, current vendors, tags, stages
-  and text, e.g. "Prospects on ADP TotalSource" or "#enterprise partners"
+- Saved lists that update automatically, built from account type, current vendors, tags, stages,
+  text and "vendor renewal within N days", e.g. "Prospects on ADP TotalSource" or "#enterprise partners"
 - Built-in "By current vendor" groups with counts
 - Export any list to CSV
 

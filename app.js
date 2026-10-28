@@ -9,7 +9,7 @@
     prospect: ['New', 'Contacted', 'Qualified', 'Proposal', 'Negotiation', 'Won', 'Lost'],
     partner: ['Onboarding', 'Active', 'Strategic', 'At Risk', 'Inactive'],
   };
-  const ACTIVITY_KINDS = ['Call', 'Email', 'LinkedIn', 'Visit', 'Meeting', 'Demo', 'Note', 'Other'];
+  const ACTIVITY_KINDS = ['Call', 'Email', 'LinkedIn', 'Visit', 'Text', 'Meeting', 'Demo', 'Note', 'Other'];
   // Daily activity plan targets shown on the planner.
   const PLAN_SECTIONS = [
     { key: 'outreach', label: 'Calls / Emails / LinkedIn', short: 'Outreach', count: 25, kinds: ['Call', 'Email', 'LinkedIn'] },
@@ -26,6 +26,76 @@
   ];
   const NO_VENDOR = 'None / in-house';
   const CONTACT_ROLES = ['Decision maker', 'Champion', 'Influencer', 'HR', 'Finance', 'Operations', 'Executive', 'Other'];
+  const CONTACT_STATUSES = ['Active', 'Left company', 'Do not contact'];
+  const CHANNELS = ['Email', 'Phone', 'Mobile / text', 'LinkedIn', 'In person'];
+  const TIMEZONES = ['Eastern', 'Central', 'Mountain', 'Pacific', 'Alaska', 'Hawaii'];
+  const LEAD_SOURCES = ['Referral', 'Partner / broker', 'Inbound', 'Cold outreach', 'Event', 'Existing client', 'Other'];
+
+  // Cadence step types: how each looks, what it logs as, which daily-plan section it counts toward.
+  const STEP_TYPES = {
+    email: { label: 'Email', icon: '✉', kind: 'Email', plan: 'outreach', outcomes: ['Sent', 'Replied', 'Bounced'] },
+    call: { label: 'Call', icon: '☎', kind: 'Call', plan: 'outreach', outcomes: ['Connected', 'Left voicemail', 'No answer', 'Wrong number', 'Replied'] },
+    linkedin: { label: 'LinkedIn', icon: 'in', kind: 'LinkedIn', plan: 'outreach', outcomes: ['Connection request sent', 'Message sent', 'Viewed profile', 'Replied'] },
+    visit: { label: 'Visit', icon: '⌂', kind: 'Visit', plan: 'visits', outcomes: ['Met in person', 'Dropped off materials', 'Nobody available'] },
+    text: { label: 'Text', icon: '✆', kind: 'Text', outcomes: ['Sent', 'Replied'] },
+    task: { label: 'Task', icon: '✓', kind: 'Note', outcomes: ['Done'] },
+  };
+  const EXIT_OUTCOMES = {
+    continue: 'Continue to next step', meeting: 'Meeting booked: finish', replied: 'Replied / engaged: finish',
+    notinterested: 'Not interested: finish', bad: 'Bad data / left company: finish',
+  };
+  const FINISH_LABELS = { completed: 'Completed all steps', meeting: 'Meeting booked', replied: 'Replied', notinterested: 'Not interested', bad: 'Bad data' };
+  const CADENCE_COLORS = ['#2f6fed', '#d9480f', '#0f8a6a', '#8a4bd6', '#c2255c', '#c98a00', '#0b7285'];
+
+  // Starter cadences: [day, type, step name, subject, script].
+  const CADENCE_TEMPLATES = [
+    {
+      name: 'Insperity Renewal', color: '#d9480f',
+      description: 'Prospects on Insperity approaching renewal. Lead with a side-by-side benefits and cost comparison.',
+      steps: [
+        [1, 'email', 'Intro: renewal comparison', 'Quick idea before your Insperity renewal',
+          'Hi {{first_name}},\n\nWith {{company}}\'s Insperity renewal coming up ({{renewal_date}}), many companies your size compare benefits and admin costs side by side before signing again. I can put together a no-obligation comparison with TriNet in about 15 minutes of your time.\n\nOpen to a quick call next week?\n\nThanks,'],
+        [3, 'call', 'Discovery call', '',
+          'Reference the email.\n- When is the renewal?\n- How many employees are on benefits?\n- What do you like / dislike about Insperity?\n- What was your last renewal increase?'],
+        [4, 'linkedin', 'LinkedIn connect', '', 'Hi {{first_name}}, I help growing companies like {{company}} with HR and benefits. Would be glad to connect.'],
+        [7, 'email', 'Value: benefits comparison', 'Benefits comparison for {{company}}',
+          'Hi {{first_name}},\n\nFollowing up. A TriNet comparison covers medical plan options, employer cost per employee, HR support and technology. Happy to run the numbers for {{company}}.\n\nBest,'],
+        [9, 'call', 'Follow-up call + voicemail', '', 'Short voicemail: renewal timing + free comparison offer. Ask for 15 minutes.'],
+        [12, 'visit', 'Drop-in visit', '', 'Drop off the comparison one-pager and a business card. Ask for the decision maker.'],
+        [16, 'email', 'Case study', 'How a company like {{company}} handled renewal',
+          'Hi {{first_name}},\n\nA company similar to {{company}} moved from Insperity to TriNet at renewal and lowered their benefits spend while adding plan choice. Worth a 15-minute look before you sign?\n\nBest,'],
+        [21, 'email', 'Breakup', 'Should I close the loop?',
+          'Hi {{first_name}},\n\nI haven\'t heard back, so I\'ll assume the timing isn\'t right. If a renewal comparison would help later, just reply and I\'ll put it together.\n\nAll the best,'],
+      ],
+    },
+    {
+      name: 'ADP TotalSource Nurture', color: '#2f6fed',
+      description: 'Long-term nurture for ADP TotalSource clients. Stay top of mind until renewal or a pain point.',
+      steps: [
+        [1, 'email', 'Intro & value', 'Supporting {{company}} beyond payroll',
+          'Hi {{first_name}},\n\nI know {{company}} works with ADP TotalSource today. I\'m not asking you to switch, just to keep TriNet in mind for your next benefits review. Mind if I send a short overview?\n\nBest,'],
+        [5, 'linkedin', 'LinkedIn connect', '', 'Hi {{first_name}}, I share HR and benefits trends for companies like {{company}}. Would be glad to connect.'],
+        [12, 'call', 'Check-in call', '', 'Ask about their service experience, benefits renewal month and hiring plans.'],
+        [25, 'email', 'Industry insight', '{{industry}} benefits benchmarks',
+          'Hi {{first_name}},\n\nSharing a quick benchmark on what {{industry}} companies are offering in benefits this year. Happy to walk you through how {{company}} compares.\n\nBest,'],
+        [40, 'visit', 'In-person touch', '', 'Stop by with something useful: a compliance calendar or benefits benchmark.'],
+        [60, 'call', 'Renewal timing call', '', 'Confirm the renewal date and offer a comparison 90 days before it.'],
+      ],
+    },
+    {
+      name: 'New Prospect Intro', color: '#0f8a6a',
+      description: 'First touches for a brand-new prospect.',
+      steps: [
+        [1, 'call', 'Intro call', '', 'Introduce yourself. Ask about their current HR / payroll / benefits setup and biggest headache.'],
+        [1, 'email', 'Intro email', 'Introduction: HR & benefits for {{company}}',
+          'Hi {{first_name}},\n\nI tried you by phone. I help companies like {{company}} simplify HR, benefits and payroll. Would a 15-minute call this week work?\n\nBest,'],
+        [3, 'linkedin', 'LinkedIn connect', '', 'Hi {{first_name}}, I work with companies like {{company}} on HR and benefits. Would be glad to connect.'],
+        [6, 'call', 'Follow-up call', '', 'Reference the email and LinkedIn note. Offer a quick benefits review.'],
+        [10, 'email', 'Final follow-up', 'Closing the loop',
+          'Hi {{first_name}},\n\nI\'ll close the loop for now. If HR or benefits becomes a priority for {{company}}, I\'d be glad to help.\n\nBest,'],
+      ],
+    },
+  ];
   const DAY_START = 7;
   const DAY_END = 19;
 
@@ -79,7 +149,7 @@
 
   // ---------- state ----------
   let state = load();
-  const ui = { search: '', typeFilter: 'all', stageFilter: 'all', vendorFilter: 'all', sort: 'followup', sortDir: 1, plannerDate: today(), listId: null, navs: 0 };
+  const ui = { search: '', typeFilter: 'all', stageFilter: 'all', vendorFilter: 'all', sort: 'followup', sortDir: 1, plannerDate: today(), listId: null, navs: 0, cadFilter: 'active' };
   // Per-device view preferences (layout choice), not synced.
   const PREFS_KEY = 'minicrm.prefs';
   try { Object.assign(ui, JSON.parse(localStorage.getItem(PREFS_KEY)) || {}); } catch (e) { /* defaults */ }
@@ -89,7 +159,7 @@
     try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType })); } catch (e) { /* ignore */ }
   };
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], deleted: {} }; }
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
@@ -139,6 +209,8 @@
       for (const c of contacts) yield ['c:' + c.id, c, { ...c, _ts: undefined }];
     }
     for (const l of st.lists) yield ['l:' + l.id, l, { ...l, _ts: undefined }];
+    for (const c of st.cadences) yield ['cad:' + c.id, c, { ...c, _ts: undefined }];
+    for (const e of st.enrollments) yield ['enr:' + e.id, e, { ...e, _ts: undefined }];
     for (const t of st.tasks) yield ['t:' + t.id, t, { ...t, _ts: undefined }];
     for (const [d, day] of Object.entries(st.days)) yield ['d:' + d, day, { ...day, _ts: undefined }];
   }
@@ -190,10 +262,14 @@
     for (const [d, day] of Object.entries(R.days)) days[d] = newer(days[d], day);
     for (const [d, day] of Object.entries(days)) if (!alive('d:' + d, day)) delete days[d];
 
-    return { ...emptyState(), accounts: merged, tasks: mergeList(L.tasks, R.tasks, 't:'), days, lists: mergeList(L.lists, R.lists, 'l:'), deleted };
+    return { ...emptyState(), accounts: merged, tasks: mergeList(L.tasks, R.tasks, 't:'), days, lists: mergeList(L.lists, R.lists, 'l:'),
+      cadences: mergeList(L.cadences, R.cadences, 'cad:'), enrollments: mergeList(L.enrollments, R.enrollments, 'enr:'), deleted };
   }
 
-  const toPayload = (st) => ({ version: 1, accounts: st.accounts, tasks: st.tasks, days: st.days, lists: st.lists, deleted: st.deleted });
+  const toPayload = (st) => ({
+    version: 1, accounts: st.accounts, tasks: st.tasks, days: st.days, lists: st.lists,
+    cadences: st.cadences, enrollments: st.enrollments, deleted: st.deleted,
+  });
 
   const getAccount = (id) => state.accounts.find((a) => a.id === id);
   const primaryContact = (a) => a.contacts.find((c) => c.primary) || a.contacts[0] || null;
@@ -204,7 +280,7 @@
     return [...COMPETITORS, ...[...used].filter((v) => !COMPETITORS.includes(v) && v !== NO_VENDOR).sort(), NO_VENDOR];
   };
   const haystack = (a) => [a.name, a.industry, a.tags, a.notes, ...a.vendors,
-    ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone])].join(' ').toLowerCase();
+    a.location, ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone, c.mobile])].join(' ').toLowerCase();
   const vendorPills = (a) => a.vendors.map((v) => `<span class="pill vendor">${esc(v)}</span>`).join(' ');
   const getDay = (iso) => state.days[iso] || { priorities: ['', '', ''], notes: '' };
   const findAccountByName = (name) => {
@@ -251,7 +327,7 @@
   }
 
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences };
   const TAB_FOR = { account: 'accounts' };
 
   function route() {
@@ -260,6 +336,7 @@
     if (view === 'account') ui.recordId = arg;
     if (view === 'planner' && arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)) ui.plannerDate = arg;
     if (view === 'lists' && arg) ui.listId = decodeURIComponent(arg);
+    if (view === 'cadences' && arg) ui.cadenceId = arg;
     $$('#tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === (TAB_FOR[view] || view)));
     views[view]();
   }
@@ -319,6 +396,7 @@
         <div class="card stat"><div class="num">${money(openPipeline)}</div><div class="label">Open prospect pipeline</div></div>
         <div class="card stat ${overdue.length ? 'alert' : ''}"><div class="num">${overdue.length}</div><div class="label">Overdue items</div></div>
         <div class="card stat"><div class="num">${dueToday.length}</div><div class="label">Due today</div></div>
+        <a class="card stat ${dueSteps(t).length ? 'alert' : ''}" href="#cadences" style="text-decoration:none;color:inherit"><div class="num">${dueSteps(t).length}</div><div class="label">Cadence steps due</div></a>
         <a class="card stat" href="#planner/${t}" style="text-decoration:none;color:inherit"><div class="num">${planDone}/${planTotal}</div><div class="label">Today's activity plan</div></a>
       </div>
 
@@ -362,10 +440,10 @@
   /** Remove every record. Tombstones carry the erase to other synced devices. */
   function eraseAll() {
     const typed = prompt(
-      `This permanently deletes all ${state.accounts.length} accounts, tasks, planner days and lists` +
+      `This permanently deletes all ${state.accounts.length} accounts, tasks, planner days, lists and cadences` +
       `${syncCfg ? ' on this device AND every synced device' : ' on this device'}.\n\nExport a backup first if you might need it.\n\nType DELETE to confirm.`);
     if ((typed || '').trim().toUpperCase() !== 'DELETE') { if (typed !== null) toast('Nothing was deleted'); return; }
-    state.accounts = []; state.tasks = []; state.lists = []; state.days = {};
+    state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = [];
     ui.listId = null;
     save(); toast('All data erased'); go('dashboard');
   }
@@ -394,10 +472,11 @@
     value: (x, y) => (Number(y.value) || 0) - (Number(x.value) || 0),
     followup: (x, y) => (x.nextFollowUp || FAR).localeCompare(y.nextFollowUp || FAR),
     revisit: (x, y) => (x.revisitDate || FAR).localeCompare(y.revisitDate || FAR),
+    renewal: (x, y) => (x.vendorRenewal || FAR).localeCompare(y.vendorRenewal || FAR),
     lasttouch: (x, y) => ((lastActivity(y) || {}).date || '').localeCompare((lastActivity(x) || {}).date || ''),
     updated: (x, y) => (y.updatedAt || '').localeCompare(x.updatedAt || ''),
   };
-  const SORT_LABELS = { followup: 'Next follow-up', revisit: 'Next revisit', name: 'Name', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', updated: 'Recently updated' };
+  const SORT_LABELS = { followup: 'Next follow-up', revisit: 'Next revisit', renewal: 'Vendor renewal', name: 'Name', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', updated: 'Recently updated' };
   const sortAccounts = (list) => list.sort((x, y) => SORTERS[ui.sort](x, y) * ui.sortDir || x.name.localeCompare(y.name));
 
   function filteredAccounts() {
@@ -436,7 +515,7 @@
       <div class="card table-card">
         <div class="table-wrap">
           <table class="table acct-table">
-            <thead><tr>${th('Account', 'name')}${th('Stage', 'stage')}${th('Primary contact')}${th('Current vendors')}${th('Value', 'value')}${th('Follow-up', 'followup')}${th('Revisit', 'revisit')}${th('Last touch', 'lasttouch')}</tr></thead>
+            <thead><tr>${th('Account', 'name')}${th('Stage', 'stage')}${th('Primary contact')}${th('Current vendors')}${th('Renewal', 'renewal')}${th('Value', 'value')}${th('Follow-up', 'followup')}${th('Revisit', 'revisit')}${th('Last touch', 'lasttouch')}</tr></thead>
             <tbody>${list.map((a) => {
               const p = primaryContact(a);
               const last = lastActivity(a);
@@ -445,6 +524,7 @@
                 <td>${esc(a.stage)}</td>
                 <td>${p ? `${esc(p.name)}${p.title ? `<div class="small muted">${esc(p.title)}</div>` : ''}` : '<span class="muted">—</span>'}${a.contacts.length > 1 ? `<div class="small muted">+${a.contacts.length - 1} more</div>` : ''}</td>
                 <td>${vendorPills(a) || '<span class="muted">—</span>'}</td>
+                <td>${a.vendorRenewal ? `<span class="small">${fmtDate(a.vendorRenewal, { month: 'short', day: 'numeric', year: '2-digit' })}</span>` : '<span class="muted">—</span>'}</td>
                 <td class="num">${a.value ? money(a.value) : '<span class="muted">—</span>'}</td>
                 <td>${dueChip(a.nextFollowUp)}</td>
                 <td>${dueChip(a.revisitDate)}</td>
@@ -615,14 +695,23 @@
 
         <div class="facts">
           <div class="span-all"><span>Current vendors</span>${a.vendors.length ? vendorPills(a) : '—'}</div>
-          <div><span>Website</span>${a.website ? `<a href="${esc(/^https?:/.test(a.website) ? a.website : 'https://' + a.website)}" target="_blank" rel="noopener">${esc(a.website)}</a>` : '—'}</div>
-          <div><span>Industry</span>${esc(a.industry) || '—'}</div>
+          <div><span>Vendor renewal</span>${a.vendorRenewal ? `${fmtDate(a.vendorRenewal)} <span class="small muted">${relDays(a.vendorRenewal)}</span>` : '—'}</div>
+          <div><span>Employees</span>${esc(a.employees) || '—'}</div>
           <div><span>${a.type === 'partner' ? 'Annual value' : 'Deal value'}</span>${money(a.value)}</div>
           <div><span>Next follow-up</span>${a.nextFollowUp ? `<span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp)}</span> <span class="small muted">${relDays(a.nextFollowUp)}</span>` : '—'}</div>
           <div><span>Next revisit</span>${a.revisitDate ? `<span class="pill ${dueClass(a.revisitDate)}">${fmtDate(a.revisitDate)}</span> <span class="small muted">${relDays(a.revisitDate)}</span>${a.revisitNote ? `<div class="small muted">${esc(a.revisitNote)}</div>` : ''}` : '—'}</div>
           <div><span>Last touch</span>${last ? `${fmtDate(last.date)} <span class="small muted">(${esc(last.kind)})</span>` : 'Never'}</div>
-          <div><span>Added</span>${fmtDate((a.createdAt || '').slice(0, 10) || null)}</div>
         </div>
+        <details class="more-details">
+          <summary>More details</summary>
+          <div class="facts">
+            <div><span>Industry</span>${esc(a.industry) || '—'}</div>
+            <div><span>Location</span>${esc(a.location) || '—'}</div>
+            <div><span>Website</span>${a.website ? `<a href="${esc(/^https?:/.test(a.website) ? a.website : 'https://' + a.website)}" target="_blank" rel="noopener">${esc(a.website)}</a>` : '—'}</div>
+            <div><span>Lead source</span>${esc(a.leadSource) || '—'}</div>
+            <div><span>Added</span>${fmtDate((a.createdAt || '').slice(0, 10) || null)}</div>
+          </div>
+        </details>
 
         <div>
           <div class="section-head"><h2 style="margin:0">Contacts <span class="muted small">(${a.contacts.length})</span></h2><button class="btn sm ghost" data-act="new-contact" data-id="${a.id}">+ Add contact</button></div>
@@ -631,14 +720,16 @@
               <div class="row spread">
                 <div><strong>${esc(c.name)}</strong> ${c.primary ? '<span class="pill primary">Primary</span>' : ''}</div>
                 <div class="row" style="gap:0">
+                  <button class="icon-btn" data-act="enroll-contact" data-id="${a.id}" data-cid="${c.id}" title="Add to cadence">⇉</button>
                   ${c.primary ? '' : `<button class="icon-btn" data-act="primary-contact" data-id="${a.id}" data-cid="${c.id}" title="Make primary">★</button>`}
                   <button class="icon-btn" data-act="edit-contact" data-id="${a.id}" data-cid="${c.id}" title="Edit">✎</button>
                   <button class="icon-btn" data-act="del-contact" data-id="${a.id}" data-cid="${c.id}" title="Delete">✕</button>
                 </div>
               </div>
               ${c.title || c.role ? `<div class="small muted">${esc([c.title, c.role].filter(Boolean).join(' · '))}</div>` : ''}
-              ${c.email ? `<div class="small"><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>` : ''}
-              ${c.phone ? `<div class="small"><a href="tel:${esc(c.phone)}">${esc(c.phone)}</a></div>` : ''}
+              ${c.status && c.status !== 'Active' ? `<span class="pill overdue">${esc(c.status)}</span>` : ''}
+              ${contactLinks(c, a)}
+              ${enrollmentsFor(c.id).map((p) => `<button type="button" class="cad-badge" style="--c:${p.cad.color}" data-act="enr-open" data-eid="${p.e.id}">${esc(p.cad.name)} · ${p.e.step + 1}/${p.cad.steps.length}${p.e.status === 'paused' ? ' · paused' : ` · next ${esc(fmtDate(p.e.dueDate, { month: 'short', day: 'numeric' }))}`}</button>`).join('')}
               ${c.notes ? `<div class="small muted" style="white-space:pre-wrap;margin-top:.25rem">${esc(c.notes)}</div>` : ''}
             </div>`).join('')}</div>` : '<div class="empty">No contacts yet. Add the decision maker, champion, HR lead…</div>'}
         </div>
@@ -754,6 +845,22 @@
           <div class="card priorities">
             <h3>Top 3 priorities</h3>
             ${[0, 1, 2].map((i) => `<input data-prio="${i}" placeholder="Priority ${i + 1}" value="${esc(day.priorities[i] || '')}">`).join('')}
+          </div>
+
+          <div class="card">
+            <div class="row spread"><h3 style="margin:0">Cadence steps due</h3><a class="small" href="#cadences">Cadences →</a></div>
+            ${(() => {
+              const steps = dueSteps(d);
+              return steps.length ? `<div class="stack" style="margin-top:.5rem">${steps.map((p) => `
+                <div class="task cad-task" style="--c:${p.cad.color}">
+                  ${stepIcon(p.step)}
+                  <div class="t-main">
+                    <div class="t-title">${esc(p.contact.name)} <span class="muted">· ${esc(p.acct.name)}</span></div>
+                    <div class="t-sub">${esc(p.cad.name)} · ${esc(p.step.title || stepType(p.step).label)}${p.e.dueDate < d ? ` · <span class="pill overdue">${esc(relDays(p.e.dueDate))}</span>` : ''}</div>
+                  </div>
+                  <button class="btn sm" data-act="enr-log" data-eid="${p.e.id}">Do it</button>
+                </div>`).join('')}</div>` : '<div class="empty">No cadence steps due.</div>';
+            })()}
           </div>
 
           <div class="card">
@@ -1030,7 +1137,7 @@
   // Saved lists are filters: an account matches when it meets every filled-in section and any
   // value ticked within a section. Built-in "vendor:<name>" lists group accounts by current vendor.
   const VENDOR_LIST = 'vendor:';
-  const emptyCriteria = () => ({ type: 'all', stages: [], tags: [], vendors: [], text: '' });
+  const emptyCriteria = () => ({ type: 'all', stages: [], tags: [], vendors: [], text: '', renewalDays: 0 });
 
   function matchesCriteria(a, c) {
     if (c.type !== 'all' && a.type !== c.type) return false;
@@ -1038,6 +1145,10 @@
     if (c.tags.length && !tagList(a).some((t) => c.tags.includes(t.toLowerCase()))) return false;
     if (c.vendors.length && !a.vendors.some((v) => c.vendors.includes(v))) return false;
     if (c.text && !haystack(a).includes(c.text.toLowerCase())) return false;
+    if (c.renewalDays) {
+      const n = a.vendorRenewal ? daysBetween(today(), a.vendorRenewal) : -1;
+      if (n < 0 || n > c.renewalDays) return false;
+    }
     return true;
   }
 
@@ -1061,6 +1172,7 @@
     if (c.tags.length) parts.push('Tag: ' + c.tags.map((t) => '#' + t).join(' or '));
     if (c.stages.length) parts.push('Stage: ' + c.stages.join(' or '));
     if (c.text) parts.push(`Contains "${c.text}"`);
+    if (c.renewalDays) parts.push(`Vendor renewal within ${c.renewalDays} days`);
     return parts.length ? parts : ['All accounts'];
   }
 
@@ -1128,7 +1240,7 @@
 
   const readCriteria = (fd) => ({
     type: fd.get('type') || 'all', vendors: fd.getAll('vendors'), tags: fd.getAll('tags'),
-    stages: fd.getAll('stages'), text: (fd.get('text') || '').trim(),
+    stages: fd.getAll('stages'), text: (fd.get('text') || '').trim(), renewalDays: Number(fd.get('renewalDays')) || 0,
   });
 
   function listForm(existing) {
@@ -1145,7 +1257,10 @@
       <div class="field"><span>Current vendor is any of</span>${checks('vendors', allVendors(), c.vendors)}</div>
       <div class="field"><span>Tagged with any of</span>${checks('tags', allTags(), c.tags, (t) => '#' + t)}</div>
       <div class="field"><span>Stage is any of</span>${checks('stages', [...STAGES.prospect, ...STAGES.partner], c.stages)}</div>
-      ${field('Name, contacts or notes contain', `<input name="text" value="${esc(c.text)}">`)}
+      <div class="grid-2">
+        ${field('Name, contacts or notes contain', `<input name="text" value="${esc(c.text)}">`)}
+        ${field('Vendor renewal within (days)', `<input name="renewalDays" type="number" min="0" step="15" value="${c.renewalDays || ''}" placeholder="e.g. 120">`)}
+      </div>
       <div class="small" id="list-preview"></div>`, (data, fd) => {
       if (!data.name.trim()) return false;
       const criteria = readCriteria(fd);
@@ -1170,21 +1285,600 @@
     const list = resolveList(ui.listId);
     if (!list) return;
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Account', 'Type', 'Stage', 'Industry', 'Value', 'Current vendors', 'Primary contact', 'Title', 'Email', 'Phone', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
+    const rows = [['Account', 'Type', 'Stage', 'Industry', 'Employees', 'Location', 'Value', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
     for (const a of listAccounts(list)) {
       const p = primaryContact(a) || {};
-      rows.push([a.name, a.type, a.stage, a.industry, a.value, a.vendors.join('; '), p.name, p.title, p.email, p.phone,
+      rows.push([a.name, a.type, a.stage, a.industry, a.employees, a.location, a.value, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone,
         a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.tags]);
     }
     downloadFile(`${list.name.replace(/[^\w-]+/g, '-')}-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
   }
+
+  // ---------- cadences ----------
+  // A cadence is an ordered list of steps ("Day 3 · Call"). People (account contacts) are enrolled
+  // into it; each enrollment tracks its current step, when that step is due and what happened at
+  // every step so far. Completing a step logs it to the account history and the daily plan.
+  const cadenceById = (id) => state.cadences.find((c) => c.id === id);
+  const stepType = (s) => STEP_TYPES[s.type] || STEP_TYPES.task;
+  const stepIcon = (s, cls = '') => `<span class="st-icon st-${s.type} ${cls}" title="${esc(stepType(s).label)}">${stepType(s).icon}</span>`;
+  const cadenceDays = (cad) => cad.steps.length ? cad.steps[cad.steps.length - 1].day : 0;
+  const initials = (name) => (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join('');
+
+  const isWeekend = (iso) => [0, 6].includes(fromISO(iso).getDay());
+  const nextWorkday = (iso) => { while (isWeekend(iso)) iso = addDays(iso, 1); return iso; };
+  /** Move n days forward, counting only weekdays when the cadence skips weekends. */
+  function shiftDays(iso, n, skipWeekends) {
+    if (!skipWeekends) return addDays(iso, n);
+    let d = nextWorkday(iso);
+    for (let i = 0; i < n; i++) d = nextWorkday(addDays(d, 1));
+    return d;
+  }
+
+  /** The enrollment with its cadence, account and contact, or null if any of them is gone. */
+  function enrollmentParts(e) {
+    const cad = cadenceById(e.cadenceId);
+    const acct = getAccount(e.accountId);
+    const contact = acct && acct.contacts.find((c) => c.id === e.contactId);
+    if (!cad || !acct || !contact || !cad.steps.length) return null;
+    return { e, cad, acct, contact, step: cad.steps[Math.min(e.step, cad.steps.length - 1)] };
+  }
+  const liveEnrollments = (cadId) => state.enrollments
+    .filter((e) => !cadId || e.cadenceId === cadId).map(enrollmentParts).filter(Boolean);
+  const isDue = (e, on = today()) => e.status === 'active' && e.dueDate <= on;
+  const enrollmentsFor = (contactId) => liveEnrollments().filter((p) => p.contact.id === contactId && p.e.status !== 'finished');
+
+  /** Date for every step: actual dates for finished steps, due/projected dates for the rest. */
+  function stepDates(p) {
+    const { e, cad } = p;
+    const dates = [];
+    cad.steps.forEach((s, i) => {
+      const h = [...e.history].reverse().find((x) => x.stepId === s.id);
+      if (i < e.step || (e.status === 'finished' && h)) dates.push(h ? h.date : null);
+      else if (i === e.step && e.status !== 'finished') dates.push(e.dueDate);
+      else {
+        const prev = dates[i - 1] || today();
+        dates.push(shiftDays(prev, Math.max(0, s.day - cad.steps[i - 1].day), cad.skipWeekends));
+      }
+    });
+    return dates;
+  }
+
+  function lastTouch(p) {
+    const h = [...p.e.history].reverse().find((x) => !x.skipped);
+    if (h) {
+      const s = p.cad.steps.find((x) => x.id === h.stepId);
+      return { date: h.date, label: s ? stepType(s).label : 'Touch', outcome: h.outcome };
+    }
+    const act = [...p.acct.activities].filter((x) => x.contactId === p.contact.id).sort((a, b) => b.date.localeCompare(a.date))[0];
+    return act ? { date: act.date, label: act.kind, outcome: '' } : null;
+  }
+
+  function enroll(cad, acct, contact, startDate) {
+    const start = cad.skipWeekends ? nextWorkday(startDate) : startDate;
+    state.enrollments.push({
+      id: uid(), cadenceId: cad.id, accountId: acct.id, contactId: contact.id, startDate: start,
+      step: 0, dueDate: shiftDays(start, Math.max(0, cad.steps[0].day - 1), cad.skipWeekends),
+      status: 'active', outcome: '', history: [], addedAt: new Date().toISOString(),
+    });
+  }
+
+  function advance(p, fromDate) {
+    const { e, cad } = p;
+    if (e.step + 1 >= cad.steps.length) return finishEnrollment(e, 'completed', fromDate);
+    const gap = Math.max(0, cad.steps[e.step + 1].day - cad.steps[e.step].day);
+    e.step += 1;
+    e.dueDate = shiftDays(fromDate, gap, cad.skipWeekends);
+  }
+
+  function finishEnrollment(e, outcome, date = today()) {
+    e.status = 'finished';
+    e.outcome = outcome;
+    e.finishedAt = date;
+  }
+
+  /** Merge fields for step subjects and scripts. */
+  function fillTemplate(text, p) {
+    const { acct, contact } = p;
+    const vals = {
+      first_name: (contact.name || '').split(/\s+/)[0], name: contact.name, title: contact.title || '',
+      company: acct.name, vendor: acct.vendors.find((v) => v !== NO_VENDOR) || 'your current provider',
+      industry: acct.industry || 'your industry', employees: acct.employees || '',
+      renewal_date: acct.vendorRenewal ? fmtDate(acct.vendorRenewal) : 'soon',
+    };
+    return (text || '').replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => (k in vals ? vals[k] : m));
+  }
+
+  /** Put a completed cadence touch into that day's activity plan so it counts toward the targets. */
+  function addPlanTouch(d, secKey, row) {
+    const rows = getPlan(d, true)[secKey];
+    const slot = rows.findIndex((r) => !r.name.trim());
+    if (slot === -1) rows.push(row); else rows[slot] = row;
+  }
+
+  // ----- cadence page -----
+  function renderCadences() {
+    if (!state.cadences.length) {
+      $('#view').innerHTML = `
+        <div class="page-head"><h1>Cadences</h1></div>
+        <div class="card stack">
+          <div>
+            <h2>Build your first cadence</h2>
+            <p class="muted" style="margin:0">A cadence is a planned series of calls, emails, LinkedIn touches and visits. Enroll contacts and the app tells you who to touch each day and what to say.</p>
+          </div>
+          <div class="tpl-grid">
+            ${CADENCE_TEMPLATES.map((t, i) => `
+              <button type="button" class="tpl-card" data-act="cad-template" data-tpl="${i}" style="--c:${t.color}">
+                <strong>${esc(t.name)}</strong>
+                <span class="small muted">${esc(t.description)}</span>
+                <span class="tpl-steps">${t.steps.map((s) => stepIcon({ type: s[1] })).join('')}</span>
+                <span class="small muted">${t.steps.length} steps · ${t.steps[t.steps.length - 1][0]} days</span>
+              </button>`).join('')}
+            <button type="button" class="tpl-card blank" data-act="cad-new"><strong>+ Blank cadence</strong><span class="small muted">Start from scratch</span></button>
+          </div>
+        </div>`;
+      return;
+    }
+    if (!cadenceById(ui.cadenceId)) ui.cadenceId = state.cadences[0].id;
+    const cad = cadenceById(ui.cadenceId);
+    const people = liveEnrollments(cad.id);
+    const t = today();
+    const active = people.filter((p) => p.e.status === 'active');
+    const due = active.filter((p) => isDue(p.e)).sort((a, b) => a.e.dueDate.localeCompare(b.e.dueDate));
+    const overdue = due.filter((p) => p.e.dueDate < t);
+    const finished = people.filter((p) => p.e.status === 'finished');
+    const won = finished.filter((p) => ['meeting', 'replied'].includes(p.e.outcome));
+    const atStep = cad.steps.map((s, i) => people.filter((p) => p.e.status !== 'finished' && p.e.step === i).length);
+    const filters = { active: 'Active', due: 'Due', paused: 'Paused', finished: 'Finished', all: 'All' };
+    const shown = people.filter((p) => ({
+      active: p.e.status === 'active', due: isDue(p.e), paused: p.e.status === 'paused', finished: p.e.status === 'finished', all: true,
+    })[ui.cadFilter]).sort((a, b) => (a.e.status === 'finished') - (b.e.status === 'finished') || (a.e.dueDate || '').localeCompare(b.e.dueDate || ''));
+
+    $('#view').innerHTML = `
+      <div class="page-head">
+        <h1>Cadences</h1>
+        <button class="btn ghost" data-act="cad-new">+ New cadence</button>
+      </div>
+      <div class="cad-switch">
+        ${state.cadences.map((c) => {
+          const live = liveEnrollments(c.id);
+          const dueN = live.filter((p) => isDue(p.e)).length;
+          return `<button type="button" class="cad-chip ${c.id === cad.id ? 'active' : ''}" data-act="cad-open" data-cad="${c.id}" style="--c:${c.color}">
+            <span class="dot"></span>${esc(c.name)} <span class="muted">${live.filter((p) => p.e.status !== 'finished').length}</span>
+            ${dueN ? `<span class="due-badge">${dueN} due</span>` : ''}
+          </button>`;
+        }).join('')}
+      </div>
+
+      <div class="card cad-head" style="--c:${cad.color}">
+        <div class="detail-head">
+          <div>
+            <h2 style="margin:0">${esc(cad.name)}</h2>
+            ${cad.description ? `<div class="muted small" style="margin-top:.2rem">${esc(cad.description)}</div>` : ''}
+            <div class="small muted" style="margin-top:.35rem">${cad.steps.length} steps · ${cadenceDays(cad)} days${cad.skipWeekends ? ' · skips weekends' : ''}</div>
+          </div>
+          <div class="row">
+            <button class="btn" data-act="cad-add-people">+ Add people</button>
+            <button class="btn ghost" data-act="cad-edit">Edit steps</button>
+            <button class="btn danger sm" data-act="cad-delete">Delete</button>
+          </div>
+        </div>
+        <div class="cad-stats">
+          <div><b>${active.length}</b><span>Active</span></div>
+          <div class="${due.length ? 'warn' : ''}"><b>${due.length}</b><span>Due now</span></div>
+          <div class="${overdue.length ? 'bad' : ''}"><b>${overdue.length}</b><span>Overdue</span></div>
+          <div><b>${people.filter((p) => p.e.status === 'paused').length}</b><span>Paused</span></div>
+          <div class="good"><b>${won.length}</b><span>Replied / meetings</span></div>
+          <div><b>${finished.length ? Math.round((won.length / finished.length) * 100) + '%' : '—'}</b><span>Success rate</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Steps</h3>
+        <div class="step-track">
+          ${cad.steps.map((s, i) => `
+            <div class="step-node">
+              ${stepIcon(s)}
+              <div class="step-day">Day ${s.day}</div>
+              <div class="step-title">${esc(s.title || stepType(s).label)}</div>
+              <div class="step-count ${atStep[i] ? 'on' : ''}">${atStep[i]} here</div>
+            </div>`).join('<div class="step-link"></div>')}
+        </div>
+      </div>
+
+      <div class="cad-grid">
+        <div class="card">
+          <div class="section-head"><h3 style="margin:0">Due now <span class="muted small">(${due.length})</span></h3></div>
+          ${due.length ? `<div class="queue">${due.map((p) => `
+            <div class="queue-row">
+              ${stepIcon(p.step)}
+              <div class="grow">
+                <div><strong>${esc(p.contact.name)}</strong> <span class="muted small">· ${esc(p.acct.name)}</span></div>
+                <div class="small muted">Step ${p.e.step + 1}: ${esc(p.step.title || stepType(p.step).label)}</div>
+              </div>
+              ${dueChip(p.e.dueDate)}
+              <button class="btn sm" data-act="enr-log" data-eid="${p.e.id}">Do it</button>
+              <button class="icon-btn" data-act="enr-skip" data-eid="${p.e.id}" title="Skip this step">⤼</button>
+            </div>`).join('')}</div>` : '<div class="empty">You\'re all caught up on this cadence.</div>'}
+        </div>
+
+        <div class="card">
+          <div class="section-head">
+            <h3 style="margin:0">People <span class="muted small">(${people.length})</span></h3>
+            <div class="seg">${Object.entries(filters).map(([k, l]) => `<button type="button" class="${ui.cadFilter === k ? 'active' : ''}" data-act="cad-filter" data-f="${k}">${l}</button>`).join('')}</div>
+          </div>
+          ${shown.length ? `<div class="people">${shown.map(personRow).join('')}</div>`
+            : `<div class="empty">${people.length ? 'Nobody here.' : 'No one enrolled yet. Click "+ Add people" to start.'}</div>`}
+        </div>
+      </div>`;
+  }
+
+  function progressBar(p) {
+    const { e, cad } = p;
+    const skipped = new Set(e.history.filter((h) => h.skipped).map((h) => h.stepId));
+    return `<div class="seq-bar">${cad.steps.map((s, i) => {
+      const st = i < e.step || (e.status === 'finished' && e.history.some((h) => h.stepId === s.id))
+        ? (skipped.has(s.id) ? 'skipped' : 'done')
+        : i === e.step && e.status !== 'finished' ? 'current' : 'todo';
+      return `<span class="seg-${st}" title="Day ${s.day} · ${esc(s.title || stepType(s).label)}"></span>`;
+    }).join('')}</div>`;
+  }
+
+  const statusPill = (e) => e.status === 'finished'
+    ? `<span class="pill ${['meeting', 'replied'].includes(e.outcome) ? 'won' : ''}">${esc(FINISH_LABELS[e.outcome] || 'Finished')}</span>`
+    : e.status === 'paused' ? '<span class="pill med">Paused</span>'
+    : isDue(e) ? `<span class="pill ${e.dueDate < today() ? 'overdue' : 'today'}">${e.dueDate < today() ? 'Overdue' : 'Due today'}</span>`
+    : '<span class="pill active-pill">Active</span>';
+
+  function personRow(p) {
+    const last = lastTouch(p);
+    const finished = p.e.status === 'finished';
+    return `
+      <div class="person-row" data-act="enr-open" data-eid="${p.e.id}">
+        <div class="avatar" style="--c:${p.cad.color}">${esc(initials(p.contact.name))}</div>
+        <div class="p-main">
+          <strong>${esc(p.contact.name)}</strong>
+          <div class="small muted">${p.contact.title ? esc(p.contact.title) + ' · ' : ''}<a href="#account/${p.acct.id}">${esc(p.acct.name)}</a>${p.acct.vendors.length ? ' · ' + esc(p.acct.vendors[0]) : ''}</div>
+        </div>
+        <div class="p-progress">${progressBar(p)}<div class="small muted">${finished ? `Ended ${esc(relDays(p.e.finishedAt))}` : `Step ${p.e.step + 1} of ${p.cad.steps.length}`}</div></div>
+        <div class="p-last small"><span class="muted">Last touch</span><div>${last ? `${esc(last.label)} · ${esc(relDays(last.date))}` : 'None yet'}</div></div>
+        <div class="p-next small"><span class="muted">Next touch</span><div>${finished ? '—' : `${stepIcon(p.step, 'xs')} ${esc(p.step.title || stepType(p.step).label)} ${dueChip(p.e.dueDate)}`}</div></div>
+        <div class="p-status">${statusPill(p.e)}</div>
+      </div>`;
+  }
+
+  // ----- cadence modals -----
+  function contactLinks(c, acct) {
+    return `<div class="row small contact-links">
+      ${c.email ? `<a href="mailto:${esc(c.email)}">✉ ${esc(c.email)}</a>` : ''}
+      ${c.phone ? `<a href="tel:${esc(c.phone)}">☎ ${esc(c.phone)}</a>` : ''}
+      ${c.mobile ? `<a href="tel:${esc(c.mobile)}">📱 ${esc(c.mobile)}</a>` : ''}
+      ${c.linkedin ? `<a href="${esc(/^https?:/.test(c.linkedin) ? c.linkedin : 'https://' + c.linkedin)}" target="_blank" rel="noopener">in LinkedIn</a>` : ''}
+      ${c.timezone ? `<span class="muted">🕑 ${esc(c.timezone)}</span>` : ''}
+      ${c.channel ? `<span class="muted">Prefers ${esc(c.channel)}</span>` : ''}
+    </div>`;
+  }
+
+  function enrollmentDetail(eid) {
+    const p = enrollmentParts(state.enrollments.find((x) => x.id === eid) || {});
+    if (!p) return;
+    const { e, cad, acct, contact } = p;
+    const dates = stepDates(p);
+    const open = e.status !== 'finished';
+    openModal(`${contact.name} · ${cad.name}`, `
+      <div class="enr-head">
+        <div class="avatar lg" style="--c:${cad.color}">${esc(initials(contact.name))}</div>
+        <div class="grow">
+          <div><strong>${esc(contact.name)}</strong>${contact.title ? ` <span class="muted">· ${esc(contact.title)}</span>` : ''}</div>
+          <div class="small"><a href="#account/${acct.id}" data-close>${esc(acct.name)}</a> ${acct.vendors.length ? vendorPills(acct) : ''}</div>
+          ${contactLinks(contact, acct)}
+        </div>
+        ${statusPill(e)}
+      </div>
+      <ol class="seq-timeline">
+        ${cad.steps.map((s, i) => {
+          const h = [...e.history].reverse().find((x) => x.stepId === s.id);
+          const state_ = h ? (h.skipped ? 'skipped' : 'done') : i === e.step && open ? 'current' : open ? 'todo' : 'unreached';
+          const when = state_ === 'done' || state_ === 'skipped' ? fmtDate(h.date, { month: 'short', day: 'numeric' })
+            : state_ === 'unreached' ? '' : dates[i] ? `${state_ === 'current' ? 'Due' : 'Planned'} ${fmtDate(dates[i], { weekday: 'short', month: 'short', day: 'numeric' })}` : '';
+          return `
+            <li class="seq-${state_}">
+              ${stepIcon(s)}
+              <div class="grow">
+                <div class="row spread"><strong>Day ${s.day} · ${esc(s.title || stepType(s).label)}</strong><span class="small ${state_ === 'current' ? dueClass(e.dueDate) : 'muted'}">${esc(when)}</span></div>
+                ${h && !h.skipped ? `<div class="small">${esc(h.outcome || 'Done')}${h.note ? ' · ' + esc(h.note) : ''}</div>` : ''}
+                ${h && h.skipped ? '<div class="small muted">Skipped</div>' : ''}
+                ${state_ === 'current' ? `<div class="row" style="margin-top:.35rem"><button type="button" class="btn sm" data-enr="log">Do this step</button><button type="button" class="btn sm ghost" data-enr="skip">Skip</button></div>` : ''}
+              </div>
+            </li>`;
+        }).join('')}
+      </ol>
+      <div class="row enr-actions">
+        ${open ? `
+          <button type="button" class="btn ghost sm" data-enr="${e.status === 'paused' ? 'resume' : 'pause'}">${e.status === 'paused' ? '▶ Resume' : '❚❚ Pause'}</button>
+          <button type="button" class="btn ghost sm" data-enr="finish">Finish…</button>`
+        : '<button type="button" class="btn ghost sm" data-enr="restart">↺ Restart from step 1</button>'}
+        <button type="button" class="btn danger sm" data-enr="remove">Remove</button>
+      </div>`, () => {}, 'Close', { wide: true });
+    modalForm.querySelector('.modal-actions [data-close]').remove();
+    $$('[data-enr]', modalForm).forEach((b) => b.addEventListener('click', () => enrollmentAction(eid, b.dataset.enr)));
+  }
+
+  function enrollmentAction(eid, action) {
+    const e = state.enrollments.find((x) => x.id === eid);
+    const p = enrollmentParts(e);
+    if (!p) return;
+    const t = today();
+    const fromDetail = modal.open; // actions inside the person's detail re-open it afterwards
+    if (action === 'log') return logStepForm(eid);
+    if (action === 'skip') { e.history.push({ stepId: p.step.id, date: t, skipped: true }); advance(p, t); toast('Step skipped'); }
+    if (action === 'pause') { e.status = 'paused'; toast('Paused'); }
+    if (action === 'resume') { e.status = 'active'; if (e.dueDate < t) e.dueDate = p.cad.skipWeekends ? nextWorkday(t) : t; toast('Resumed'); }
+    if (action === 'restart') {
+      Object.assign(e, { step: 0, status: 'active', outcome: '', finishedAt: '', dueDate: p.cad.skipWeekends ? nextWorkday(t) : t });
+      toast('Restarted');
+    }
+    if (action === 'remove') {
+      if (!confirm(`Remove ${p.contact.name} from ${p.cad.name}? Their logged activities stay in the account history.`)) return;
+      state.enrollments = state.enrollments.filter((x) => x !== e);
+      modal.close(); save(); rerender(); return;
+    }
+    if (action === 'finish') return finishForm(eid);
+    save(); rerender();
+    if (fromDetail) enrollmentDetail(eid);
+  }
+
+  function finishForm(eid) {
+    const p = enrollmentParts(state.enrollments.find((x) => x.id === eid));
+    openModal(`Finish ${p.contact.name}'s cadence`, `
+      ${field('Outcome', `<select name="outcome">${Object.entries(FINISH_LABELS).filter(([k]) => k !== 'removed').map(([k, l]) => opt(k, l, 'meeting')).join('')}</select>`)}
+      ${field('Note', '<input name="note" placeholder="Optional">')}`, (data) => {
+      finishEnrollment(p.e, data.outcome);
+      p.acct.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `${p.cad.name}: finished (${FINISH_LABELS[data.outcome]})`, notes: data.note, contactId: p.contact.id, createdAt: new Date().toISOString() });
+      touch(p.acct);
+      toast('Cadence finished');
+    }, 'Finish');
+  }
+
+  function logStepForm(eid) {
+    const p = enrollmentParts(state.enrollments.find((x) => x.id === eid));
+    if (!p) return;
+    const { e, cad, acct, contact, step } = p;
+    const type = stepType(step);
+    const subject = fillTemplate(step.subject, p);
+    const body = fillTemplate(step.body, p);
+    const liUrl = contact.linkedin
+      ? (/^https?:/.test(contact.linkedin) ? contact.linkedin : 'https://' + contact.linkedin)
+      : `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${contact.name} ${acct.name}`)}`;
+    const actions = {
+      email: contact.email ? `<a class="btn" href="mailto:${esc(contact.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}">✉ Open in Mail</a>` : '<span class="small muted">No email on file for this contact.</span>',
+      call: [contact.phone && `<a class="btn" href="tel:${esc(contact.phone)}">☎ Call ${esc(contact.phone)}</a>`, contact.mobile && `<a class="btn ghost" href="tel:${esc(contact.mobile)}">📱 Mobile</a>`].filter(Boolean).join(' ') || '<span class="small muted">No phone on file.</span>',
+      linkedin: `<a class="btn" href="${esc(liUrl)}" target="_blank" rel="noopener">in Open LinkedIn</a>`,
+      visit: `<a class="btn" href="https://maps.apple.com/?q=${encodeURIComponent([acct.name, acct.location].filter(Boolean).join(' '))}" target="_blank" rel="noopener">⌂ Directions</a>`,
+      text: contact.mobile ? `<a class="btn" href="sms:${esc(contact.mobile)}&body=${encodeURIComponent(body)}">✆ Text ${esc(contact.mobile)}</a>` : '<span class="small muted">No mobile number on file.</span>',
+      task: '',
+    };
+    openModal(`${type.label}: ${step.title || type.label}`, `
+      <div class="enr-head">
+        ${stepIcon(step, 'lg')}
+        <div class="grow">
+          <div><strong>${esc(contact.name)}</strong>${contact.title ? ` <span class="muted">· ${esc(contact.title)}</span>` : ''} · ${esc(acct.name)}</div>
+          <div class="small muted">${esc(cad.name)} · Step ${e.step + 1} of ${cad.steps.length} · Day ${step.day}${e.dueDate < today() ? ` · <span class="pill overdue">due ${esc(relDays(e.dueDate))}</span>` : ''}</div>
+        </div>
+      </div>
+      <div class="row">${actions[step.type] || ''}</div>
+      ${subject || body ? `
+        <div class="script">
+          ${subject ? `<div class="small"><span class="muted">Subject:</span> <strong>${esc(subject)}</strong></div>` : ''}
+          ${body ? `<div class="script-body">${esc(body)}</div>` : ''}
+          <button type="button" class="btn sm ghost" id="copy-script">Copy</button>
+        </div>` : ''}
+      <div class="grid-3">
+        ${field('Outcome', `<select name="outcome" id="step-outcome">${type.outcomes.map((o) => `<option>${esc(o)}</option>`).join('')}</select>`)}
+        ${field('Then', `<select name="then" id="step-then">${Object.entries(EXIT_OUTCOMES).map(([k, l]) => opt(k, l, 'continue')).join('')}</select>`)}
+        ${field('Date', `<input name="date" type="date" value="${today()}">`)}
+        ${field('Notes', '<textarea name="note" rows="2" placeholder="What happened, next steps…"></textarea>', 'span-3')}
+      </div>`, (data) => {
+      const actId = uid();
+      acct.activities.push({
+        id: actId, date: data.date, kind: type.kind, contactId: contact.id, createdAt: new Date().toISOString(),
+        summary: `${cad.name} · ${step.title || type.label}: ${data.outcome}`, notes: data.note,
+      });
+      e.history.push({ stepId: step.id, date: data.date, outcome: data.outcome, note: data.note, activityId: actId });
+      if (type.plan) addPlanTouch(data.date, type.plan, { name: acct.name, kind: type.kind, note: `${cad.name}: ${step.title || type.label}`, done: true, activityId: actId });
+      if (data.then === 'continue') advance(p, data.date); else finishEnrollment(e, data.then, data.date);
+      touch(acct);
+      toast(e.status === 'finished' ? `${contact.name}: ${FINISH_LABELS[e.outcome]}` : `Logged · next: ${fmtDate(e.dueDate, { month: 'short', day: 'numeric' })}`);
+    }, 'Complete step', { wide: true });
+    const copy = $('#copy-script');
+    if (copy) copy.addEventListener('click', () => {
+      const text = [subject && `Subject: ${subject}`, body].filter(Boolean).join('\n\n');
+      (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => toast('Copied'), () => toast('Copy not available'));
+    });
+    $('#step-outcome').addEventListener('change', (ev) => {
+      if (/replied/i.test(ev.target.value)) $('#step-then').value = 'replied';
+    });
+  }
+
+  function addPeopleForm(cad, preset = {}) {
+    const inCad = new Set(state.enrollments.filter((e) => e.cadenceId === cad.id && e.status !== 'finished').map((e) => e.contactId));
+    const people = state.accounts.flatMap((a) => a.contacts.map((c) => ({ a, c })))
+      .sort((x, y) => x.a.name.localeCompare(y.a.name) || (y.c.primary - x.c.primary));
+    openModal(`Add people to ${cad.name}`, `
+      <div class="grid-3">
+        ${field('Show', `<select id="ap-source">
+          <option value="">All contacts</option>
+          ${state.lists.length ? `<optgroup label="Saved lists">${state.lists.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join('')}</optgroup>` : ''}
+          <optgroup label="Current vendor">${allVendors().filter((v) => state.accounts.some((a) => a.vendors.includes(v))).map((v) => `<option value="vendor:${esc(v)}">${esc(v)}</option>`).join('')}</optgroup>
+        </select>`)}
+        ${field('Search', '<input id="ap-search" type="search" placeholder="Name, title, account…">')}
+        ${field('Start date', `<input name="start" type="date" value="${today()}">`)}
+      </div>
+      <div class="row spread small">
+        <label class="row"><input type="checkbox" id="ap-primary" style="width:auto"> Primary contacts only</label>
+        <label class="row"><input type="checkbox" id="ap-all" style="width:auto"> Select all shown</label>
+      </div>
+      <div class="pick-list" id="ap-list">
+        ${people.length ? people.map(({ a, c }) => {
+          const blocked = c.status && c.status !== 'Active' ? c.status : inCad.has(c.id) ? 'Already in this cadence' : '';
+          return `<label class="pick ${blocked ? 'blocked' : ''}" data-acct="${a.id}" data-primary="${c.primary ? 1 : 0}" data-text="${esc([c.name, c.title, a.name, ...a.vendors].join(' ').toLowerCase())}">
+            <input type="checkbox" name="pick" value="${a.id}|${c.id}" ${blocked ? 'disabled' : ''} ${preset.contactId === c.id && !blocked ? 'checked' : ''}>
+            <span class="avatar sm" style="--c:${cad.color}">${esc(initials(c.name))}</span>
+            <span class="grow"><strong>${esc(c.name)}</strong>${c.title ? ` <span class="muted">· ${esc(c.title)}</span>` : ''}<div class="small muted">${esc(a.name)}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</div></span>
+            ${blocked ? `<span class="small muted">${esc(blocked)}</span>` : ''}
+          </label>`;
+        }).join('') : '<div class="empty">Add contacts to your accounts first.</div>'}
+      </div>
+      <div class="small" id="ap-count"></div>`, (data, fd) => {
+      const picks = fd.getAll('pick');
+      if (!picks.length) { toast('Pick at least one person'); return false; }
+      for (const v of picks) {
+        const [aid, cid] = v.split('|');
+        const a = getAccount(aid);
+        enroll(cad, a, a.contacts.find((c) => c.id === cid), data.start || today());
+      }
+      ui.cadenceId = cad.id;
+      toast(`Added ${picks.length} ${picks.length === 1 ? 'person' : 'people'}`);
+    }, 'Add to cadence', { wide: true });
+
+    const listIds = (src) => {
+      if (!src) return null;
+      const list = resolveList(src);
+      return list ? new Set(listAccounts(list).map((a) => a.id)) : null;
+    };
+    const refresh = () => {
+      const q = $('#ap-search').value.trim().toLowerCase();
+      const ids = listIds($('#ap-source').value);
+      const primaryOnly = $('#ap-primary').checked;
+      $$('#ap-list .pick').forEach((row) => {
+        row.hidden = (ids && !ids.has(row.dataset.acct)) || (primaryOnly && row.dataset.primary !== '1') || (q && !row.dataset.text.includes(q));
+      });
+      const n = $$('#ap-list input:checked').length;
+      $('#ap-count').textContent = `${n} selected`;
+    };
+    $('#ap-source').addEventListener('change', refresh);
+    $('#ap-search').addEventListener('input', refresh);
+    $('#ap-primary').addEventListener('change', refresh);
+    $('#ap-list').addEventListener('change', refresh);
+    $('#ap-all').addEventListener('change', (ev) => {
+      $$('#ap-list .pick:not([hidden]) input:not(:disabled)').forEach((cb) => { cb.checked = ev.target.checked; });
+      refresh();
+    });
+    refresh();
+  }
+
+  function enrollContactForm(acct, contact) {
+    if (!state.cadences.length) {
+      if (confirm('You have no cadences yet. Create one now?')) go('cadences');
+      return;
+    }
+    if (contact.status && contact.status !== 'Active') { toast(`${contact.name} is marked "${contact.status}"`); return; }
+    const current = enrollmentsFor(contact.id).map((p) => p.cad.id);
+    const choices = state.cadences.filter((c) => !current.includes(c.id));
+    if (!choices.length) { toast(`${contact.name} is already in every cadence`); return; }
+    openModal(`Add ${contact.name} to a cadence`, `
+      <div class="grid-2">
+        ${field('Cadence', `<select name="cad">${choices.map((c) => opt(c.id, `${c.name} (${c.steps.length} steps)`, ui.cadenceId)).join('')}</select>`)}
+        ${field('Start date', `<input name="start" type="date" value="${today()}">`)}
+      </div>`, (data) => {
+      const cad = cadenceById(data.cad);
+      enroll(cad, acct, contact, data.start || today());
+      toast(`${contact.name} added to ${cad.name}`);
+    }, 'Add');
+  }
+
+  function cadenceForm(existing, template) {
+    const src = existing || (template ? {
+      name: template.name, description: template.description, color: template.color, skipWeekends: true,
+      steps: template.steps.map(([day, type, title, subject, body]) => ({ id: uid(), day, type, title, subject, body })),
+    } : { name: '', description: '', color: CADENCE_COLORS[state.cadences.length % CADENCE_COLORS.length], skipWeekends: true, steps: [{ id: uid(), day: 1, type: 'email', title: 'Intro email', subject: '', body: '' }] });
+    const stepRow = (s) => `
+      <div class="step-edit">
+        <input type="hidden" name="s_id" value="${esc(s.id || uid())}">
+        <div class="step-edit-main">
+          <span class="step-num"></span>
+          <label class="day-in">Day <input name="s_day" type="number" min="1" value="${esc(s.day)}" required></label>
+          <select name="s_type">${Object.entries(STEP_TYPES).map(([k, v]) => opt(k, `${v.icon}  ${v.label}`, s.type)).join('')}</select>
+          <input name="s_title" placeholder="Step name, e.g. Discovery call" value="${esc(s.title)}">
+          <span class="step-btns">
+            <button type="button" class="icon-btn" data-step="up" title="Move up">↑</button>
+            <button type="button" class="icon-btn" data-step="down" title="Move down">↓</button>
+            <button type="button" class="icon-btn" data-step="del" title="Remove step">✕</button>
+          </span>
+        </div>
+        <details ${s.subject || s.body ? '' : ''}>
+          <summary class="small">Subject & script / template${s.subject || s.body ? ' ✓' : ''}</summary>
+          <input name="s_subject" placeholder="Email subject (email steps)" value="${esc(s.subject)}">
+          <textarea name="s_body" rows="4" placeholder="Email body, call talking points, LinkedIn note…">${esc(s.body)}</textarea>
+        </details>
+      </div>`;
+    openModal(existing ? `Edit ${existing.name}` : 'New cadence', `
+      <div class="grid-3">
+        ${field('Cadence name *', `<input name="name" required value="${esc(src.name)}" placeholder="e.g. Insperity Renewal">`, 'span-2')}
+        ${field('Color', `<select name="color">${CADENCE_COLORS.map((c, i) => opt(c, ['Blue', 'Orange', 'Green', 'Purple', 'Pink', 'Gold', 'Teal'][i], src.color)).join('')}</select>`)}
+        ${field('Description', `<input name="description" value="${esc(src.description)}" placeholder="Who it's for and the angle">`, 'span-2')}
+        <label class="row small" style="align-self:end"><input type="checkbox" name="skipWeekends" style="width:auto" ${src.skipWeekends ? 'checked' : ''}> Skip weekends</label>
+      </div>
+      <div>
+        <div class="row spread"><strong>Steps</strong><span class="small muted">Merge fields: {{first_name}} {{company}} {{vendor}} {{title}} {{industry}} {{employees}} {{renewal_date}}</span></div>
+        <div id="steps-edit">${src.steps.map(stepRow).join('')}</div>
+        <button type="button" class="btn sm ghost" id="add-step">+ Add step</button>
+      </div>`, (data, fd) => {
+      if (!data.name.trim()) return false;
+      const ids = fd.getAll('s_id'); const days = fd.getAll('s_day'); const types = fd.getAll('s_type');
+      const titles = fd.getAll('s_title'); const subjects = fd.getAll('s_subject'); const bodies = fd.getAll('s_body');
+      const steps = ids.map((id, i) => ({ id, day: Math.max(1, Number(days[i]) || 1), type: types[i], title: titles[i].trim(), subject: subjects[i], body: bodies[i] }))
+        .map((s, i) => ({ s, i })).sort((x, y) => x.s.day - y.s.day || x.i - y.i).map((x) => x.s);
+      if (!steps.length) { toast('Add at least one step'); return false; }
+      const fields = { name: data.name.trim(), description: data.description, color: data.color, skipWeekends: !!data.skipWeekends, steps };
+      if (existing) {
+        // Keep everyone on the same step (by id) after steps are reordered, added or removed.
+        for (const e of state.enrollments.filter((x) => x.cadenceId === existing.id && x.status !== 'finished')) {
+          const oldId = (existing.steps[e.step] || {}).id;
+          const idx = steps.findIndex((s) => s.id === oldId);
+          e.step = idx === -1 ? Math.min(e.step, steps.length - 1) : idx;
+        }
+        Object.assign(existing, fields);
+        toast('Cadence saved');
+      } else {
+        const cad = { id: uid(), ...fields };
+        state.cadences.push(cad);
+        ui.cadenceId = cad.id;
+        location.hash = `cadences/${cad.id}`;
+        toast('Cadence created');
+      }
+    }, existing ? 'Save cadence' : 'Create cadence', { wide: true });
+
+    const box = $('#steps-edit');
+    const renumber = () => $$('.step-edit', box).forEach((r, i) => { $('.step-num', r).textContent = i + 1; });
+    box.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-step]');
+      if (!b) return;
+      const row = b.closest('.step-edit');
+      if (b.dataset.step === 'del') { if ($$('.step-edit', box).length > 1) row.remove(); }
+      if (b.dataset.step === 'up' && row.previousElementSibling) box.insertBefore(row, row.previousElementSibling);
+      if (b.dataset.step === 'down' && row.nextElementSibling) box.insertBefore(row.nextElementSibling, row);
+      renumber();
+    });
+    $('#add-step').addEventListener('click', () => {
+      const lastDay = Math.max(1, ...$$('[name=s_day]', box).map((x) => Number(x.value) || 1));
+      box.insertAdjacentHTML('beforeend', stepRow({ id: uid(), day: lastDay + 2, type: 'call', title: '', subject: '', body: '' }));
+      renumber();
+      $$('[name=s_title]', box).pop().focus();
+    });
+    renumber();
+  }
+
+  /** Cadence steps due on day d (on today's page, overdue ones too), across all cadences. */
+  const dueSteps = (d) => liveEnrollments().filter((p) => p.e.status === 'active' && (p.e.dueDate === d || (d === today() && p.e.dueDate < d)))
+    .sort((a, b) => a.e.dueDate.localeCompare(b.e.dueDate));
 
   // ---------- modal ----------
   const modal = $('#modal');
   const modalForm = $('#modal-form');
   let modalSubmit = null;
 
-  function openModal(title, bodyHtml, onSubmit, submitLabel = 'Save') {
+  function openModal(title, bodyHtml, onSubmit, submitLabel = 'Save', opts = {}) {
+    modal.classList.toggle('wide', !!opts.wide);
     modalForm.innerHTML = `
       <h2>${esc(title)}</h2>
       <div class="stack" style="margin-top:.75rem">${bodyHtml}</div>
@@ -1194,7 +1888,7 @@
       </div>`;
     modalSubmit = onSubmit;
     modalForm.oninput = null;
-    modal.showModal();
+    if (!modal.open) modal.showModal();
     const first = modalForm.querySelector('input:not([type=hidden]), select, textarea');
     if (first) first.focus();
   }
@@ -1217,26 +1911,37 @@
   function accountForm(existing) {
     const a = existing || { type: 'prospect', stage: 'New' };
     openModal(existing ? 'Edit account' : 'New account', `
-      <div class="grid-2">
+      <fieldset class="form-sec"><legend>Company</legend><div class="grid-3">
         ${field('Account name *', `<input name="name" required value="${esc(a.name)}">`)}
         ${field('Type', `<select name="type" id="f-type">${opt('prospect', 'Prospect', a.type)}${opt('partner', 'Partner', a.type)}</select>`)}
         ${field('Stage / status', `<select name="stage" id="f-stage">${STAGES[a.type].map((s) => opt(s, s, a.stage)).join('')}</select>`)}
-        ${field(a.type === 'partner' ? 'Annual value ($)' : 'Deal value ($)', `<input name="value" type="number" min="0" step="any" value="${esc(a.value)}">`)}
-        ${existing ? '' : `
-        ${field('Primary contact', `<input name="c_name">`)}
-        ${field('Contact title', `<input name="c_title">`)}
-        ${field('Contact email', `<input name="c_email" type="email">`)}
-        ${field('Contact phone', `<input name="c_phone" type="tel">`)}
-        <div class="small muted span-2">You can add more contacts from the account page.</div>`}
-        <div class="field span-2"><span>Current vendors</span>${vendorPicker(a.vendors || [])}</div>
-        ${field('Website', `<input name="website" value="${esc(a.website)}">`)}
         ${field('Industry', `<input name="industry" value="${esc(a.industry)}">`)}
+        ${field('Employees', `<input name="employees" type="number" min="0" value="${esc(a.employees)}">`)}
+        ${field(a.type === 'partner' ? 'Annual value ($)' : 'Deal value ($)', `<input name="value" type="number" min="0" step="any" value="${esc(a.value)}">`)}
+        ${field('Website', `<input name="website" value="${esc(a.website)}" autocapitalize="off">`)}
+        ${field('City, State', `<input name="location" value="${esc(a.location)}" placeholder="e.g. Austin, TX">`)}
+        ${field('Lead source', `<select name="leadSource"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, a.leadSource)).join('')}</select>`)}
+      </div></fieldset>
+      ${existing ? '' : `
+      <fieldset class="form-sec"><legend>Primary contact</legend><div class="grid-4">
+        ${field('Name', `<input name="c_name">`)}
+        ${field('Title', `<input name="c_title">`)}
+        ${field('Email', `<input name="c_email" type="email">`)}
+        ${field('Phone', `<input name="c_phone" type="tel">`)}
+      </div></fieldset>`}
+      <fieldset class="form-sec"><legend>Current vendor</legend><div class="grid-3">
+        <div class="field span-2"><span>Current vendors</span>${vendorPicker(a.vendors || [])}</div>
+        ${field('Vendor renewal date', `<input name="vendorRenewal" type="date" value="${esc(a.vendorRenewal)}">`)}
+      </div></fieldset>
+      <fieldset class="form-sec"><legend>Next steps</legend><div class="grid-3">
         ${field('Next follow-up', `<input name="nextFollowUp" type="date" value="${esc(a.nextFollowUp)}">`)}
         ${field('Next revisit date', `<input name="revisitDate" type="date" value="${esc(a.revisitDate)}">`)}
-        ${field('Revisit purpose', `<input name="revisitNote" value="${esc(a.revisitNote)}" placeholder="e.g. Drop off benefits comparison">`)}
+        ${field('Revisit purpose', `<input name="revisitNote" value="${esc(a.revisitNote)}" placeholder="e.g. Drop off comparison">`)}
+      </div></fieldset>
+      <fieldset class="form-sec"><legend>Notes</legend><div class="grid-3">
         ${field('Tags (comma separated)', `<input name="tags" value="${esc(a.tags)}">`)}
-        ${field('Notes', `<textarea name="notes" rows="4">${esc(a.notes)}</textarea>`, 'span-2')}
-      </div>`, (data) => {
+        ${field('Notes', `<textarea name="notes" rows="3">${esc(a.notes)}</textarea>`, 'span-2')}
+      </div></fieldset>`, (data) => {
       if (!data.name.trim()) return false;
       const { c_name, c_title, c_email, c_phone, ...fields } = data;
       fields.vendors = JSON.parse(fields.vendors || '[]');
@@ -1246,13 +1951,13 @@
       } else {
         const now = new Date().toISOString();
         const contacts = c_name || c_email || c_phone
-          ? [{ id: uid(), name: c_name || c_email || c_phone, title: c_title, email: c_email, phone: c_phone, role: '', notes: '', primary: true }] : [];
+          ? [{ id: uid(), name: c_name || c_email || c_phone, title: c_title, email: c_email, phone: c_phone, role: '', notes: '', status: 'Active', primary: true }] : [];
         const acct = { id: uid(), ...fields, contacts, activities: [], keyDates: [], createdAt: now, updatedAt: now };
         state.accounts.push(acct);
         location.hash = `account/${acct.id}`;
         toast('Account created');
       }
-    });
+    }, 'Save', { wide: true });
     $('#f-type').addEventListener('change', (e) => {
       $('#f-stage').innerHTML = STAGES[e.target.value].map((s) => opt(s, s, '')).join('');
     });
@@ -1308,17 +2013,30 @@
   function contactForm(acct, existing) {
     const c = existing || { primary: acct.contacts.length === 0 };
     openModal(`${existing ? 'Edit' : 'Add'} contact — ${acct.name}`, `
-      <div class="grid-2">
+      <div class="grid-3">
         ${field('Name *', `<input name="name" required value="${esc(c.name)}">`)}
         ${field('Title', `<input name="title" value="${esc(c.title)}" placeholder="e.g. HR Director">`)}
-        ${field('Email', `<input name="email" type="email" value="${esc(c.email)}">`)}
-        ${field('Phone', `<input name="phone" type="tel" value="${esc(c.phone)}">`)}
         ${field('Role in deal', `<select name="role"><option value="">—</option>${CONTACT_ROLES.map((r) => opt(r, r, c.role)).join('')}</select>`)}
+        ${field('Email', `<input name="email" type="email" value="${esc(c.email)}" autocapitalize="off">`)}
+        ${field('Direct phone', `<input name="phone" type="tel" value="${esc(c.phone)}">`)}
+        ${field('Mobile', `<input name="mobile" type="tel" value="${esc(c.mobile)}">`)}
+        ${field('LinkedIn URL', `<input name="linkedin" value="${esc(c.linkedin)}" placeholder="linkedin.com/in/…" autocapitalize="off">`)}
+        ${field('Preferred channel', `<select name="channel"><option value="">—</option>${CHANNELS.map((x) => opt(x, x, c.channel)).join('')}</select>`)}
+        ${field('Time zone', `<select name="timezone"><option value="">—</option>${TIMEZONES.map((x) => opt(x, x, c.timezone)).join('')}</select>`)}
+        ${field('Status', `<select name="status">${CONTACT_STATUSES.map((x) => opt(x, x, c.status || 'Active')).join('')}</select>`)}
         <label class="row small" style="align-self:end"><input type="checkbox" name="primary" style="width:auto" ${c.primary ? 'checked' : ''}> Primary contact</label>
-        ${field('Notes', `<textarea name="notes" rows="3">${esc(c.notes)}</textarea>`, 'span-2')}
+        <span></span>
+        ${field('Notes', `<textarea name="notes" rows="2">${esc(c.notes)}</textarea>`, 'span-3')}
       </div>`, (data) => {
       if (!data.name.trim()) return false;
-      const fields = { name: data.name, title: data.title, email: data.email, phone: data.phone, role: data.role, notes: data.notes, primary: !!data.primary };
+      const fields = {
+        name: data.name, title: data.title, email: data.email, phone: data.phone, mobile: data.mobile, linkedin: data.linkedin,
+        channel: data.channel, timezone: data.timezone, status: data.status, role: data.role, notes: data.notes, primary: !!data.primary,
+      };
+      if (existing && data.status !== 'Active' && existing.status !== data.status) {
+        // People who left or opted out come out of any running cadence.
+        for (const p of enrollmentsFor(existing.id)) finishEnrollment(p.e, 'bad');
+      }
       let target = existing;
       if (existing) Object.assign(existing, fields);
       else acct.contacts.push(target = { id: uid(), ...fields });
@@ -1326,7 +2044,7 @@
       else if (!acct.contacts.some((x) => x.primary)) acct.contacts[0].primary = true;
       touch(acct);
       toast(existing ? 'Contact updated' : 'Contact added');
-    });
+    }, 'Save', { wide: true });
   }
 
   function activityForm(acct, existing) {
@@ -1411,6 +2129,7 @@
       case 'del-account':
         if (confirm(`Delete ${acct.name} and all its history? Planner tasks will be unlinked.`)) {
           state.accounts = state.accounts.filter((a) => a.id !== id);
+          state.enrollments = state.enrollments.filter((x) => x.accountId !== id);
           state.tasks.forEach((x) => { if (x.accountId === id) x.accountId = ''; });
           save(); go('accounts');
         }
@@ -1479,6 +2198,7 @@
         const c = acct.contacts.find((x) => x.id === cid);
         if (!confirm(`Remove ${c.name} from ${acct.name}?`)) return;
         acct.contacts = acct.contacts.filter((x) => x.id !== cid);
+        state.enrollments = state.enrollments.filter((x) => x.contactId !== cid);
         if (c.primary && acct.contacts[0]) acct.contacts[0].primary = true;
         touch(acct); save(); rerender(); return;
       }
@@ -1493,6 +2213,26 @@
       case 'list-csv': return exportListCsv();
       case 'load-sample': loadSample(); return;
       case 'erase-all': eraseAll(); return;
+      case 'cad-template': return cadenceForm(null, CADENCE_TEMPLATES[Number(el.dataset.tpl)]);
+      case 'cad-new': return cadenceForm(null, null);
+      case 'cad-open': ui.cadenceId = el.dataset.cad; return go(`cadences/${el.dataset.cad}`);
+      case 'cad-edit': return cadenceForm(cadenceById(ui.cadenceId));
+      case 'cad-add-people': return addPeopleForm(cadenceById(ui.cadenceId));
+      case 'cad-filter': ui.cadFilter = el.dataset.f; return rerender();
+      case 'cad-delete': {
+        const cad = cadenceById(ui.cadenceId);
+        const n = state.enrollments.filter((x) => x.cadenceId === cad.id).length;
+        if (!confirm(`Delete "${cad.name}"${n ? ` and its ${n} enrollment${n === 1 ? '' : 's'}` : ''}? Logged activities stay in account history.`)) return;
+        state.cadences = state.cadences.filter((x) => x !== cad);
+        state.enrollments = state.enrollments.filter((x) => x.cadenceId !== cad.id);
+        ui.cadenceId = null; save(); return go('cadences');
+      }
+      case 'enr-open':
+        if (e.target.closest('a')) return;
+        return enrollmentDetail(el.dataset.eid);
+      case 'enr-log': return logStepForm(el.dataset.eid);
+      case 'enr-skip': return enrollmentAction(el.dataset.eid, 'skip');
+      case 'enroll-contact': return enrollContactForm(acct, acct.contacts.find((c) => c.id === cid));
     }
   });
 
@@ -1579,6 +2319,42 @@
     helix.vendors = ['Paychex PEO', 'Gusto'];
     oak.vendors = ['Insperity'];
     summit.vendors = ['Justworks'];
+    Object.assign(northwind, { employees: 120, location: 'Dallas, TX', leadSource: 'Referral', vendorRenewal: addDays(t, 140) });
+    Object.assign(helix, { employees: 85, location: 'Austin, TX', leadSource: 'Inbound', vendorRenewal: addDays(t, 200) });
+    Object.assign(oak, { employees: 60, location: 'Houston, TX', leadSource: 'Cold outreach', vendorRenewal: addDays(t, 75) });
+    Object.assign(summit, { employees: 40, location: 'San Antonio, TX', leadSource: 'Partner / broker' });
+    Object.assign(brightpath, { employees: 25, location: 'Dallas, TX', leadSource: 'Event' });
+    Object.assign(northwind.contacts[0], { mobile: '555-0199', linkedin: 'linkedin.com/in/danaortiz', timezone: 'Central', channel: 'Email' });
+    Object.assign(oak.contacts[0], { title: 'HR Manager', email: 'chris@oakiron.example', phone: '555-0170', timezone: 'Central', channel: 'Phone' });
+    oak.contacts.push(contact('Angela Ruiz', 'CFO', 'Decision maker', 'angela@oakiron.example', '555-0171'));
+
+    // Example cadences with people at different points.
+    const cads = CADENCE_TEMPLATES.map((tp) => ({
+      id: uid(), name: tp.name, description: tp.description, color: tp.color, skipWeekends: true,
+      steps: tp.steps.map(([day, type, title, subject, body]) => ({ id: uid(), day, type, title, subject, body })),
+    }));
+    state.cadences.push(...cads);
+    const seed = (cad, acct, c, startBack, doneCount, finish) => {
+      const start = nextWorkday(addDays(t, -startBack));
+      const when = (i) => shiftDays(start, cad.steps[i].day - 1, true);
+      const history = cad.steps.slice(0, doneCount).map((st, i) => {
+        const type = STEP_TYPES[st.type];
+        const outcome = type.outcomes[i % 2 === 0 ? 0 : Math.min(1, type.outcomes.length - 1)];
+        const actId = uid();
+        acct.activities.push({ id: actId, date: when(i), kind: type.kind, contactId: c.id, summary: `${cad.name} · ${st.title}: ${outcome}`, notes: '', createdAt: now });
+        return { stepId: st.id, date: when(i), outcome, note: '', activityId: actId };
+      });
+      const e = { id: uid(), cadenceId: cad.id, accountId: acct.id, contactId: c.id, startDate: start, step: Math.min(doneCount, cad.steps.length - 1),
+        dueDate: doneCount < cad.steps.length ? when(doneCount) : '', status: 'active', outcome: '', history, addedAt: now };
+      if (finish) finishEnrollment(e, finish, history.length ? history[history.length - 1].date : t);
+      state.enrollments.push(e);
+    };
+    seed(cads[0], oak, oak.contacts[0], 8, 3);
+    seed(cads[0], oak, oak.contacts[1], 0, 0);
+    seed(cads[1], northwind, northwind.contacts[0], 6, 1);
+    seed(cads[1], northwind, northwind.contacts[1], 22, 3);
+    seed(cads[2], helix, helix.contacts[0], 5, 2);
+    seed(cads[2], helix, helix.contacts[1], 12, 3, 'meeting');
     state.accounts.push(northwind, brightpath, helix, summit, oak);
     state.lists.push(
       { id: uid(), name: 'Prospects on a competitor PEO', criteria: { ...emptyCriteria(), type: 'prospect', vendors: COMPETITORS } },
