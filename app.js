@@ -330,8 +330,8 @@
   }
 
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap };
-  const TAB_FOR = { account: 'accounts' };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport };
+  const TAB_FOR = { account: 'accounts', report: 'dashboard' };
 
   function route() {
     let [name, arg] = location.hash.replace('#', '').split('/');
@@ -341,6 +341,7 @@
     if (view === 'planner' && arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)) ui.plannerDate = arg;
     if (view === 'lists' && arg) ui.listId = decodeURIComponent(arg);
     if (view === 'cadences' && arg) ui.cadenceId = arg;
+    if (view === 'report') ui.reportWeek = weekStart(/^\d{4}-\d{2}-\d{2}$/.test(arg || '') ? arg : today());
     if (view === 'map') {
       const parts = location.hash.split('/');
       ui.mapMode = parts[1] === 'route' ? 'route' : 'accounts';
@@ -388,6 +389,7 @@
           <div class="muted">${todaysTasks.filter((x) => !x.done).length} open planner tasks today · ${dueToday.length} account items due</div>
         </div>
         <div class="row">
+          ${dashSwitch('today')}
           <button class="btn ghost" data-act="new-account">+ Account</button>
           <a class="btn" href="#planner/${t}">Open today's planner</a>
         </div>
@@ -1335,7 +1337,7 @@
   const stepType = (s) => STEP_TYPES[s.type] || STEP_TYPES.task;
   const stepIcon = (s, cls = '') => `<span class="st-icon st-${s.type} ${cls}" title="${esc(stepType(s).label)}">${stepType(s).icon}</span>`;
   const cadenceDays = (cad) => cad.steps.length ? cad.steps[cad.steps.length - 1].day : 0;
-  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
   const initials = (name) => (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join('');
 
   const isWeekend = (iso) => [0, 6].includes(fromISO(iso).getDay());
@@ -2652,6 +2654,277 @@
     if (ui.mapMode === 'route') renderRoutePlanner(); else renderMapAccounts();
   }
 
+  // ---------- weekly activity report ----------
+  // Monday–Sunday weeks built from what's already recorded: account history (touches, meetings,
+  // stage changes), the daily activity plan, cadence step logs and outcomes, accounts and tasks.
+  const REPORT_SERIES = [
+    { key: 'call', label: 'Calls', kinds: ['Call'] },
+    { key: 'email', label: 'Emails', kinds: ['Email'] },
+    { key: 'linkedin', label: 'LinkedIn', kinds: ['LinkedIn'] },
+    { key: 'visit', label: 'Visits', kinds: ['Visit'] },
+    { key: 'other', label: 'Other', kinds: ['Text', 'Meeting', 'Demo', 'Other'] },
+  ];
+  const TOUCH_KINDS = REPORT_SERIES.flatMap((s) => s.kinds);
+  const weekStart = (iso) => { const day = (fromISO(iso).getDay() + 6) % 7; return addDays(iso, -day); };
+  const fmtWeek = (ws) => `${fmtDate(ws, { month: 'short', day: 'numeric' })} – ${fmtDate(addDays(ws, 6), { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  const STAGE_RE = /^Stage changed: (.+) → (.+)$/;
+
+  function weekStats(ws) {
+    const we = addDays(ws, 6);
+    const inWeek = (d) => !!d && d.slice(0, 10) >= ws && d.slice(0, 10) <= we;
+    const days = [...Array(7)].map((_, i) => addDays(ws, i));
+    const acts = state.accounts.flatMap((a) => a.activities.filter((h) => inWeek(h.date)).map((h) => ({ ...h, account: a })));
+    const touches = acts.filter((h) => TOUCH_KINDS.includes(h.kind));
+    const count = (kinds) => touches.filter((h) => kinds.includes(h.kind)).length;
+    const perDay = days.map((d) => {
+      const row = { d };
+      for (const s of REPORT_SERIES) row[s.key] = touches.filter((h) => h.date === d && s.kinds.includes(h.kind)).length;
+      row.total = REPORT_SERIES.reduce((n, s) => n + row[s.key], 0);
+      return row;
+    });
+
+    // Daily plan: done vs targets on weekdays (weekend work still counts toward "done").
+    const workdays = days.filter((d) => !isWeekend(d)).length;
+    const plan = PLAN_SECTIONS.map((sec) => {
+      const done = days.reduce((n, d) => n + (getDay(d).plan ? planStats(getPlan(d), sec.key).done : 0), 0);
+      return { sec, done, target: sec.count * workdays };
+    });
+    const outreachDaysHit = days.filter((d) => !isWeekend(d) && getDay(d).plan && planStats(getPlan(d), 'outreach').done >= PLAN_SECTIONS[0].count).length;
+
+    // Cadences: steps logged, replies and meetings by cadence.
+    const cadences = state.cadences.map((cad) => {
+      const ens = state.enrollments.filter((e) => e.cadenceId === cad.id);
+      const hist = ens.flatMap((e) => e.history.filter((h) => inWeek(h.date)));
+      return {
+        cad,
+        steps: hist.filter((h) => !h.skipped).length,
+        skipped: hist.filter((h) => h.skipped).length,
+        replies: hist.filter((h) => /replied/i.test(h.outcome || '')).length + ens.filter((e) => e.outcome === 'replied' && inWeek(e.finishedAt) && !e.history.some((h) => inWeek(h.date) && /replied/i.test(h.outcome || ''))).length,
+        meetings: ens.filter((e) => e.outcome === 'meeting' && inWeek(e.finishedAt)).length,
+        added: ens.filter((e) => inWeek(e.addedAt)).length,
+        finished: ens.filter((e) => e.status === 'finished' && inWeek(e.finishedAt)).length,
+      };
+    });
+    const sum = (k) => cadences.reduce((n, c) => n + c[k], 0);
+
+    // Pipeline movement from logged stage changes.
+    const moves = acts.filter((h) => h.kind === 'Note' && STAGE_RE.test(h.summary)).map((h) => {
+      const [, from, to] = h.summary.match(STAGE_RE);
+      const list = STAGES[h.account.type] || [];
+      return { h, a: h.account, from, to, forward: list.indexOf(to) > list.indexOf(from) && !['Lost', 'Inactive', 'At Risk'].includes(to) };
+    }).sort((x, y) => y.h.date.localeCompare(x.h.date));
+    const newAccounts = state.accounts.filter((a) => inWeek(a.createdAt));
+    const won = moves.filter((m) => m.to === 'Won');
+
+    const byAccount = new Map();
+    for (const h of touches) byAccount.set(h.account.id, { a: h.account, n: (byAccount.get(h.account.id)?.n || 0) + 1 });
+    const topAccounts = [...byAccount.values()].sort((x, y) => y.n - x.n).slice(0, 6);
+
+    return {
+      ws, we, days, perDay, acts, touches, plan, outreachDaysHit, workdays, cadences, moves, newAccounts, won, topAccounts,
+      kpi: {
+        touches: touches.length, call: count(['Call']), email: count(['Email']), linkedin: count(['LinkedIn']), visit: count(['Visit']),
+        meetingsHeld: count(['Meeting', 'Demo']), meetingsBooked: sum('meetings'), replies: sum('replies'), cadenceSteps: sum('steps'),
+        newAccounts: newAccounts.length, advances: moves.filter((m) => m.forward).length, won: won.length,
+        tasksDone: state.tasks.filter((x) => x.done && inWeek(x.date)).length,
+      },
+    };
+  }
+
+  const KPIS = [
+    ['touches', 'Total touches', true], ['call', 'Calls'], ['email', 'Emails'], ['linkedin', 'LinkedIn'], ['visit', 'Visits'],
+    ['meetingsHeld', 'Meetings held'], ['meetingsBooked', 'Meetings booked'], ['replies', 'Replies'],
+    ['cadenceSteps', 'Cadence steps'], ['advances', 'Stage advances'], ['newAccounts', 'New accounts'], ['won', 'Won'],
+  ];
+
+  function delta(now, prev) {
+    const d = now - prev;
+    if (!d) return '<span class="delta flat">same as last week</span>';
+    return `<span class="delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)} vs last week</span>`;
+  }
+
+  function dashSwitch(mode) {
+    return `<div class="seg" role="group" aria-label="Home view">
+      <a class="${mode === 'today' ? 'active' : ''}" href="#dashboard" role="button">Today</a>
+      <a class="${mode === 'report' ? 'active' : ''}" href="#report" role="button">Weekly report</a>
+    </div>`;
+  }
+
+  /** Stacked daily columns: one per day, segments by touch type, 2px gaps, rounded top, total on top. */
+  function activityChart(st) {
+    const max = Math.max(4, ...st.perDay.map((r) => r.total));
+    const step = Math.max(1, Math.ceil(max / 4));
+    const top = step * 4;
+    const ticks = [0, 1, 2, 3, 4].map((i) => i * step);
+    return `
+      <div class="viz-root">
+        <div class="viz-legend">${REPORT_SERIES.map((s, i) => `<span><i class="sw s${i + 1}"></i>${s.label}</span>`).join('')}</div>
+        <div class="viz-plot" role="img" aria-label="Touches per day this week, by type">
+          <div class="viz-grid">${ticks.slice().reverse().map((t) => `<div><span>${t}</span></div>`).join('')}</div>
+          <div class="viz-cols">
+            ${st.perDay.map((r) => `
+              <div class="viz-col ${r.d === today() ? 'today' : ''}" tabindex="0"
+                data-tip="${esc(`${fmtDate(r.d, { weekday: 'long', month: 'short', day: 'numeric' })}|${REPORT_SERIES.map((s) => `${s.label}: ${r[s.key]}`).join('|')}|Total: ${r.total}`)}">
+                <div class="viz-stack" style="height:${(r.total / top) * 100}%">
+                  ${r.total ? `<span class="viz-total">${r.total}</span>` : ''}
+                  ${REPORT_SERIES.map((s, i) => (r[s.key] ? `<div class="viz-seg s${i + 1}" style="flex:${r[s.key]}"></div>` : '')).reverse().join('')}
+                </div>
+                <div class="viz-x">${fmtDate(r.d, { weekday: 'short' })}<br><span>${fromISO(r.d).getDate()}</span></div>
+              </div>`).join('')}
+          </div>
+        </div>
+        <div class="viz-tip" hidden></div>
+        <details class="viz-table">
+          <summary>Show as table</summary>
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>Day</th>${REPORT_SERIES.map((s) => `<th class="num">${s.label}</th>`).join('')}<th class="num">Total</th></tr></thead>
+            <tbody>${st.perDay.map((r) => `<tr><td>${fmtDate(r.d, { weekday: 'short', month: 'short', day: 'numeric' })}</td>${REPORT_SERIES.map((s) => `<td class="num">${r[s.key]}</td>`).join('')}<td class="num"><strong>${r.total}</strong></td></tr>`).join('')}</tbody>
+          </table></div>
+        </details>
+      </div>`;
+  }
+
+  function bindChartTips() {
+    const tip = $('.viz-tip');
+    if (!tip) return;
+    const show = (col) => {
+      const [title, ...lines] = col.dataset.tip.split('|');
+      tip.innerHTML = `<strong>${esc(title)}</strong>${lines.map((l) => `<div>${esc(l)}</div>`).join('')}`;
+      tip.hidden = false;
+      const root = col.closest('.viz-root').getBoundingClientRect();
+      const r = col.getBoundingClientRect();
+      const left = Math.min(Math.max(r.left - root.left + r.width / 2 - tip.offsetWidth / 2, 0), root.width - tip.offsetWidth);
+      tip.style.left = `${left}px`;
+      tip.style.top = `${Math.max(r.top - root.top + 4, 0)}px`;
+    };
+    $$('.viz-col').forEach((col) => {
+      col.addEventListener('mouseenter', () => show(col));
+      col.addEventListener('focus', () => show(col));
+      col.addEventListener('click', () => show(col));
+      col.addEventListener('mouseleave', () => { tip.hidden = true; });
+      col.addEventListener('blur', () => { tip.hidden = true; });
+    });
+  }
+
+  function reportSummary(st) {
+    const k = st.kpi;
+    const lines = [
+      `Weekly activity: ${fmtWeek(st.ws)}`,
+      '',
+      `Touches: ${k.touches} (Calls ${k.call}, Emails ${k.email}, LinkedIn ${k.linkedin}, Visits ${k.visit})`,
+      `Meetings: ${k.meetingsHeld} held, ${k.meetingsBooked} booked · ${plural(k.replies, 'reply', 'replies')}`,
+      `Plan: ${st.plan.map((p) => `${p.sec.label} ${p.done}/${p.target}`).join(' · ')}`,
+      `Hit 25 outreach on ${st.outreachDaysHit} of ${st.workdays} workdays`,
+      `Cadences: ${plural(k.cadenceSteps, 'step')} done${st.cadences.filter((c) => c.steps || c.meetings || c.replies).map((c) => `\n  - ${c.cad.name}: ${plural(c.steps, 'step')}, ${plural(c.replies, 'reply', 'replies')}, ${plural(c.meetings, 'meeting')} booked`).join('')}`,
+      `Pipeline: ${plural(k.advances, 'stage advance')}, ${k.won} won, ${plural(k.newAccounts, 'new account')}`,
+      ...st.moves.slice(0, 8).map((m) => `  - ${m.a.name}: ${m.from} → ${m.to}`),
+      st.topAccounts.length ? `Most touched: ${st.topAccounts.map((t) => `${t.a.name} (${t.n})`).join(', ')}` : '',
+    ];
+    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  function renderReport() {
+    const ws = ui.reportWeek;
+    const st = weekStats(ws);
+    const prev = weekStats(addDays(ws, -7));
+    const isThisWeek = ws === weekStart(today());
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+
+    $('#view').innerHTML = `
+      <div class="page-head">
+        <h1>Weekly report</h1>
+        ${dashSwitch('report')}
+      </div>
+      <div class="week-nav">
+        <button class="btn ghost sm" data-act="report-week" data-n="-7" aria-label="Previous week">‹</button>
+        <strong>${fmtWeek(ws)}</strong>
+        <button class="btn ghost sm" data-act="report-week" data-n="7" aria-label="Next week" ${isThisWeek ? 'disabled' : ''}>›</button>
+        <span class="muted small">${isThisWeek ? 'This week so far' : '<button class="link-btn" data-act="report-this">Back to this week</button>'}</span>
+      </div>
+
+      <div class="kpi-grid">
+        ${KPIS.map(([key, label, hero]) => `
+          <div class="card kpi ${hero ? 'hero' : ''}">
+            <div class="num">${st.kpi[key]}</div>
+            <div class="label">${label}</div>
+            ${delta(st.kpi[key], prev.kpi[key])}
+          </div>`).join('')}
+      </div>
+
+      <div class="report-grid">
+        <div class="card">
+          <h2>Touches by day</h2>
+          ${st.touches.length ? activityChart(st) : '<div class="empty">No calls, emails, LinkedIn touches or visits logged this week yet.</div>'}
+        </div>
+
+        <div class="card">
+          <h2>Daily plan attainment</h2>
+          <p class="small muted" style="margin-top:0">Targets × ${st.workdays} workdays. You hit 25 calls/emails/LinkedIn on <strong>${st.outreachDaysHit} of ${st.workdays}</strong> days.</p>
+          <div class="attain">${st.plan.map((p) => `
+            <div class="attain-row">
+              <span>${esc(p.sec.label)}</span>
+              <div class="progress"><div style="width:${Math.min(100, pct(p.done, p.target))}%"></div></div>
+              <b>${p.done}/${p.target}</b>
+              <span class="muted small">${pct(p.done, p.target)}%</span>
+            </div>`).join('')}</div>
+        </div>
+
+        <div class="card">
+          <h2>Cadences</h2>
+          ${state.cadences.length ? `<div class="table-wrap"><table class="table">
+            <thead><tr><th>Cadence</th><th class="num">Steps</th><th class="num">Replies</th><th class="num">Meetings</th><th class="num col-opt">Added</th></tr></thead>
+            <tbody>${st.cadences.map((c) => `<tr>
+              <td><a href="#cadences/${c.cad.id}"><span class="dot-sm" style="--c:${c.cad.color}"></span>${esc(c.cad.name)}</a></td>
+              <td class="num">${c.steps}${c.skipped ? `<span class="muted small"> +${c.skipped} skipped</span>` : ''}</td>
+              <td class="num">${c.replies}</td><td class="num">${c.meetings}</td><td class="num col-opt">${c.added}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>` : '<div class="empty">No cadences yet.</div>'}
+        </div>
+
+        <div class="card">
+          <h2>Pipeline movement</h2>
+          ${st.moves.length || st.newAccounts.length ? `<ul class="list">
+            ${st.moves.map((m) => `<li>
+              <span class="move ${m.forward ? 'fwd' : 'back'}" aria-label="${m.forward ? 'Advanced' : 'Moved back'}">${m.forward ? '▲' : '▼'}</span>
+              <div class="grow"><a class="title" href="#account/${m.a.id}">${esc(m.a.name)}</a><div class="small muted">${esc(m.from)} → <strong>${esc(m.to)}</strong> · ${esc(fmtDate(m.h.date, { weekday: 'short' }))}</div></div>
+              ${m.to === 'Won' ? '<span class="pill won">Won</span>' : ''}
+            </li>`).join('')}
+            ${st.newAccounts.map((a) => `<li><span class="move new">+</span><div class="grow"><a class="title" href="#account/${a.id}">${esc(a.name)}</a><div class="small muted">New ${a.type} account</div></div></li>`).join('')}
+          </ul>` : '<div class="empty">No stage changes or new accounts this week.</div>'}
+        </div>
+
+        <div class="card">
+          <h2>Most-touched accounts</h2>
+          ${st.topAccounts.length ? `<ul class="list">${st.topAccounts.map((t) => `<li>
+            <div class="grow"><a class="title" href="#account/${t.a.id}">${esc(t.a.name)}</a><div class="small muted">${esc(t.a.stage)}${t.a.vendors.length ? ' · ' + esc(t.a.vendors.join(', ')) : ''}</div></div>
+            <b>${t.n}</b><span class="small muted">touch${t.n === 1 ? '' : 'es'}</span>
+          </li>`).join('')}</ul>` : '<div class="empty">No account touches this week.</div>'}
+        </div>
+
+        <div class="card">
+          <h2>Share</h2>
+          <p class="small muted" style="margin-top:0">A plain-text summary to paste into an email or message, and the week's activity as a spreadsheet.</p>
+          <pre class="report-text" id="report-text">${esc(reportSummary(st))}</pre>
+          <div class="row">
+            <button class="btn" data-act="report-copy">Copy summary</button>
+            <button class="btn ghost" data-act="report-csv">Export activities (CSV)</button>
+          </div>
+        </div>
+      </div>`;
+    bindChartTips();
+  }
+
+  function reportCsv() {
+    const st = weekStats(ui.reportWeek);
+    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [['Date', 'Type', 'Account', 'Contact', 'Summary', 'Notes']];
+    for (const h of [...st.acts].sort((x, y) => x.date.localeCompare(y.date))) {
+      const c = h.contactId && h.account.contacts.find((x) => x.id === h.contactId);
+      rows.push([h.date, h.kind, h.account.name, c ? c.name : '', h.summary, h.notes]);
+    }
+    downloadFile(`activity-${st.ws}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
+  }
+
   // ---------- modal ----------
   const modal = $('#modal');
   const modalForm = $('#modal-form');
@@ -3002,6 +3275,15 @@
       case 'open-sync': return syncSettings();
       case 'load-sample': loadSample(); return;
       case 'erase-all': eraseAll(); return;
+      case 'report-week': return go(`report/${addDays(ui.reportWeek, Number(el.dataset.n))}`);
+      case 'report-this': return go('report');
+      case 'report-csv': return reportCsv();
+      case 'report-copy': {
+        const text = $('#report-text').textContent;
+        if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Summary copied'), () => toast('Copy not available'));
+        else toast('Copy not available');
+        return;
+      }
       case 'map-mode': return go(el.dataset.mode === 'route' ? `map/route/${ui.routeDate || today()}` : 'map');
       case 'map-near':
         myLocation().then((pt) => { mapState.me = pt; rerender(); if (mapState.map) mapState.map.setView(pt, 11); }, (err) => toast(err.message));

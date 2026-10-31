@@ -746,3 +746,82 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
 }
 .route-summary b { font-size: .92rem; line-height: 1.25; }
 @media (max-width: 560px) { .route-summary { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------- weekly report ---------- */
+.seg a { display: inline-block; padding: .32rem .7rem; border-radius: 7px; color: var(--muted); text-decoration: none; font-weight: 500; white-space: nowrap; }
+.seg a.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.kpi-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: .6rem; margin-bottom: 1rem; }
+.kpi { padding: .7rem .8rem; }
+.kpi .num { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+.kpi.hero .num { font-size: 1.9rem; }
+.kpi .label { color: var(--muted); font-size: .8rem; }
+.delta { display: block; font-size: .72rem; margin-top: .2rem; color: var(--muted); }
+.delta.up { color: var(--ok); }
+.delta.down { color: var(--danger); }
+.report-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.report-grid > :first-child { grid-column: 1 / -1; }
+.attain { display: grid; gap: .55rem; }
+.attain-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 2fr) auto 2.6rem; gap: .6rem; align-items: center; font-size: .88rem; }
+.attain-row .progress { height: 8px; border-radius: 4px; }
+.attain-row .muted { text-align: right; }
+.dot-sm { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c); margin-right: .4rem; }
+.move { flex: 0 0 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: .7rem; font-weight: 700; background: var(--surface-2); color: var(--muted); }
+.move.fwd { background: var(--partner-soft); color: var(--ok); }
+.move.back { background: var(--danger-soft); color: var(--danger); }
+.move.new { background: var(--accent-soft); color: var(--accent); font-size: 1rem; }
+.report-text { white-space: pre-wrap; font: .82rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); border-radius: 8px; padding: .75rem; max-height: 260px; overflow: auto; margin: 0 0 .6rem; }
+
+/* chart (validated categorical palette; own dark steps) */
+.viz-root {
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #98a2b3;
+  --grid: #e8eaee; position: relative;
+}
+@media (prefers-color-scheme: dark) {
+  .viz-root { --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #667085; --grid: #2a303c; }
+}
+.viz-legend { display: flex; flex-wrap: wrap; gap: .4rem 1rem; font-size: .8rem; color: var(--muted); margin-bottom: .6rem; }
+.viz-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: .35rem; vertical-align: -1px; }
+.sw.s1, .viz-seg.s1 { background: var(--series-1); }
+.sw.s2, .viz-seg.s2 { background: var(--series-2); }
+.sw.s3, .viz-seg.s3 { background: var(--series-3); }
+.sw.s4, .viz-seg.s4 { background: var(--series-4); }
+.sw.s5, .viz-seg.s5 { background: var(--series-5); }
+.viz-plot { position: relative; height: 220px; padding-left: 2rem; }
+.viz-grid { position: absolute; inset: 0 0 2.4rem 0; display: flex; flex-direction: column; justify-content: space-between; }
+.viz-grid div { border-top: 1px solid var(--grid); position: relative; height: 0; }
+.viz-grid span { position: absolute; left: 0; top: -.55rem; font-size: .68rem; color: var(--muted); }
+.viz-cols { position: absolute; inset: 0 0 0 2rem; display: grid; grid-template-columns: repeat(7, 1fr); gap: .5rem; }
+.viz-col { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; padding-bottom: 2.4rem; position: relative; cursor: default; outline: none; border-radius: 6px; }
+.viz-col:hover, .viz-col:focus-visible { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.viz-stack { width: min(34px, 70%); display: flex; flex-direction: column; gap: 2px; position: relative; min-height: 0; }
+.viz-seg { min-height: 2px; }
+.viz-stack > .viz-seg:first-of-type { border-radius: 4px 4px 0 0; }
+.viz-total { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); font-size: .75rem; font-weight: 600; color: var(--text); padding-bottom: 2px; }
+.viz-x { position: absolute; bottom: 0; height: 2.2rem; font-size: .72rem; color: var(--muted); text-align: center; line-height: 1.2; }
+.viz-x span { color: var(--text); font-weight: 600; }
+.viz-col.today .viz-x { color: var(--accent); }
+.viz-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .45rem .6rem; font-size: .78rem; box-shadow: 0 6px 18px rgba(16, 24, 40, .15); min-width: 140px; }
+.viz-table { margin-top: .6rem; }
+.viz-table summary { cursor: pointer; color: var(--accent); font-size: .85rem; }
+@media (max-width: 1000px) { .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .report-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) {
+  .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
+  .kpi { padding: .5rem .55rem; }
+  .kpi .num { font-size: 1.2rem; } .kpi.hero .num { font-size: 1.4rem; }
+  .kpi .label { font-size: .7rem; }
+  .delta { font-size: .64rem; }
+  .viz-cols { gap: .2rem; }
+  .attain-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto; }
+  .attain-row .muted { display: none; }
+}
+
+.week-nav { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin: -.25rem 0 .9rem; }
+.week-nav strong { font-size: 1rem; }
+.report-grid .table { min-width: 0; }
+.report-grid .table td:first-child a { word-break: break-word; }
+@media (max-width: 560px) {
+  .report-grid .table th, .report-grid .table td { padding: .45rem .3rem; font-size: .82rem; }
+}
+@media (max-width: 560px) { .report-grid .col-opt { display: none; } .report-grid .table td .muted.small { display: block; } }
+@media (max-width: 560px) { .viz-table .table th, .viz-table .table td { padding: .4rem .18rem; font-size: .78rem; } }
+@media (max-width: 560px) { .page-head .seg a { flex: 1; text-align: center; } }

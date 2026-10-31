@@ -52,6 +52,16 @@ No install, no build step: open `index.html` in a browser.
 - Contacts marked "Left company" or "Do not contact" can't be enrolled and are taken out of
   running cadences
 
+**Weekly activity report** (Home → Weekly report)
+- Monday–Sunday weeks with ‹ › navigation; every number compares to the previous week (▲/▼)
+- Totals: touches, calls, emails, LinkedIn, visits, meetings held, meetings booked, replies,
+  cadence steps, stage advances, new accounts, won
+- Touches-by-day chart (stacked by type, hover/tap for the day's breakdown, table view)
+- Daily plan attainment against your 25/5/5/5 targets × workdays, and how many days you hit 25
+- Cadence performance (steps, replies, meetings booked, people added), pipeline movement (stage
+  changes, wins, new accounts), and most-touched accounts
+- **Copy summary**: a plain-text recap to paste into an email; **Export activities (CSV)**
+
 **Map & route planner**
 - **Accounts map**: every account with an address is pinned (purple = prospect, green = partner,
   orange ring = follow-up or revisit due). Filter by type, vendor or saved list. **Near me**
