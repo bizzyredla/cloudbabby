@@ -532,7 +532,7 @@
               const p = primaryContact(a);
               const last = lastActivity(a);
               return `<tr class="click-row" data-act="open-account" data-id="${a.id}">
-                <td class="sticky-col"><strong>${esc(a.name)}</strong><div>${typePill(a)}</div></td>
+                <td class="sticky-col"><strong>${esc(a.name)}</strong><div class="row" style="gap:.35rem">${typePill(a)}${accountLinks(a)}</div></td>
                 <td>${esc(a.stage)}</td>
                 <td>${p ? `${esc(p.name)}${p.title ? `<div class="small muted">${esc(p.title)}</div>` : ''}` : '<span class="muted">—</span>'}${a.contacts.length > 1 ? `<div class="small muted">+${a.contacts.length - 1} more</div>` : ''}</td>
                 <td>${vendorPills(a) || '<span class="muted">—</span>'}</td>
@@ -552,8 +552,8 @@
     return `<div class="acard-grid">${list.map((a) => {
       const p = primaryContact(a);
       return `
-        <button type="button" class="acard" data-act="open-account" data-id="${a.id}">
-          <div class="row spread"><strong class="acard-name">${esc(a.name)}</strong>${typePill(a)}</div>
+        <div class="acard" role="link" tabindex="0" data-act="open-account" data-id="${a.id}">
+          <div class="row spread"><span class="row" style="gap:.35rem"><strong class="acard-name">${esc(a.name)}</strong>${accountLinks(a)}</span>${typePill(a)}</div>
           <div class="small muted">${esc(a.stage)}${a.value ? ' · ' + money(a.value) : ''}${a.industry ? ' · ' + esc(a.industry) : ''}</div>
           ${p ? `<div class="small">${esc(p.name)}${p.title ? ` <span class="muted">· ${esc(p.title)}</span>` : ''}${a.contacts.length > 1 ? ` <span class="muted">+${a.contacts.length - 1}</span>` : ''}</div>` : ''}
           ${a.vendors.length ? `<div class="row">${vendorPills(a)}</div>` : ''}
@@ -561,7 +561,7 @@
             <span>Follow-up ${dueChip(a.nextFollowUp)}</span>
             <span>Revisit ${dueChip(a.revisitDate)}</span>
           </div>
-        </button>`;
+        </div>`;
     }).join('')}</div>`;
   }
 
@@ -588,7 +588,7 @@
                   const p = primaryContact(a);
                   return `
                   <div class="kcard" draggable="${!touchUI}" data-id="${a.id}" data-act="open-account">
-                    <strong>${esc(a.name)}</strong>
+                    <div class="row spread" style="gap:.3rem;flex-wrap:nowrap"><strong>${esc(a.name)}</strong>${accountLinks(a)}</div>
                     ${p ? `<div class="small muted">${esc(p.name)}</div>` : ''}
                     ${a.vendors.length ? `<div class="small">${esc(a.vendors.join(', '))}</div>` : ''}
                     <div class="row small" style="margin-top:.3rem">${a.value ? `<span>${money(a.value)}</span>` : ''}${a.nextFollowUp ? dueChip(a.nextFollowUp) : ''}</div>
@@ -644,7 +644,7 @@
     $('#view').innerHTML = `
       <div class="page-head">
         <h1>Accounts <span class="muted small">(${list.length})</span></h1>
-        <div class="row">${viewSwitcher()}<button class="btn ghost" data-act="accounts-csv" title="Export the accounts shown">Export CSV</button><button class="btn" data-act="new-account">+ New account</button></div>
+        <div class="row">${viewSwitcher()}<button class="btn ghost" data-act="import-csv" title="Import accounts and contacts from a ZoomInfo or spreadsheet CSV">Import</button><button class="btn ghost" data-act="accounts-csv" title="Export the accounts shown">Export CSV</button><button class="btn" data-act="new-account">+ New account</button></div>
       </div>
       <div class="filters">
         <input type="search" id="acct-search" placeholder="Search name, contacts, vendors, tags, notes…" value="${esc(ui.search)}">
@@ -701,12 +701,13 @@
       <div class="card stack">
         <div class="detail-head">
           <div>
-            <div class="row"><h1 style="margin:0">${esc(a.name)}</h1><span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span><span class="pill">${esc(a.stage)}</span></div>
+            <div class="row"><h1 style="margin:0">${esc(a.name)}</h1>${accountLinks(a)}<span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span><span class="pill">${esc(a.stage)}</span></div>
             ${a.tags ? `<div class="row small muted" style="margin-top:.35rem">${tagList(a).map((x) => `<span class="pill">#${esc(x)}</span>`).join('')}</div>` : ''}
           </div>
           <div class="row">
             <button class="btn" data-act="log" data-id="${a.id}">+ Log activity</button>
             <button class="btn ghost" data-act="new-task" data-id="${a.id}">+ Plan task</button>
+            ${researchMenu(a)}
             <button class="btn ghost" data-act="edit-account" data-id="${a.id}">Edit</button>
           </div>
         </div>
@@ -725,7 +726,8 @@
           <div class="facts">
             <div><span>Industry</span>${esc(a.industry) || '—'}</div>
             <div><span>Location</span>${esc(a.location) || '—'}</div>
-            <div><span>Website</span>${a.website ? `<a href="${esc(/^https?:/.test(a.website) ? a.website : 'https://' + a.website)}" target="_blank" rel="noopener">${esc(a.website)}</a>` : '—'}</div>
+            <div><span>Website</span>${a.website ? `<a href="${esc(extUrl(a.website))}" target="_blank" rel="noopener">${esc(a.website)}</a>` : '—'}</div>
+            <div><span>Company LinkedIn</span>${a.linkedin ? `<a href="${esc(extUrl(a.linkedin))}" target="_blank" rel="noopener">Open profile</a>` : '—'}</div>
             <div><span>Lead source</span>${esc(a.leadSource) || '—'}</div>
             <div><span>Added</span>${fmtDate((a.createdAt || '').slice(0, 10) || null)}</div>
           </div>
@@ -738,6 +740,7 @@
               <div class="row spread">
                 <div><strong>${esc(c.name)}</strong> ${c.primary ? '<span class="pill primary">Primary</span>' : ''}</div>
                 <div class="row" style="gap:0">
+                  ${researchMenu(a, c)}
                   <button class="icon-btn" data-act="enroll-contact" data-id="${a.id}" data-cid="${c.id}" title="Add to cadence">⇉</button>
                   ${c.primary ? '' : `<button class="icon-btn" data-act="primary-contact" data-id="${a.id}" data-cid="${c.id}" title="Make primary">★</button>`}
                   <button class="icon-btn" data-act="edit-contact" data-id="${a.id}" data-cid="${c.id}" title="Edit">✎</button>
@@ -1306,10 +1309,10 @@
 
   function accountsCsv(title, accounts) {
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Account', 'Type', 'Stage', 'Industry', 'Employees', 'Location', 'Value', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
+    const rows = [['Account', 'Website', 'Company LinkedIn', 'Type', 'Stage', 'Industry', 'Employees', 'Location', 'Value', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
     for (const a of accounts) {
       const p = primaryContact(a) || {};
-      rows.push([a.name, a.type, a.stage, a.industry, a.employees, a.location, a.value, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone,
+      rows.push([a.name, a.website, a.linkedin, a.type, a.stage, a.industry, a.employees, a.location, a.value, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
         a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.tags]);
     }
     downloadFile(`${title.replace(/[^\w-]+/g, '-')}-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
@@ -1558,7 +1561,7 @@
       <div class="person-row" data-act="enr-open" data-eid="${p.e.id}">
         <div class="avatar" style="--c:${p.cad.color}">${esc(initials(p.contact.name))}</div>
         <div class="p-main">
-          <strong>${esc(p.contact.name)}</strong>
+          <strong>${esc(p.contact.name)} ${contactLinkIcons(p.contact, p.acct)}</strong>
           <div class="small muted">${p.contact.title ? esc(p.contact.title) + ' · ' : ''}<a href="#account/${p.acct.id}">${esc(p.acct.name)}</a>${p.acct.vendors.length ? ' · ' + esc(p.acct.vendors[0]) : ''}</div>
         </div>
         <div class="p-progress">${progressBar(p)}<div class="small muted">${finished ? `Ended ${esc(relDays(p.e.finishedAt))}` : `Step ${p.e.step + 1} of ${p.cad.steps.length}`}</div></div>
@@ -1574,7 +1577,7 @@
       ${c.email ? `<a href="mailto:${esc(c.email)}">✉ ${esc(c.email)}</a>` : ''}
       ${c.phone ? `<a href="tel:${esc(c.phone)}">☎ ${esc(c.phone)}</a>` : ''}
       ${c.mobile ? `<a href="tel:${esc(c.mobile)}">📱 ${esc(c.mobile)}</a>` : ''}
-      ${c.linkedin ? `<a href="${esc(/^https?:/.test(c.linkedin) ? c.linkedin : 'https://' + c.linkedin)}" target="_blank" rel="noopener">in LinkedIn</a>` : ''}
+      ${contactLinkIcons(c, acct)}
       ${c.timezone ? `<span class="muted">🕑 ${esc(c.timezone)}</span>` : ''}
       ${c.channel ? `<span class="muted">Prefers ${esc(c.channel)}</span>` : ''}
     </div>`;
@@ -1894,6 +1897,205 @@
   const dueSteps = (d) => liveEnrollments().filter((p) => p.e.status === 'active' && (p.e.dueDate === d || (d === today() && p.e.dueDate < d)))
     .sort((a, b) => a.e.dueDate.localeCompare(b.e.dueDate));
 
+  // ---------- web links & research (LinkedIn, Sales Navigator, ZoomInfo) ----------
+  const extUrl = (u) => (u ? (/^https?:\/\//i.test(u.trim()) ? u.trim() : 'https://' + u.trim().replace(/^\/+/, '')) : '');
+  const SVG_WEB = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
+  const SVG_LI = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10.5V17M8 7.2v.1M11.5 17v-6.5M11.5 13.2a2.6 2.6 0 0 1 5 1V17"/></svg>';
+  const SVG_FIND = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg>';
+
+  /** Small icon links: website and LinkedIn. A missing LinkedIn shows a faded "find on LinkedIn" icon. */
+  function linkIcons({ website, linkedin, findLinkedIn }) {
+    return `<span class="ext-links">
+      ${website ? `<a class="ext-ic web" href="${esc(extUrl(website))}" target="_blank" rel="noopener" title="Website: ${esc(website)}" aria-label="Website">${SVG_WEB}</a>` : ''}
+      ${linkedin ? `<a class="ext-ic li" href="${esc(extUrl(linkedin))}" target="_blank" rel="noopener" title="LinkedIn profile" aria-label="LinkedIn">${SVG_LI}</a>`
+        : findLinkedIn ? `<a class="ext-ic li missing" href="${esc(findLinkedIn)}" target="_blank" rel="noopener" title="Find on LinkedIn" aria-label="Find on LinkedIn">${SVG_LI}</a>` : ''}
+    </span>`;
+  }
+  const liPeopleSearch = (name, company) => `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${name} ${company || ''}`.trim())}`;
+  const liCompanySearch = (company) => `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(company)}`;
+  const accountLinks = (a) => linkIcons({ website: a.website, linkedin: a.linkedin, findLinkedIn: liCompanySearch(a.name) });
+  const contactLinkIcons = (c, a) => linkIcons({ linkedin: c.linkedin, findLinkedIn: liPeopleSearch(c.name, a && a.name) });
+
+  /**
+   * "Look up" menu: opens LinkedIn, Sales Navigator or ZoomInfo searching for the account or person.
+   * The search text is also copied, so it can be pasted if a site opens without it filled in.
+   */
+  function researchMenu(a, c) {
+    const q = c ? `${c.name} ${a.name}` : a.name;
+    const items = c ? [
+      ['LinkedIn', liPeopleSearch(c.name, a.name), 'Search people on LinkedIn'],
+      ['Sales Navigator', `https://www.linkedin.com/sales/search/people?keywords=${encodeURIComponent(q)}`, 'Search leads in Sales Navigator'],
+      ['ZoomInfo', 'https://app.zoominfo.com/#/apps/search/v2', 'Open ZoomInfo search (name copied — paste it in)'],
+    ] : [
+      ['LinkedIn', liCompanySearch(a.name), 'Search companies on LinkedIn'],
+      ['Sales Navigator', `https://www.linkedin.com/sales/search/company?keywords=${encodeURIComponent(a.name)}`, 'Search accounts in Sales Navigator'],
+      ['ZoomInfo', 'https://app.zoominfo.com/#/apps/search/v2', 'Open ZoomInfo search (name copied — paste it in)'],
+      ['ZoomInfo profile', `https://www.google.com/search?q=${encodeURIComponent(`site:zoominfo.com/c ${a.name}`)}`, "Find the company's public ZoomInfo profile"],
+      ['Google', `https://www.google.com/search?q=${encodeURIComponent([a.name, a.location].filter(Boolean).join(' '))}`, 'Search the web'],
+    ];
+    return `<details class="research">
+      <summary class="${c ? 'icon-btn' : 'btn ghost'}" title="Look up ${esc(q)}">${SVG_FIND}${c ? '' : ' Look up'}</summary>
+      <div class="research-menu">
+        <div class="small muted">Look up ${esc(q)}</div>
+        ${items.map(([label, href, title]) => `<a href="${esc(href)}" target="_blank" rel="noopener" data-copy="${esc(q)}" title="${esc(title)}">${esc(label)}</a>`).join('')}
+      </div>
+    </details>`;
+  }
+
+  // Research links copy the search text so it's ready to paste; menus close when you click elsewhere.
+  document.addEventListener('click', (e) => {
+    const copy = e.target.closest('a[data-copy]');
+    if (copy && navigator.clipboard) navigator.clipboard.writeText(copy.dataset.copy).then(() => toast(`"${copy.dataset.copy}" copied`), () => {});
+    $$('details.research[open]').forEach((d) => { if (!d.contains(e.target) || copy) d.open = false; });
+  });
+
+  // ---------- CSV import (ZoomInfo exports, spreadsheets, other CRMs) ----------
+  /** RFC 4180-style CSV parser: quoted fields, escaped quotes, commas/newlines inside quotes, BOM. */
+  function parseCsv(text) {
+    const rows = []; let row = []; let cell = ''; let quoted = false;
+    text = text.replace(/^﻿/, '');
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (quoted) {
+        if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+        else if (ch === '"') quoted = false;
+        else cell += ch;
+      } else if (ch === '"') quoted = true;
+      else if (ch === ',') { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(cell); rows.push(row); row = []; cell = '';
+      } else cell += ch;
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter((r) => r.some((x) => x.trim()));
+  }
+
+  // Column names we recognize (compared lower-case, letters and digits only). ZoomInfo's export names included.
+  const CSV_FIELDS = {
+    company: ['companyname', 'company', 'account', 'accountname', 'organization', 'organizationname', 'employer'],
+    website: ['website', 'companywebsite', 'websiteurl', 'domain', 'companydomain', 'url'],
+    industry: ['industry', 'primaryindustry', 'companyindustry'],
+    employees: ['employees', 'employeecount', 'companyemployeecount', 'numberofemployees', 'companysize', 'employeerange'],
+    city: ['companycity', 'city', 'hqcity'],
+    state: ['companystate', 'state', 'hqstate', 'region'],
+    location: ['location', 'companylocation'],
+    companyLinkedin: ['companylinkedinurl', 'linkedincompanyurl', 'companylinkedin', 'linkedincompanyprofileurl'],
+    first: ['firstname', 'first'],
+    last: ['lastname', 'last'],
+    name: ['fullname', 'name', 'contactname', 'contact', 'primarycontact'],
+    title: ['jobtitle', 'title', 'position'],
+    email: ['email', 'emailaddress', 'businessemail', 'workemail', 'supplementalemail'],
+    phone: ['directphonenumber', 'directphone', 'phone', 'phonenumber', 'workphone', 'businessphone'],
+    mobile: ['mobilephone', 'mobile', 'cellphone', 'mobilenumber'],
+    linkedin: ['linkedincontactprofileurl', 'contactlinkedin', 'linkedinurl', 'linkedinprofile', 'linkedinprofileurl', 'personlinkedinurl', 'profileurl', 'linkedin'],
+  };
+  const normHeader = (h) => h.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  function mapCsv(rows) {
+    const headers = rows[0].map(normHeader);
+    const col = {};
+    for (const [key, aliases] of Object.entries(CSV_FIELDS)) {
+      const i = aliases.map((al) => headers.indexOf(al)).find((x) => x !== -1);
+      if (i !== undefined) col[key] = i;
+    }
+    const get = (r, k) => (col[k] === undefined ? '' : (r[col[k]] || '').trim());
+    const records = rows.slice(1).map((r) => {
+      const name = get(r, 'name') || [get(r, 'first'), get(r, 'last')].filter(Boolean).join(' ');
+      const emp = get(r, 'employees').match(/\d[\d,]*/);
+      return {
+        company: get(r, 'company'), website: get(r, 'website'), industry: get(r, 'industry'),
+        employees: emp ? emp[0].replace(/,/g, '') : '',
+        location: get(r, 'location') || [get(r, 'city'), get(r, 'state')].filter(Boolean).join(', '),
+        companyLinkedin: get(r, 'companyLinkedin'),
+        contact: name ? { name, title: get(r, 'title'), email: get(r, 'email'), phone: get(r, 'phone'), mobile: get(r, 'mobile'), linkedin: get(r, 'linkedin') } : null,
+      };
+    }).filter((x) => x.company);
+    return { col, records };
+  }
+
+  /** Work out what an import would do (dry run) or do it, without overwriting anything already filled in. */
+  function applyImport(records, opts, commit) {
+    const now = new Date().toISOString();
+    const made = new Map(); // lower-case name -> new account (dry run keeps them here)
+    const stats = { newAccounts: 0, updatedAccounts: new Set(), newContacts: 0, skippedContacts: 0 };
+    for (const r of records) {
+      const key = r.company.toLowerCase();
+      let a = findAccountByName(r.company) || made.get(key);
+      if (!a) {
+        a = migrateAccount({
+          id: uid(), name: r.company, type: opts.type, stage: STAGES[opts.type][0], tags: opts.tag, notes: '', vendors: [],
+          contacts: [], activities: [], keyDates: [], leadSource: opts.source, createdAt: now, updatedAt: now,
+        });
+        made.set(key, a);
+        stats.newAccounts++;
+        if (commit) state.accounts.push(a);
+      } else if (!made.has(key)) stats.updatedAccounts.add(a.id);
+      const fill = { website: r.website, industry: r.industry, employees: r.employees, location: r.location, linkedin: r.companyLinkedin };
+      if (commit) for (const [k, v] of Object.entries(fill)) if (v && !a[k]) a[k] = v;
+      if (r.contact) {
+        const c = r.contact;
+        const dup = a.contacts.some((x) => (c.email && x.email && x.email.toLowerCase() === c.email.toLowerCase()) || x.name.toLowerCase() === c.name.toLowerCase());
+        if (dup) stats.skippedContacts++;
+        else {
+          stats.newContacts++;
+          const contact = { id: uid(), ...c, role: '', notes: '', status: 'Active', channel: '', timezone: '', primary: a.contacts.length === 0 };
+          if (commit) a.contacts.push(contact); else a.contacts = [...a.contacts, contact];
+        }
+      }
+      if (commit) touch(a);
+    }
+    return stats;
+  }
+
+  function importCsvForm(text, fileName) {
+    const rows = parseCsv(text);
+    if (rows.length < 2) { alert('That file has no rows to import.'); return; }
+    const { col, records } = mapCsv(rows);
+    if (col.company === undefined) {
+      alert('Couldn\'t find a company column. The first row should have headers such as "Company Name", "Website", "First Name", "Last Name", "Job Title", "Email".');
+      return;
+    }
+    // Dry run against copies so the preview never changes real data.
+    const preview = () => {
+      const saved = state.accounts;
+      state.accounts = saved.map((a) => ({ ...a, contacts: [...a.contacts] }));
+      try { return applyImport(records, { type: 'prospect', tag: '', source: '' }, false); } finally { state.accounts = saved; }
+    };
+    const s = preview();
+    const found = Object.keys(col).filter((k) => !['first', 'last', 'city', 'state'].includes(k))
+      .map((k) => ({ company: 'Company', website: 'Website', industry: 'Industry', employees: 'Employees', location: 'Location', companyLinkedin: 'Company LinkedIn',
+        name: 'Name', title: 'Title', email: 'Email', phone: 'Phone', mobile: 'Mobile', linkedin: 'LinkedIn' })[k]);
+    if (col.first !== undefined || col.last !== undefined) found.push('Name');
+    if (col.city !== undefined || col.state !== undefined) found.push('City/State');
+    const fromZoomInfo = /zoominfo/i.test(fileName) || col.companyLinkedin !== undefined || rows[0].some((h) => /zoominfo/i.test(h));
+    openModal('Import accounts & contacts', `
+      <div class="import-summary">
+        <div><b>${s.newAccounts}</b><span>new accounts</span></div>
+        <div><b>${s.updatedAccounts.size}</b><span>existing accounts</span></div>
+        <div><b>${s.newContacts}</b><span>new contacts</span></div>
+        <div><b>${s.skippedContacts}</b><span>duplicates skipped</span></div>
+      </div>
+      <p class="small muted" style="margin:0">From <strong>${esc(fileName)}</strong> (${records.length} rows). Columns recognized: ${[...new Set(found)].map((f) => `<span class="pill">${esc(f)}</span>`).join(' ')}</p>
+      <p class="small muted" style="margin:0">Existing accounts are matched by name. Only empty fields are filled in, and contacts already on an account (same email or name) are skipped.</p>
+      <div class="grid-3">
+        ${field('New accounts are', `<select name="type">${opt('prospect', 'Prospects', 'prospect')}${opt('partner', 'Partners', '')}</select>`)}
+        ${field('Lead source', `<select name="source"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, '')).join('')}</select>`)}
+        ${field('Tag new accounts', `<input name="tag" value="${fromZoomInfo ? 'zoominfo' : 'import'}-${today().slice(5)}">`)}
+      </div>`, (data) => {
+      const st2 = applyImport(records, { type: data.type, tag: data.tag.trim(), source: data.source }, true);
+      toast(`Imported: ${st2.newAccounts} new accounts, ${st2.newContacts} contacts`);
+      ui.typeFilter = 'all'; ui.stageFilter = 'all'; ui.vendorFilter = 'all'; ui.search = '';
+      go('accounts');
+    }, 'Import', { wide: true });
+  }
+
+  $('#csv-import').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) importCsvForm(await file.text(), file.name);
+  });
+
   // ---------- modal ----------
   const modal = $('#modal');
   const modalForm = $('#modal-form');
@@ -1940,7 +2142,8 @@
         ${field('Industry', `<input name="industry" value="${esc(a.industry)}">`)}
         ${field('Employees', `<input name="employees" type="number" min="0" value="${esc(a.employees)}">`)}
         ${field(a.type === 'partner' ? 'Annual value ($)' : 'Deal value ($)', `<input name="value" type="number" min="0" step="any" value="${esc(a.value)}">`)}
-        ${field('Website', `<input name="website" value="${esc(a.website)}" autocapitalize="off">`)}
+        ${field('Website', `<input name="website" value="${esc(a.website)}" autocapitalize="off" placeholder="company.com">`)}
+        ${field('Company LinkedIn', `<input name="linkedin" value="${esc(a.linkedin)}" autocapitalize="off" placeholder="linkedin.com/company/…">`)}
         ${field('City, State', `<input name="location" value="${esc(a.location)}" placeholder="e.g. Austin, TX">`)}
         ${field('Lead source', `<select name="leadSource"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, a.leadSource)).join('')}</select>`)}
       </div></fieldset>
@@ -2238,6 +2441,7 @@
       }
       case 'list-csv': return exportListCsv();
       case 'accounts-csv': return accountsCsv('accounts', filteredAccounts());
+      case 'import-csv': return $('#csv-import').click();
       case 'open-sync': return syncSettings();
       case 'load-sample': loadSample(); return;
       case 'erase-all': eraseAll(); return;
@@ -2299,7 +2503,9 @@
       </section>
       <section class="set-sec">
         <h3>Data</h3>
+        <p class="small muted">Import accounts and contacts from a ZoomInfo export or any spreadsheet saved as CSV.</p>
         <div class="row">
+          <button type="button" class="btn ghost sm" id="set-csv">Import CSV…</button>
           ${state.accounts.length ? '' : '<button type="button" class="btn ghost sm" id="set-sample">Load sample data</button>'}
           <button type="button" class="btn danger sm" id="set-erase">Erase all data…</button>
         </div>
@@ -2310,6 +2516,7 @@
     $('#set-export').addEventListener('click', exportBackup);
     $('#set-import').addEventListener('click', () => { modal.close(); $('#file-import').click(); });
     $('#set-erase').addEventListener('click', () => { modal.close(); eraseAll(); });
+    $('#set-csv').addEventListener('click', () => { modal.close(); $('#csv-import').click(); });
     const sample = $('#set-sample');
     if (sample) sample.addEventListener('click', () => { modal.close(); loadSample(); });
   }
@@ -2351,6 +2558,9 @@
   }
 
   $('#btn-settings').addEventListener('click', openSettings);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.matches && e.target.matches('.acard[role=link]')) e.target.click();
+  });
   $('#btn-search').addEventListener('click', openSearch);
   document.addEventListener('keydown', (e) => {
     const typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');

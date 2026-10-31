@@ -52,6 +52,19 @@ No install, no build step: open `index.html` in a browser.
 - Contacts marked "Left company" or "Do not contact" can't be enrolled and are taken out of
   running cadences
 
+**Web links, LinkedIn & ZoomInfo**
+- Website and LinkedIn icons on accounts (record, table, cards, board) and contacts (cards,
+  cadence people). A faded LinkedIn icon means no profile is saved yet. Tap it to search LinkedIn
+- **Look up** menu on every account and contact: LinkedIn, Sales Navigator, ZoomInfo, the
+  company's public ZoomInfo profile, and Google. The name is copied to the clipboard as well, so
+  you can paste it if a site opens without the search filled in
+- **Import CSV** (Accounts page or Settings): bring in accounts and contacts from a ZoomInfo
+  export or any spreadsheet. Columns are recognized automatically (company, website, company
+  LinkedIn, employees, industry, city/state, first/last name, title, email, direct and mobile
+  phone, contact LinkedIn). A preview shows what will be added. Existing accounts are matched by
+  name, only empty fields are filled, duplicate contacts are skipped, and new accounts are tagged
+  so they're easy to list. CSV exports include website and LinkedIn columns and re-import cleanly
+
 **Contact & account fields**
 - Contacts: title, role in deal, email, direct phone, mobile, LinkedIn URL, preferred channel,
   time zone, status, primary flag, notes
