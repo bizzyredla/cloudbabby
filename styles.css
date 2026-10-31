@@ -849,3 +849,4 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
 @media (max-width: 900px) { .research-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 560px) { .rv-label { flex-basis: 6.5rem; } }
 a.btn { text-decoration: none; }
+.show-more { display: flex; justify-content: center; margin: 1rem 0; }

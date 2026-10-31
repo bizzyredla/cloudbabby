@@ -352,6 +352,8 @@
       ui.mapMode = parts[1] === 'route' ? 'route' : 'accounts';
       if (ui.mapMode === 'route') ui.routeDate = /^\d{4}-\d{2}-\d{2}$/.test(parts[2] || '') ? parts[2] : (ui.routeDate || today());
     } else if (mapState.map) unmountMap(false);
+    if (ui.lastView !== view) ui.showAll = false;
+    ui.lastView = view;
     $$('#tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === (TAB_FOR[view] || view)));
     views[view]();
   }
@@ -472,6 +474,7 @@
     if ((typed || '').trim().toUpperCase() !== 'DELETE') { if (typed !== null) toast('Nothing was deleted'); return; }
     state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = []; state.flows = [];
     ui.listId = null;
+    research = { target: '', hint: '', list: '', flows: ['hq', 'dm', 'hr'], custom: '', pasted: '' }; saveResearch();
     save(); toast('All data erased'); go('dashboard');
   }
 
@@ -528,10 +531,17 @@
     </div>`;
 
   /** One renderer for every collection of accounts (Accounts page and Lists), in the chosen layout. */
+  const PAGE_SIZE = 200;
+  const BOARD_CAP = 50;
+
   function accountCollection(list, emptyMsg = 'No accounts match.') {
     if (ui.accountView === 'board') return accountBoard(list);
     if (!list.length) return `<div class="card empty">${emptyMsg}</div>`;
-    return ui.accountView === 'cards' ? accountCards(list) : accountTable(list);
+    // Large books render the first page; "Show all" expands until you leave the screen.
+    const shown = ui.showAll ? list : list.slice(0, PAGE_SIZE);
+    const more = list.length - shown.length;
+    return (ui.accountView === 'cards' ? accountCards(shown) : accountTable(shown))
+      + (more ? `<div class="show-more"><button class="btn ghost" data-act="show-all">Show all ${list.length} accounts (${more} more)</button></div>` : '');
   }
 
   function accountTable(list) {
@@ -599,7 +609,7 @@
             <section class="kcol" data-stage="${esc(stage)}">
               <header><strong>${esc(stage)}</strong> <span class="pill">${col.length}</span>${total ? `<div class="small muted">${money(total)}</div>` : ''}</header>
               <div class="kcol-body">
-                ${col.map((a) => {
+                ${col.slice(0, BOARD_CAP).map((a) => {
                   const p = primaryContact(a);
                   return `
                   <div class="kcard" draggable="${!touchUI}" data-id="${a.id}" data-act="open-account">
@@ -610,6 +620,7 @@
                     ${touchUI ? `<select class="kcard-stage" data-id="${a.id}" aria-label="Move ${esc(a.name)} to stage">${STAGES[type].map((s2) => opt(s2, s2, a.stage)).join('')}</select>` : ''}
                   </div>`;
                 }).join('') || '<div class="kcol-empty">Drop here</div>'}
+                ${col.length > BOARD_CAP ? `<div class="kcol-empty">+${col.length - BOARD_CAP} more · narrow with filters or search</div>` : ''}
               </div>
             </section>`;
         }).join('')}
@@ -684,9 +695,13 @@
 
     $('#acct-search').addEventListener('input', (e) => {
       ui.search = e.target.value;
-      const pos = e.target.selectionStart;
-      renderAccounts();
-      const el = $('#acct-search'); el.focus(); el.setSelectionRange(pos, pos);
+      clearTimeout(ui.searchTimer);
+      ui.searchTimer = setTimeout(() => { // redraw once typing pauses
+        if (!$('#acct-search')) return; // left the page meanwhile
+        const pos = $('#acct-search').selectionStart;
+        renderAccounts();
+        const el = $('#acct-search'); el.focus(); el.setSelectionRange(pos, pos);
+      }, 160);
     });
     $('#acct-type').addEventListener('change', (e) => { ui.typeFilter = e.target.value; ui.stageFilter = 'all'; renderAccounts(); });
     $('#acct-stage').addEventListener('change', (e) => { ui.stageFilter = e.target.value; renderAccounts(); });
@@ -2165,7 +2180,7 @@
 
   /** Find coordinates for accounts with a new or changed address, one per second, while the map is open. */
   async function locateAccounts() {
-    if (mapState.locating) return;
+    if (mapState.locating || Date.now() < (mapState.geoPausedUntil || 0)) return;
     const run = mapState.runId;
     const todo = state.accounts.filter(needsGeo);
     if (!todo.length) return;
@@ -2179,7 +2194,12 @@
         a.geo = hit ? { ...hit, q } : { q, miss: true };
         touch(a); save();
         if (hit) addAccountMarker(a);
-      } catch (e) { mapState.locating.error = e.message; break; }
+      } catch (e) {
+        // Service unreachable (offline or down): pause lookups instead of retrying in a loop.
+        mapState.locating.error = e.message;
+        mapState.geoPausedUntil = Date.now() + 5 * 60 * 1000;
+        break;
+      }
       mapState.locating.done++;
       updateLocateStatus();
       await new Promise((r) => setTimeout(r, 1100));
@@ -2253,7 +2273,7 @@
     const m = L.circleMarker(ll(a), {
       radius: 8, weight: due ? 3 : 2, color: due ? '#e8590c' : '#fff', fillOpacity: 0.95,
       fillColor: a.type === 'partner' ? '#0f8a6a' : '#8a4bd6',
-    }).bindPopup(accountPopup(a), { minWidth: 220 }).bindTooltip(a.name, { direction: 'top', offset: [0, -6] }).addTo(mapState.layer);
+    }).bindPopup(accountPopup(a), { minWidth: 220 }).bindTooltip(esc(a.name), { direction: 'top', offset: [0, -6] }).addTo(mapState.layer);
     mapState.markers.set(a.id, m);
   }
 
@@ -2288,7 +2308,9 @@
             <button type="button" class="btn sm ghost" data-act="map-near">📍 Near me</button>
           </div>
           <div class="legend small"><span><i style="background:#8a4bd6"></i>Prospect</span><span><i style="background:#0f8a6a"></i>Partner</span><span><i class="due"></i>Due now</span></div>
-          <div id="locate-status"></div>
+          <div id="locate-status">${Date.now() < (mapState.geoPausedUntil || 0) && accts.some(needsGeo) ? `
+            <div class="place-hint">Address lookup is unavailable right now (offline or the service is busy).
+              <button type="button" class="link-btn" data-act="map-geo-retry">Retry</button></div>` : ''}</div>
           ${near ? `
             <h3 style="margin:.5rem 0 .25rem">Closest to you</h3>
             <div class="side-list">${near.map(({ a, d }) => `
@@ -2302,7 +2324,7 @@
             <div class="side-list">${missing.map((a) => `
               <div class="side-item">
                 <a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a>
-                <span class="small muted">${!geoQuery(a) ? 'No address yet' : geoMissed(a) ? "Address not found" : 'Finding…'}</span>
+                <span class="small muted">${!geoQuery(a) ? 'No address yet' : geoMissed(a) ? 'Address not found' : Date.now() < (mapState.geoPausedUntil || 0) ? 'Lookup unavailable' : 'Finding…'}</span>
                 <span class="row" style="gap:.25rem">
                   <button type="button" class="btn sm ghost" data-act="edit-account" data-id="${a.id}">Address</button>
                   <button type="button" class="btn sm ghost" data-act="map-place" data-id="${a.id}">Drop pin</button>
@@ -2321,7 +2343,7 @@
       wirePopups(map);
       mapped.forEach(addAccountMarker);
       if (mapState.me) L.circleMarker(mapState.me, { radius: 7, color: '#fff', weight: 3, fillColor: '#2f6fed', fillOpacity: 1 }).bindTooltip('You are here').addTo(mapState.layer);
-      if (!restored && mapped.length) map.fitBounds(L.latLngBounds(mapped.map(ll)).pad(0.15), { maxZoom: 12 });
+      if (!restored && mapped.length) map.fitBounds(L.latLngBounds(mapped.map(ll)).pad(0.15), { maxZoom: 12, animate: false });
       updateLocateStatus();
       locateAccounts();
     }).catch((e) => { $('#map').innerHTML = `<div class="empty" style="padding:1rem">${esc(e.message)}</div>`; });
@@ -2429,6 +2451,7 @@
   /** Shortest visiting order: nearest-neighbour start, then 2-opt. Index 0 is a fixed start when hasStart. */
   function solveOrder(m, hasStart, roundTrip) {
     const n = m.length;
+    const deadline = performance.now() + 150; // big backlogs still return quickly with a good order
     const cost = (path) => {
       let c = 0;
       for (let i = 0; i < path.length - 1; i++) c += m[path[i]][path[i + 1]];
@@ -2437,7 +2460,7 @@
     };
     const improve = (path) => {
       let better = true;
-      while (better) {
+      while (better && performance.now() < deadline) {
         better = false;
         for (let i = hasStart ? 1 : 0; i < path.length - 1; i++) {
           for (let k = i + 1; k < path.length; k++) {
@@ -2458,7 +2481,9 @@
       return improve(path);
     };
     if (hasStart) return fromStart(0);
-    return [...Array(n).keys()].map(fromStart).reduce((b, p) => (cost(p) < cost(b) ? p : b));
+    // Without a fixed start, try a few spread-out starting stops and keep the shortest.
+    const starts = [...new Set([...Array(Math.min(n, 6)).keys()].map((i) => Math.floor((i * n) / Math.min(n, 6))))];
+    return starts.map(fromStart).reduce((b, p) => (cost(p) < cost(b) ? p : b));
   }
 
   /** What the current optimized order was computed for; when this changes the route re-optimizes itself. */
@@ -2595,11 +2620,11 @@
       mappedStops.forEach((s, i) => {
         const v = visitedRow(d, s.a);
         L.marker(ll(s.a), { icon: L.divIcon({ className: `stop-pin ${v ? 'visited' : ''}`, html: String(stops.indexOf(s) + 1), iconSize: [26, 26] }) })
-          .bindPopup(accountPopup(s.a), { minWidth: 220 }).bindTooltip(s.a.name).addTo(mapState.layer);
+          .bindPopup(accountPopup(s.a), { minWidth: 220 }).bindTooltip(esc(s.a.name)).addTo(mapState.layer);
       });
       wirePopups(map);
       const bounds = [...pts, ...(start ? [start] : [])];
-      if (!restored && bounds.length) map.fitBounds(L.latLngBounds(bounds).pad(0.2), { maxZoom: 13 });
+      if (!restored && bounds.length) map.fitBounds(L.latLngBounds(bounds).pad(0.2), { maxZoom: 13, animate: false });
       if (!pts.length) return;
       const gm = $('#route-gmaps');
       gm.href = googleRouteUrl(start, pts, r.roundTrip);
@@ -2649,7 +2674,11 @@
   function unmountMap(keepView) {
     mapState.runId++;
     mapState.keep = keepView && mapState.map ? { c: mapState.map.getCenter(), z: mapState.map.getZoom() } : null;
-    if (mapState.map) { mapState.map.remove(); mapState.map = null; }
+    if (mapState.map) {
+      // Stop any zoom/pan animation first; removing mid-animation throws inside Leaflet.
+      try { mapState.map.stop(); mapState.map.off(); mapState.map.remove(); } catch (e) { /* already gone */ }
+      mapState.map = null;
+    }
   }
 
   function renderMap() {
@@ -3547,6 +3576,7 @@
       case 'open-sync': return syncSettings();
       case 'load-sample': loadSample(); return;
       case 'erase-all': eraseAll(); return;
+      case 'show-all': ui.showAll = true; return rerender();
       case 'rs-flow': {
         const f = el.dataset.f;
         research.flows = research.flows.includes(f) ? research.flows.filter((x) => x !== f) : [...research.flows, f];
@@ -3583,6 +3613,7 @@
         else toast('Copy not available');
         return;
       }
+      case 'map-geo-retry': mapState.geoPausedUntil = 0; return rerender();
       case 'map-mode': return go(el.dataset.mode === 'route' ? `map/route/${ui.routeDate || today()}` : 'map');
       case 'map-near':
         myLocation().then((pt) => { mapState.me = pt; rerender(); if (mapState.map) mapState.map.setView(pt, 11); }, (err) => toast(err.message));
@@ -4079,6 +4110,21 @@
   }, 250));
 
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+  // If the app stays open past midnight, move "today" screens to the new day.
+  let lastToday = today();
+  function checkNewDay() {
+    const t = today();
+    if (t === lastToday) return;
+    if (ui.plannerDate === lastToday) ui.plannerDate = t;
+    if (ui.routeDate === lastToday) ui.routeDate = t;
+    const old = lastToday;
+    lastToday = t;
+    if (location.hash.includes(old)) location.replace(location.hash.replace(old, t));
+    else if (!modal.open && !(document.activeElement && document.activeElement.matches('input, textarea, select'))) rerender();
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkNewDay(); });
+  setInterval(checkNewDay, 60000);
   setSyncStatus(syncCfg ? 'pending' : 'off');
   route();
   syncNow();
