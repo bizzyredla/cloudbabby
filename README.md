@@ -52,6 +52,23 @@ No install, no build step: open `index.html` in a browser.
 - Contacts marked "Left company" or "Do not contact" can't be enrolled and are taken out of
   running cadences
 
+**Map & route planner**
+- **Accounts map**: every account with an address is pinned (purple = prospect, green = partner,
+  orange ring = follow-up or revisit due). Filter by type, vendor or saved list. **Near me**
+  lists the closest accounts for drop-in visits. Tap a pin to open the account, add it to
+  today's route, or get directions
+- Addresses are found automatically (OpenStreetMap). If one can't be found, fix the address or
+  **Drop pin** on the map by hand
+- **Route planner** for any day: stops come in automatically from that day's planner Visits and
+  Revisits, due revisit dates and cadence Visit steps. Add or remove stops as needed. The route
+  re-optimizes itself whenever stops change, using real drive times (OSRM), from your home base
+  or current location, optionally returning to the start. You get arrival times per stop (with
+  your minutes-per-visit), total drive time and miles, **Open in Google Maps** for the whole
+  route, and ➤ to navigate to each stop (Apple Maps on iPhone). **Visited** logs the visit to the
+  account and your daily plan, and revisits ask when to go back
+- Accounts have a street address field; CSV import reads street address and ZIP columns
+- Map: Leaflet (bundled in `vendor/leaflet`, BSD-2 license), © OpenStreetMap contributors, © CARTO
+
 **Web links, LinkedIn & ZoomInfo**
 - Website and LinkedIn icons on accounts (record, table, cards, board) and contacts (cards,
   cadence people). A faded LinkedIn icon means no profile is saved yet. Tap it to search LinkedIn

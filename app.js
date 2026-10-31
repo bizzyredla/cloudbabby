@@ -155,8 +155,11 @@
   try { Object.assign(ui, JSON.parse(localStorage.getItem(PREFS_KEY)) || {}); } catch (e) { /* defaults */ }
   ui.accountView ||= matchMedia('(max-width: 700px)').matches ? 'cards' : 'table';
   ui.boardType ||= 'prospect';
+  ui.mapMode = 'accounts';
+  ui.routeDate = today();
+  ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home })); } catch (e) { /* ignore */ }
   };
 
   function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], deleted: {} }; }
@@ -280,7 +283,7 @@
     return [...COMPETITORS, ...[...used].filter((v) => !COMPETITORS.includes(v) && v !== NO_VENDOR).sort(), NO_VENDOR];
   };
   const haystack = (a) => [a.name, a.industry, a.tags, a.notes, ...a.vendors,
-    a.location, ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone, c.mobile])].join(' ').toLowerCase();
+    a.location, a.address, ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone, c.mobile])].join(' ').toLowerCase();
   const vendorPills = (a) => a.vendors.map((v) => `<span class="pill vendor">${esc(v)}</span>`).join(' ');
   const getDay = (iso) => state.days[iso] || { priorities: ['', '', ''], notes: '' };
   const findAccountByName = (name) => {
@@ -327,7 +330,7 @@
   }
 
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap };
   const TAB_FOR = { account: 'accounts' };
 
   function route() {
@@ -338,6 +341,11 @@
     if (view === 'planner' && arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)) ui.plannerDate = arg;
     if (view === 'lists' && arg) ui.listId = decodeURIComponent(arg);
     if (view === 'cadences' && arg) ui.cadenceId = arg;
+    if (view === 'map') {
+      const parts = location.hash.split('/');
+      ui.mapMode = parts[1] === 'route' ? 'route' : 'accounts';
+      if (ui.mapMode === 'route') ui.routeDate = /^\d{4}-\d{2}-\d{2}$/.test(parts[2] || '') ? parts[2] : (ui.routeDate || today());
+    } else if (mapState.map) unmountMap(false);
     $$('#tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === (TAB_FOR[view] || view)));
     views[view]();
   }
@@ -725,7 +733,7 @@
           <summary>More details</summary>
           <div class="facts">
             <div><span>Industry</span>${esc(a.industry) || '—'}</div>
-            <div><span>Location</span>${esc(a.location) || '—'}</div>
+            <div><span>Address</span>${geoQuery(a) ? `${esc(geoQuery(a))}${hasGeo(a) ? ` · <a href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}</div>
             <div><span>Website</span>${a.website ? `<a href="${esc(extUrl(a.website))}" target="_blank" rel="noopener">${esc(a.website)}</a>` : '—'}</div>
             <div><span>Company LinkedIn</span>${a.linkedin ? `<a href="${esc(extUrl(a.linkedin))}" target="_blank" rel="noopener">Open profile</a>` : '—'}</div>
             <div><span>Lead source</span>${esc(a.leadSource) || '—'}</div>
@@ -982,6 +990,7 @@
             <div class="small muted">Type an account name (suggestions come from your accounts). Checking off a row for an existing account logs it to that account's history.</div>
           </div>
           <div class="row">
+            <a class="btn sm ghost" href="#map/route/${d}">🗺 Plan route</a>
             <span class="pill" id="plan-count-total">${done}/${total} done</span>
             ${pending ? `<button class="btn sm ghost" data-act="plan-carry">Copy unfinished to ${esc(fmtDate(addDays(d, 1), { weekday: 'short', month: 'short', day: 'numeric' }))}</button>` : ''}
           </div>
@@ -1309,10 +1318,10 @@
 
   function accountsCsv(title, accounts) {
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Account', 'Website', 'Company LinkedIn', 'Type', 'Stage', 'Industry', 'Employees', 'Location', 'Value', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
+    const rows = [['Account', 'Website', 'Company LinkedIn', 'Type', 'Stage', 'Industry', 'Employees', 'Street address', 'Location', 'Value', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
     for (const a of accounts) {
       const p = primaryContact(a) || {};
-      rows.push([a.name, a.website, a.linkedin, a.type, a.stage, a.industry, a.employees, a.location, a.value, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
+      rows.push([a.name, a.website, a.linkedin, a.type, a.stage, a.industry, a.employees, a.address, a.location, a.value, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
         a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.tags]);
     }
     downloadFile(`${title.replace(/[^\w-]+/g, '-')}-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
@@ -1980,6 +1989,8 @@
     city: ['companycity', 'city', 'hqcity'],
     state: ['companystate', 'state', 'hqstate', 'region'],
     location: ['location', 'companylocation'],
+    address: ['companystreetaddress', 'streetaddress', 'address', 'companyaddress', 'street', 'hqaddress', 'address1'],
+    zip: ['companyzipcode', 'zipcode', 'zip', 'postalcode', 'companypostalcode'],
     companyLinkedin: ['companylinkedinurl', 'linkedincompanyurl', 'companylinkedin', 'linkedincompanyprofileurl'],
     first: ['firstname', 'first'],
     last: ['lastname', 'last'],
@@ -2006,7 +2017,8 @@
       return {
         company: get(r, 'company'), website: get(r, 'website'), industry: get(r, 'industry'),
         employees: emp ? emp[0].replace(/,/g, '') : '',
-        location: get(r, 'location') || [get(r, 'city'), get(r, 'state')].filter(Boolean).join(', '),
+        location: get(r, 'location') || [get(r, 'city'), [get(r, 'state'), get(r, 'zip')].filter(Boolean).join(' ')].filter(Boolean).join(', '),
+        address: get(r, 'address'),
         companyLinkedin: get(r, 'companyLinkedin'),
         contact: name ? { name, title: get(r, 'title'), email: get(r, 'email'), phone: get(r, 'phone'), mobile: get(r, 'mobile'), linkedin: get(r, 'linkedin') } : null,
       };
@@ -2031,7 +2043,7 @@
         stats.newAccounts++;
         if (commit) state.accounts.push(a);
       } else if (!made.has(key)) stats.updatedAccounts.add(a.id);
-      const fill = { website: r.website, industry: r.industry, employees: r.employees, location: r.location, linkedin: r.companyLinkedin };
+      const fill = { website: r.website, industry: r.industry, employees: r.employees, location: r.location, address: r.address, linkedin: r.companyLinkedin };
       if (commit) for (const [k, v] of Object.entries(fill)) if (v && !a[k]) a[k] = v;
       if (r.contact) {
         const c = r.contact;
@@ -2063,9 +2075,9 @@
       try { return applyImport(records, { type: 'prospect', tag: '', source: '' }, false); } finally { state.accounts = saved; }
     };
     const s = preview();
-    const found = Object.keys(col).filter((k) => !['first', 'last', 'city', 'state'].includes(k))
+    const found = Object.keys(col).filter((k) => !['first', 'last', 'city', 'state', 'zip'].includes(k))
       .map((k) => ({ company: 'Company', website: 'Website', industry: 'Industry', employees: 'Employees', location: 'Location', companyLinkedin: 'Company LinkedIn',
-        name: 'Name', title: 'Title', email: 'Email', phone: 'Phone', mobile: 'Mobile', linkedin: 'LinkedIn' })[k]);
+        name: 'Name', title: 'Title', email: 'Email', phone: 'Phone', mobile: 'Mobile', linkedin: 'LinkedIn', address: 'Street address' })[k]);
     if (col.first !== undefined || col.last !== undefined) found.push('Name');
     if (col.city !== undefined || col.state !== undefined) found.push('City/State');
     const fromZoomInfo = /zoominfo/i.test(fileName) || col.companyLinkedin !== undefined || rows[0].some((h) => /zoominfo/i.test(h));
@@ -2095,6 +2107,550 @@
     e.target.value = '';
     if (file) importCsvForm(await file.text(), file.name);
   });
+
+  // ---------- map & route planner ----------
+  // Leaflet (bundled in vendor/) draws the map; OpenStreetMap's Nominatim finds coordinates for
+  // addresses (free, at most one lookup per second); the public OSRM server gives drive times and
+  // road routes. Every network step has a fallback so the page still works if a service is down.
+  const CA_CENTER = [37.2, -119.5];
+  const AVG_MPH = 35;
+  const mapState = { map: null, view: null, keep: null, runId: 0, locating: null, me: null, placing: null, markers: new Map(), legsCache: new Map() };
+
+  const geoQuery = (a) => [a.address, a.location].filter(Boolean).join(', ').trim();
+  const hasGeo = (a) => !!(a.geo && Number.isFinite(a.geo.lat) && (a.geo.manual || a.geo.q === geoQuery(a)));
+  const needsGeo = (a) => geoQuery(a) && !hasGeo(a) && !(a.geo && a.geo.miss && a.geo.q === geoQuery(a));
+  const geoMissed = (a) => !hasGeo(a) && a.geo && a.geo.miss && a.geo.q === geoQuery(a);
+  const ll = (a) => [a.geo.lat, a.geo.lng];
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+
+  function miles(p, q) {
+    const R = 3958.8, toRad = (x) => (x * Math.PI) / 180;
+    const dLat = toRad(q[0] - p[0]), dLng = toRad(q[1] - p[1]);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(p[0])) * Math.cos(toRad(q[0])) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  const fmtMiles = (m) => `${m < 10 ? m.toFixed(1) : Math.round(m)} mi`;
+  const fmtDur = (sec) => { const m = Math.round(sec / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+  const navUrl = (p) => (isIOS ? `https://maps.apple.com/?daddr=${p[0]},${p[1]}&dirflg=d` : `https://www.google.com/maps/dir/?api=1&destination=${p[0]},${p[1]}&travelmode=driving`);
+
+  let leafletReady = null;
+  function loadLeaflet() {
+    if (window.L) return Promise.resolve();
+    leafletReady ||= new Promise((resolve, reject) => {
+      const css = document.createElement('link');
+      css.rel = 'stylesheet'; css.href = 'vendor/leaflet/leaflet.css';
+      document.head.appendChild(css);
+      const js = document.createElement('script');
+      js.src = 'vendor/leaflet/leaflet.js';
+      js.onload = resolve; js.onerror = () => { leafletReady = null; reject(new Error('Map library failed to load')); };
+      document.head.appendChild(js);
+    });
+    return leafletReady;
+  }
+
+  async function geocode(q) {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`Address lookup failed (${res.status})`);
+    const [hit] = await res.json();
+    return hit ? { lat: Number(hit.lat), lng: Number(hit.lon) } : null;
+  }
+
+  /** Find coordinates for accounts with a new or changed address, one per second, while the map is open. */
+  async function locateAccounts() {
+    if (mapState.locating) return;
+    const run = mapState.runId;
+    const todo = state.accounts.filter(needsGeo);
+    if (!todo.length) return;
+    mapState.locating = { done: 0, total: todo.length };
+    updateLocateStatus();
+    for (const a of todo) {
+      if (run !== mapState.runId) break;
+      const q = geoQuery(a);
+      try {
+        const hit = await geocode(q);
+        a.geo = hit ? { ...hit, q } : { q, miss: true };
+        touch(a); save();
+        if (hit) addAccountMarker(a);
+      } catch (e) { mapState.locating.error = e.message; break; }
+      mapState.locating.done++;
+      updateLocateStatus();
+      await new Promise((r) => setTimeout(r, 1100));
+    }
+    const err = mapState.locating && mapState.locating.error;
+    mapState.locating = null;
+    if (run === mapState.runId) { if (err) toast('Address lookup is unavailable right now. Try again later.'); rerenderMap(); }
+  }
+
+  function updateLocateStatus() {
+    const el = $('#locate-status');
+    if (!el || !mapState.locating) return;
+    const { done, total } = mapState.locating;
+    el.innerHTML = `<div class="small">Finding addresses… ${done}/${total}</div><div class="progress"><div style="width:${Math.round((done / total) * 100)}%"></div></div>`;
+  }
+
+  /** Create (or recreate) the Leaflet map inside #map, keeping the previous view if there was one. */
+  function mountMap() {
+    const keep = mapState.keep;
+    const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+    const map = L.map('map', { zoomControl: true, attributionControl: true });
+    L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? 'dark_all' : 'rastertiles/voyager'}/{z}/{x}/{y}{r}.png`, {
+      subdomains: 'abcd', maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
+    }).addTo(map);
+    if (keep) map.setView(keep.c, keep.z); else map.setView(CA_CENTER, 6);
+    map.on('click', (e) => {
+      if (!mapState.placing) return;
+      const a = getAccount(mapState.placing);
+      mapState.placing = null;
+      if (!a) return;
+      a.geo = { lat: e.latlng.lat, lng: e.latlng.lng, q: geoQuery(a), manual: true };
+      touch(a); save(); toast(`Pinned ${a.name}`); rerenderMap();
+    });
+    mapState.map = map;
+    mapState.markers = new Map();
+    mapState.layer = L.layerGroup().addTo(map);
+    return { map, restored: !!keep };
+  }
+
+  function rerenderMap() { if (location.hash.startsWith('#map')) rerender(); }
+
+  // ----- accounts map -----
+  const mapFilter = () => {
+    const f = ui.mapFilter;
+    const list = f.list ? resolveList(f.list) : null;
+    const ids = list ? new Set(listAccounts(list).map((a) => a.id)) : null;
+    return state.accounts.filter((a) => (f.type === 'all' || a.type === f.type) && (f.vendor === 'all' || a.vendors.includes(f.vendor)) && (!ids || ids.has(a.id)));
+  };
+
+  function accountPopup(a) {
+    const p = primaryContact(a);
+    return `<div class="map-pop">
+      <strong>${esc(a.name)}</strong> ${typePill(a)}
+      <div class="small muted">${esc(a.stage)}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</div>
+      ${geoQuery(a) ? `<div class="small">${esc(geoQuery(a))}</div>` : ''}
+      ${p ? `<div class="small">${esc(p.name)}${p.phone ? ` · <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : ''}</div>` : ''}
+      ${a.revisitDate ? `<div class="small">Revisit ${dueChip(a.revisitDate)}</div>` : ''}
+      <div class="row map-pop-actions">
+        <a class="btn sm" href="#account/${a.id}">Open</a>
+        <button type="button" class="btn sm ghost" data-pop="route" data-id="${a.id}">+ Today's route</button>
+        <a class="btn sm ghost" href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>
+      </div>
+    </div>`;
+  }
+
+  function addAccountMarker(a) {
+    if (!mapState.layer || !hasGeo(a) || mapState.view !== 'accounts') return;
+    if (!mapFilter().includes(a)) return;
+    const due = (a.revisitDate && a.revisitDate <= today()) || (a.nextFollowUp && a.nextFollowUp <= today());
+    const m = L.circleMarker(ll(a), {
+      radius: 8, weight: due ? 3 : 2, color: due ? '#e8590c' : '#fff', fillOpacity: 0.95,
+      fillColor: a.type === 'partner' ? '#0f8a6a' : '#8a4bd6',
+    }).bindPopup(accountPopup(a), { minWidth: 220 }).bindTooltip(a.name, { direction: 'top', offset: [0, -6] }).addTo(mapState.layer);
+    mapState.markers.set(a.id, m);
+  }
+
+  // Leaflet stops clicks inside popups from reaching the page, so wire popup buttons directly.
+  function wirePopups(map) {
+    map.on('popupopen', (e) => {
+      const el = e.popup.getElement();
+      $$('[data-pop=route]', el).forEach((b) => b.addEventListener('click', () => {
+        addRouteStop(today(), b.dataset.id);
+        b.textContent = '✓ On today\'s route'; b.disabled = true;
+      }));
+    });
+  }
+
+  function renderMapAccounts() {
+    const accts = mapFilter();
+    const mapped = accts.filter(hasGeo);
+    const missing = accts.filter((a) => !hasGeo(a));
+    const near = mapState.me ? mapped.map((a) => ({ a, d: miles(mapState.me, ll(a)) })).sort((x, y) => x.d - y.d).slice(0, 12) : null;
+    const f = ui.mapFilter;
+    $('#view').innerHTML = `
+      ${mapHead('accounts')}
+      <div class="map-layout">
+        <aside class="card map-side">
+          <div class="filters">
+            <select id="mf-type" aria-label="Type">${opt('all', 'All types', f.type)}${opt('prospect', 'Prospects', f.type)}${opt('partner', 'Partners', f.type)}</select>
+            <select id="mf-vendor" aria-label="Vendor"><option value="all">All vendors</option>${allVendors().map((v) => opt(v, v, f.vendor)).join('')}</select>
+            <select id="mf-list" aria-label="List"><option value="">All accounts</option>${state.lists.map((l) => opt(l.id, l.name, f.list)).join('')}</select>
+          </div>
+          <div class="row spread">
+            <span class="small muted">${mapped.length} of ${accts.length} on the map</span>
+            <button type="button" class="btn sm ghost" data-act="map-near">📍 Near me</button>
+          </div>
+          <div class="legend small"><span><i style="background:#8a4bd6"></i>Prospect</span><span><i style="background:#0f8a6a"></i>Partner</span><span><i class="due"></i>Due now</span></div>
+          <div id="locate-status"></div>
+          ${near ? `
+            <h3 style="margin:.5rem 0 .25rem">Closest to you</h3>
+            <div class="side-list">${near.map(({ a, d }) => `
+              <div class="side-item">
+                <button type="button" class="link-btn" data-act="map-focus" data-id="${a.id}"><strong>${esc(a.name)}</strong></button>
+                <span class="small muted">${fmtMiles(d)} · ${esc(a.stage)}</span>
+                <button type="button" class="btn sm ghost" data-act="route-add" data-id="${a.id}">+ Route</button>
+              </div>`).join('') || '<div class="empty">No mapped accounts yet.</div>'}</div>` : ''}
+          ${missing.length ? `
+            <h3 style="margin:.75rem 0 .25rem">Not on the map <span class="muted small">(${missing.length})</span></h3>
+            <div class="side-list">${missing.map((a) => `
+              <div class="side-item">
+                <a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a>
+                <span class="small muted">${!geoQuery(a) ? 'No address yet' : geoMissed(a) ? "Address not found" : 'Finding…'}</span>
+                <span class="row" style="gap:.25rem">
+                  <button type="button" class="btn sm ghost" data-act="edit-account" data-id="${a.id}">Address</button>
+                  <button type="button" class="btn sm ghost" data-act="map-place" data-id="${a.id}">Drop pin</button>
+                </span>
+              </div>`).join('')}</div>` : ''}
+          ${mapState.placing ? `<div class="place-hint">Tap the map where <strong>${esc((getAccount(mapState.placing) || {}).name || '')}</strong> is located.</div>` : ''}
+        </aside>
+        <div class="card map-card"><div id="map" class="map ${mapState.placing ? 'placing' : ''}"></div></div>
+      </div>`;
+    $('#mf-type').addEventListener('change', (e) => { ui.mapFilter.type = e.target.value; rerender(); });
+    $('#mf-vendor').addEventListener('change', (e) => { ui.mapFilter.vendor = e.target.value; rerender(); });
+    $('#mf-list').addEventListener('change', (e) => { ui.mapFilter.list = e.target.value; rerender(); });
+    loadLeaflet().then(() => {
+      if (mapState.view !== 'accounts' || !$('#map')) return;
+      const { map, restored } = mountMap();
+      wirePopups(map);
+      mapped.forEach(addAccountMarker);
+      if (mapState.me) L.circleMarker(mapState.me, { radius: 7, color: '#fff', weight: 3, fillColor: '#2f6fed', fillOpacity: 1 }).bindTooltip('You are here').addTo(mapState.layer);
+      if (!restored && mapped.length) map.fitBounds(L.latLngBounds(mapped.map(ll)).pad(0.15), { maxZoom: 12 });
+      updateLocateStatus();
+      locateAccounts();
+    }).catch((e) => { $('#map').innerHTML = `<div class="empty" style="padding:1rem">${esc(e.message)}</div>`; });
+  }
+
+  function mapHead(mode) {
+    return `<div class="page-head">
+      <h1>Map</h1>
+      <div class="seg" role="group" aria-label="Map mode">
+        <button type="button" class="${mode === 'accounts' ? 'active' : ''}" data-act="map-mode" data-mode="accounts">Accounts</button>
+        <button type="button" class="${mode === 'route' ? 'active' : ''}" data-act="map-mode" data-mode="route">Route planner</button>
+      </div>
+    </div>`;
+  }
+
+  // ----- route planner -----
+  const ROUTE_DEFAULTS = { extra: [], removed: [], order: [], start: 'home', roundTrip: true, startTime: '08:30', visitMins: 30 };
+  const getRoute = (d) => ({ ...ROUTE_DEFAULTS, ...(getDay(d).route || {}) });
+  function setRoute(d, patch) {
+    state.days[d] = { ...getDay(d), route: { ...getRoute(d), ...patch } };
+    save();
+  }
+  function addRouteStop(d, id) {
+    const r = getRoute(d);
+    setRoute(d, { extra: r.extra.includes(id) ? r.extra : [...r.extra, id], removed: r.removed.filter((x) => x !== id) });
+    toast(`Added to the ${d === today() ? "today's" : fmtDate(d, { month: 'short', day: 'numeric' })} route`);
+  }
+
+  /** Who to visit on day d: planner Visits/Revisits rows, due revisits, cadence visit steps, and added stops. */
+  function routeStops(d) {
+    const r = getRoute(d);
+    const plan = getPlan(d);
+    const stops = new Map();
+    const add = (a, why) => { if (a && !r.removed.includes(a.id) && !stops.has(a.id)) stops.set(a.id, { a, why }); };
+    for (const row of plan.visits) add(findAccountByName(row.name), 'Planned visit');
+    for (const row of plan.revisits) add(findAccountByName(row.name), 'Revisit');
+    for (const a of dueRevisits(d, plan.revisits)) add(a, 'Revisit due');
+    for (const p of dueSteps(d)) if (p.step.type === 'visit') add(p.acct, `${p.cad.name}: visit`);
+    for (const id of r.extra) add(getAccount(id), 'Added');
+    const all = [...stops.values()];
+    const rank = (s) => { const i = r.order.indexOf(s.a.id); return i === -1 ? 1e6 : i; };
+    return all.sort((x, y) => rank(x) - rank(y));
+  }
+
+  const visitedRow = (d, a) => {
+    const plan = getPlan(d);
+    const n = a.name.trim().toLowerCase();
+    return [...plan.visits, ...plan.revisits].find((r) => r.done && r.name.trim().toLowerCase() === n);
+  };
+
+  /** Mark a stop visited: tick (or add) its planner row, which logs the visit to the account history. */
+  function markVisited(d, a) {
+    const plan = getPlan(d, true);
+    const n = a.name.trim().toLowerCase();
+    const isRevisit = plan.revisits.some((r) => r.name.trim().toLowerCase() === n) || (a.revisitDate && a.revisitDate <= d);
+    const secKey = isRevisit ? 'revisits' : 'visits';
+    const sec = PLAN_SECTIONS.find((x) => x.key === secKey);
+    const rows = plan[secKey];
+    let row = rows.find((r) => r.name.trim().toLowerCase() === n);
+    if (!row) {
+      const slot = rows.findIndex((r) => !r.name.trim());
+      row = { name: a.name, kind: 'Visit', note: isRevisit ? (a.revisitNote || '') : 'Route visit', done: false };
+      if (slot === -1) rows.push(row); else rows[slot] = row;
+    }
+    row.done = true;
+    syncPlanActivity(d, sec, row);
+    if (secKey === 'revisits') settleRevisit(d, row);
+    save();
+    toast(`${a.name}: visit logged`);
+    if (secKey === 'revisits') nextRevisitForm(a, d); else rerender();
+  }
+
+  /** Where the day starts. The device location is only requested when optimizing, then remembered. */
+  async function startPoint(r, ask = true) {
+    if (r.start === 'home' && ui.home) return [ui.home.lat, ui.home.lng];
+    if (r.start === 'gps') {
+      if (mapState.me || !ask) return mapState.me;
+      try { mapState.me = await myLocation(); return mapState.me; } catch (e) { toast('Location unavailable, starting from the first stop'); }
+    }
+    return null;
+  }
+
+  function myLocation() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error('Location is not available on this device'));
+      navigator.geolocation.getCurrentPosition((pos) => resolve([pos.coords.latitude, pos.coords.longitude]),
+        () => reject(new Error('Location permission was denied')), { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 });
+    });
+  }
+
+  /** Drive-time matrix (seconds) between points: OSRM if reachable, else straight-line distance at an average speed. */
+  async function durationMatrix(points) {
+    try {
+      const coords = points.map((p) => `${p[1]},${p[0]}`).join(';');
+      const res = await fetch(`https://router.project-osrm.org/table/v1/driving/${coords}?annotations=duration`);
+      if (!res.ok) throw new Error();
+      const j = await res.json();
+      if (j.code !== 'Ok' || j.durations.some((row) => row.some((x) => x === null))) throw new Error();
+      return { m: j.durations, estimated: false };
+    } catch (e) {
+      return { m: points.map((p) => points.map((q) => (miles(p, q) * 1.25 / AVG_MPH) * 3600)), estimated: true };
+    }
+  }
+
+  /** Shortest visiting order: nearest-neighbour start, then 2-opt. Index 0 is a fixed start when hasStart. */
+  function solveOrder(m, hasStart, roundTrip) {
+    const n = m.length;
+    const cost = (path) => {
+      let c = 0;
+      for (let i = 0; i < path.length - 1; i++) c += m[path[i]][path[i + 1]];
+      if (roundTrip && path.length > 1) c += m[path[path.length - 1]][path[0]];
+      return c;
+    };
+    const improve = (path) => {
+      let better = true;
+      while (better) {
+        better = false;
+        for (let i = hasStart ? 1 : 0; i < path.length - 1; i++) {
+          for (let k = i + 1; k < path.length; k++) {
+            const cand = [...path.slice(0, i), ...path.slice(i, k + 1).reverse(), ...path.slice(k + 1)];
+            if (cost(cand) + 1e-6 < cost(path)) { path = cand; better = true; }
+          }
+        }
+      }
+      return path;
+    };
+    const fromStart = (s) => {
+      const path = [s]; const left = new Set([...Array(n).keys()].filter((i) => i !== s));
+      while (left.size) {
+        const last = path[path.length - 1];
+        const next = [...left].reduce((b, i) => (m[last][i] < m[last][b] ? i : b));
+        path.push(next); left.delete(next);
+      }
+      return improve(path);
+    };
+    if (hasStart) return fromStart(0);
+    return [...Array(n).keys()].map(fromStart).reduce((b, p) => (cost(p) < cost(b) ? p : b));
+  }
+
+  /** What the current optimized order was computed for; when this changes the route re-optimizes itself. */
+  const routeKey = (d, r) => [r.start, r.roundTrip, r.start === 'home' && ui.home ? ui.home.label : '',
+    ...routeStops(d).filter((s) => hasGeo(s.a)).map((s) => s.a.id).sort()].join('|');
+
+  async function optimizeRoute(d, silent = false) {
+    const r = getRoute(d);
+    const stops = routeStops(d).filter((s) => hasGeo(s.a));
+    if (stops.length < 2) { if (!silent) toast('Add at least two stops with an address'); return; }
+    const btn = $('#route-opt'); if (btn) { btn.disabled = true; btn.textContent = 'Optimizing…'; }
+    const start = await startPoint(r);
+    const points = [...(start ? [start] : []), ...stops.map((s) => ll(s.a))];
+    const { m } = await durationMatrix(points);
+    const path = solveOrder(m, !!start, r.roundTrip && !!start);
+    const order = path.filter((i) => !start || i > 0).map((i) => stops[start ? i - 1 : i].a.id);
+    const unmapped = routeStops(d).filter((s) => !hasGeo(s.a)).map((s) => s.a.id);
+    setRoute(d, { order: [...order, ...unmapped], optKey: routeKey(d, getRoute(d)) });
+    if (!silent) toast('Route optimized');
+    rerender();
+  }
+
+  /** Road legs for the route in order: OSRM route if reachable, else straight lines with estimated times. */
+  async function routeLegs(points) {
+    const key = points.map((p) => p.map((x) => x.toFixed(5)).join(',')).join('|');
+    if (mapState.legsCache.has(key)) return mapState.legsCache.get(key);
+    let out;
+    try {
+      const coords = points.map((p) => `${p[1]},${p[0]}`).join(';');
+      const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
+      if (!res.ok) throw new Error();
+      const j = await res.json();
+      if (j.code !== 'Ok') throw new Error();
+      out = { legs: j.routes[0].legs.map((l) => ({ sec: l.duration, mi: l.distance / 1609.34 })), line: j.routes[0].geometry.coordinates.map(([x, y]) => [y, x]), estimated: false };
+    } catch (e) {
+      out = { legs: points.slice(1).map((p, i) => { const mi = miles(points[i], p) * 1.25; return { sec: (mi / AVG_MPH) * 3600, mi }; }), line: points, estimated: true };
+    }
+    mapState.legsCache.set(key, out);
+    return out;
+  }
+
+  const clock = (hhmm, addSec) => {
+    const [h, m] = (hhmm || '08:30').split(':').map(Number);
+    const d = new Date(2000, 0, 1, h, m); d.setSeconds(d.getSeconds() + addSec);
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  };
+
+  function googleRouteUrl(start, pts, roundTrip) {
+    const all = start ? [start, ...pts] : pts;
+    const origin = all[0];
+    const dest = roundTrip && start ? start : all[all.length - 1];
+    const mids = (roundTrip && start ? all.slice(1) : all.slice(1, -1)).slice(0, 9);
+    const f = (p) => `${p[0].toFixed(6)},${p[1].toFixed(6)}`;
+    return `https://www.google.com/maps/dir/?api=1&origin=${f(origin)}&destination=${f(dest)}${mids.length ? `&waypoints=${encodeURIComponent(mids.map(f).join('|'))}` : ''}&travelmode=driving`;
+  }
+
+  function renderRoutePlanner() {
+    const d = ui.routeDate;
+    const r = getRoute(d);
+    const stops = routeStops(d);
+    const mappedStops = stops.filter((s) => hasGeo(s.a));
+    const addable = state.accounts.filter((a) => !stops.some((s) => s.a.id === a.id)).sort((x, y) => x.name.localeCompare(y.name));
+    const homeOk = !!ui.home;
+    $('#view').innerHTML = `
+      ${mapHead('route')}
+      <div class="map-layout">
+        <aside class="card map-side">
+          <div class="row spread">
+            <div class="row" style="gap:.3rem">
+              <button class="btn ghost sm" data-act="route-day" data-n="-1" aria-label="Previous day">‹</button>
+              <input type="date" id="route-date" value="${d}" style="width:auto">
+              <button class="btn ghost sm" data-act="route-day" data-n="1" aria-label="Next day">›</button>
+            </div>
+            <a class="small" href="#planner/${d}">Planner →</a>
+          </div>
+          <div class="grid-2 route-opts">
+            ${field('Start from', `<select id="r-start">${opt('home', homeOk ? `Home base` : 'Home base (not set)', r.start)}${opt('gps', 'My current location', r.start)}${opt('first', 'First stop', r.start)}</select>`)}
+            ${field('Leave at', `<input id="r-time" type="time" value="${esc(r.startTime)}">`)}
+            ${field('Minutes per visit', `<input id="r-mins" type="number" min="0" step="5" value="${esc(r.visitMins)}">`)}
+            <label class="row small" style="align-self:end"><input id="r-round" type="checkbox" style="width:auto" ${r.roundTrip ? 'checked' : ''}> Return to start</label>
+          </div>
+          <div class="small"><button type="button" class="link-btn" data-act="set-home">${homeOk ? `Home base: ${esc(ui.home.label)} · change` : 'Set your home base'}</button></div>
+          <div class="row">
+            <button class="btn" id="route-opt" data-act="route-optimize" ${mappedStops.length < 2 ? 'disabled' : ''}>${r.optKey ? 'Re-optimize' : 'Optimize route'}</button>
+            <a class="btn ghost" id="route-gmaps" target="_blank" rel="noopener" ${mappedStops.length ? '' : 'hidden'}>Open in Google Maps</a>
+          </div>
+          <div id="route-summary" class="route-summary"></div>
+          <ol class="stops" id="route-stops">
+            ${stops.map((s, i) => {
+              const v = visitedRow(d, s.a);
+              return `<li class="stop ${v ? 'visited' : ''} ${hasGeo(s.a) ? '' : 'nogeo'}" data-id="${s.a.id}">
+                <span class="stop-num">${i + 1}</span>
+                <div class="grow">
+                  <div><a href="#account/${s.a.id}"><strong>${esc(s.a.name)}</strong></a> <span class="pill">${esc(s.why)}</span></div>
+                  <div class="small muted">${esc(geoQuery(s.a) || 'No address')}${hasGeo(s.a) ? '' : ' · not on the map'}</div>
+                  <div class="small stop-eta"></div>
+                </div>
+                <span class="stop-actions">
+                  ${hasGeo(s.a) ? `<a class="icon-btn" href="${esc(navUrl(ll(s.a)))}" target="_blank" rel="noopener" title="Navigate">➤</a>` : ''}
+                  ${v ? '<span class="pill won">Visited</span>' : `<button class="btn sm ghost" data-act="route-visited" data-id="${s.a.id}">Visited</button>`}
+                  <button class="icon-btn" data-act="route-remove" data-id="${s.a.id}" title="Remove from this route">✕</button>
+                </span>
+              </li>`;
+            }).join('') || '<div class="empty">No visits planned for this day. Add stops below, or put accounts in the planner\'s Visits / Revisits.</div>'}
+          </ol>
+          <div class="row">
+            <select id="route-add" style="flex:1"><option value="">+ Add a stop…</option>${addable.map((a) => `<option value="${a.id}">${esc(a.name)}${hasGeo(a) ? '' : ' (no address)'}</option>`).join('')}</select>
+          </div>
+        </aside>
+        <div class="card map-card"><div id="map" class="map"></div></div>
+      </div>`;
+
+    $('#route-date').addEventListener('change', (e) => { if (e.target.value) go(`map/route/${e.target.value}`); });
+    $('#r-start').addEventListener('change', (e) => {
+      if (e.target.value === 'home' && !ui.home) { homeBaseForm(); }
+      setRoute(d, { start: e.target.value }); rerender();
+    });
+    $('#r-time').addEventListener('change', (e) => { setRoute(d, { startTime: e.target.value }); rerender(); });
+    $('#r-mins').addEventListener('change', (e) => { setRoute(d, { visitMins: Math.max(0, Number(e.target.value) || 0) }); rerender(); });
+    $('#r-round').addEventListener('change', (e) => { setRoute(d, { roundTrip: e.target.checked }); rerender(); });
+    $('#route-add').addEventListener('change', (e) => { if (e.target.value) { addRouteStop(d, e.target.value); rerender(); } });
+
+    const run = mapState.runId;
+    // Keep the best order automatically whenever the stops or start change (GPS waits until location is known).
+    if (mappedStops.length >= 2 && r.optKey !== routeKey(d, r) && (r.start !== 'gps' || mapState.me)) {
+      optimizeRoute(d, true);
+      return;
+    }
+    Promise.all([loadLeaflet(), startPoint(r, false)]).then(async ([, start]) => {
+      if (run !== mapState.runId || !$('#map')) return;
+      const { map, restored } = mountMap();
+      const pts = mappedStops.map((s) => ll(s.a));
+      if (start) L.marker(start, { icon: L.divIcon({ className: 'home-pin', html: '⌂', iconSize: [26, 26] }) }).bindTooltip('Start').addTo(mapState.layer);
+      mappedStops.forEach((s, i) => {
+        const v = visitedRow(d, s.a);
+        L.marker(ll(s.a), { icon: L.divIcon({ className: `stop-pin ${v ? 'visited' : ''}`, html: String(stops.indexOf(s) + 1), iconSize: [26, 26] }) })
+          .bindPopup(accountPopup(s.a), { minWidth: 220 }).bindTooltip(s.a.name).addTo(mapState.layer);
+      });
+      wirePopups(map);
+      const bounds = [...pts, ...(start ? [start] : [])];
+      if (!restored && bounds.length) map.fitBounds(L.latLngBounds(bounds).pad(0.2), { maxZoom: 13 });
+      if (!pts.length) return;
+      const gm = $('#route-gmaps');
+      gm.href = googleRouteUrl(start, pts, r.roundTrip);
+      const legPts = [...(start ? [start] : []), ...pts, ...(start && r.roundTrip ? [start] : [])];
+      const { legs, line, estimated } = legPts.length > 1 ? await routeLegs(legPts) : { legs: [], line: [], estimated: true };
+      if (run !== mapState.runId || !$('#map')) return;
+      if (line.length > 1) L.polyline(line, { color: '#2f6fed', weight: 4, opacity: 0.8, dashArray: estimated ? '6 8' : null }).addTo(mapState.layer);
+      // Arrival times: drive legs plus time spent at each stop.
+      let t = 0; let driveSec = 0; let mi = 0;
+      const legOffset = start ? 0 : -1;
+      mappedStops.forEach((s, i) => {
+        const leg = legs[i + legOffset];
+        if (leg) { t += leg.sec; driveSec += leg.sec; mi += leg.mi; }
+        const li = $(`#route-stops .stop[data-id="${s.a.id}"] .stop-eta`);
+        if (li) li.innerHTML = `Arrive ~${clock(r.startTime, t)}${leg ? ` · ${fmtDur(leg.sec)} drive (${fmtMiles(leg.mi)})` : ''}`;
+        t += r.visitMins * 60;
+      });
+      const back = start && r.roundTrip ? legs[legs.length - 1] : null;
+      if (back) { t += back.sec; driveSec += back.sec; mi += back.mi; }
+      $('#route-summary').innerHTML = `
+        <div><b>${mappedStops.length}</b><span>stops</span></div>
+        <div><b>${fmtDur(driveSec)}</b><span>driving${estimated ? ' (est.)' : ''}</span></div>
+        <div><b>${fmtMiles(mi)}</b><span>total</span></div>
+        <div><b>${clock(r.startTime, t)}</b><span>${back ? 'back home' : 'done'}</span></div>`;
+      if (mappedStops.length > 10) $('#route-summary').insertAdjacentHTML('beforeend', '<p class="small muted span-all">Google Maps opens the first 10 stops; use ➤ on each stop for the rest.</p>');
+    }).catch((e) => { const m = $('#map'); if (m) m.innerHTML = `<div class="empty" style="padding:1rem">${esc(e.message)}</div>`; });
+  }
+
+  function homeBaseForm() {
+    openModal('Home base', `
+      <p class="small muted" style="margin:0">Where your day usually starts, e.g. your home or office. Saved on this device.</p>
+      ${field('Address', `<input name="addr" value="${esc(ui.home ? ui.home.label : '')}" placeholder="Street, City, CA">`)}
+      <div id="home-msg" class="small"></div>`, (data) => {
+      const q = data.addr.trim();
+      if (!q) { ui.home = null; savePrefs(); return; }
+      $('#home-msg').textContent = 'Finding address…';
+      geocode(q).then((hit) => {
+        if (!hit) { $('#home-msg').innerHTML = '<span class="sync-error">Couldn\'t find that address. Try adding the city and state.</span>'; return; }
+        ui.home = { ...hit, label: q }; savePrefs();
+        modal.close(); toast('Home base saved'); rerender();
+      }, () => { $('#home-msg').innerHTML = '<span class="sync-error">Address lookup is unavailable right now.</span>'; });
+      return false;
+    }, 'Save');
+  }
+
+  /** Tear the map down (keeping its position for a redraw of the same screen) before rendering. */
+  function unmountMap(keepView) {
+    mapState.runId++;
+    mapState.keep = keepView && mapState.map ? { c: mapState.map.getCenter(), z: mapState.map.getZoom() } : null;
+    if (mapState.map) { mapState.map.remove(); mapState.map = null; }
+  }
+
+  function renderMap() {
+    const screen = ui.mapMode === 'route' ? `route:${ui.routeDate}` : 'accounts';
+    unmountMap(mapState.screen === screen);
+    mapState.screen = screen;
+    mapState.view = ui.mapMode;
+    if (ui.mapMode === 'route') renderRoutePlanner(); else renderMapAccounts();
+  }
 
   // ---------- modal ----------
   const modal = $('#modal');
@@ -2144,7 +2700,8 @@
         ${field(a.type === 'partner' ? 'Annual value ($)' : 'Deal value ($)', `<input name="value" type="number" min="0" step="any" value="${esc(a.value)}">`)}
         ${field('Website', `<input name="website" value="${esc(a.website)}" autocapitalize="off" placeholder="company.com">`)}
         ${field('Company LinkedIn', `<input name="linkedin" value="${esc(a.linkedin)}" autocapitalize="off" placeholder="linkedin.com/company/…">`)}
-        ${field('City, State', `<input name="location" value="${esc(a.location)}" placeholder="e.g. Austin, TX">`)}
+        ${field('Street address', `<input name="address" value="${esc(a.address)}" placeholder="e.g. 1200 J St" autocomplete="street-address">`)}
+        ${field('City, State', `<input name="location" value="${esc(a.location)}" placeholder="e.g. Sacramento, CA">`)}
         ${field('Lead source', `<select name="leadSource"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, a.leadSource)).join('')}</select>`)}
       </div></fieldset>
       ${existing ? '' : `
@@ -2445,6 +3002,28 @@
       case 'open-sync': return syncSettings();
       case 'load-sample': loadSample(); return;
       case 'erase-all': eraseAll(); return;
+      case 'map-mode': return go(el.dataset.mode === 'route' ? `map/route/${ui.routeDate || today()}` : 'map');
+      case 'map-near':
+        myLocation().then((pt) => { mapState.me = pt; rerender(); if (mapState.map) mapState.map.setView(pt, 11); }, (err) => toast(err.message));
+        return;
+      case 'map-focus': {
+        const a = getAccount(id); const m = mapState.markers.get(id);
+        if (a && mapState.map && hasGeo(a)) { mapState.map.setView(ll(a), 14); if (m) m.openPopup(); $('#map').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        return;
+      }
+      case 'map-place':
+        mapState.placing = id; rerender(); toast('Tap the map where this account is'); $('#map').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      case 'route-add': addRouteStop(today(), id); return;
+      case 'route-remove': {
+        const r = getRoute(ui.routeDate);
+        setRoute(ui.routeDate, { removed: [...r.removed, id], extra: r.extra.filter((x) => x !== id) });
+        return rerender();
+      }
+      case 'route-visited': return markVisited(ui.routeDate, acct);
+      case 'route-optimize': return optimizeRoute(ui.routeDate);
+      case 'route-day': return go(`map/route/${addDays(ui.routeDate, Number(el.dataset.n))}`);
+      case 'set-home': return homeBaseForm();
       case 'cad-template': return cadenceForm(null, CADENCE_TEMPLATES[Number(el.dataset.tpl)]);
       case 'cad-new': return cadenceForm(null, null);
       case 'cad-open': ui.cadenceId = el.dataset.cad; return go(`cadences/${el.dataset.cad}`);
@@ -2632,13 +3211,13 @@
     helix.vendors = ['Paychex PEO', 'Gusto'];
     oak.vendors = ['Insperity'];
     summit.vendors = ['Justworks'];
-    Object.assign(northwind, { employees: 120, location: 'Dallas, TX', leadSource: 'Referral', vendorRenewal: addDays(t, 140) });
-    Object.assign(helix, { employees: 85, location: 'Austin, TX', leadSource: 'Inbound', vendorRenewal: addDays(t, 200) });
-    Object.assign(oak, { employees: 60, location: 'Houston, TX', leadSource: 'Cold outreach', vendorRenewal: addDays(t, 75) });
-    Object.assign(summit, { employees: 40, location: 'San Antonio, TX', leadSource: 'Partner / broker' });
-    Object.assign(brightpath, { employees: 25, location: 'Dallas, TX', leadSource: 'Event' });
-    Object.assign(northwind.contacts[0], { mobile: '555-0199', linkedin: 'linkedin.com/in/danaortiz', timezone: 'Central', channel: 'Email' });
-    Object.assign(oak.contacts[0], { title: 'HR Manager', email: 'chris@oakiron.example', phone: '555-0170', timezone: 'Central', channel: 'Phone' });
+    Object.assign(northwind, { employees: 120, address: '1500 Capitol Ave', location: 'Sacramento, CA', leadSource: 'Referral', vendorRenewal: addDays(t, 140) });
+    Object.assign(helix, { employees: 85, address: '2100 Geng Rd', location: 'Palo Alto, CA', leadSource: 'Inbound', vendorRenewal: addDays(t, 200) });
+    Object.assign(oak, { employees: 60, address: '3200 E Belmont Ave', location: 'Fresno, CA', leadSource: 'Cold outreach', vendorRenewal: addDays(t, 75) });
+    Object.assign(summit, { employees: 40, address: '200 Webster St', location: 'Oakland, CA', leadSource: 'Partner / broker' });
+    Object.assign(brightpath, { employees: 25, address: '1 Market St', location: 'San Francisco, CA', leadSource: 'Event' });
+    Object.assign(northwind.contacts[0], { mobile: '555-0199', linkedin: 'linkedin.com/in/danaortiz', timezone: 'Pacific', channel: 'Email' });
+    Object.assign(oak.contacts[0], { title: 'HR Manager', email: 'chris@oakiron.example', phone: '555-0170', timezone: 'Pacific', channel: 'Phone' });
     oak.contacts.push(contact('Angela Ruiz', 'CFO', 'Decision maker', 'angela@oakiron.example', '555-0171'));
 
     // Example cadences with people at different points.
