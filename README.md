@@ -52,6 +52,20 @@ No install, no build step: open `index.html` in a browser.
 - Contacts marked "Left company" or "Do not contact" can't be enrolled and are taken out of
   running cadences
 
+**Ask Claude** (✦ in the top bar, or Look up → Ask Claude on any account)
+- Pick a company (an account or any name) or a saved list (up to 10), tap one or more research
+  flows (Company HQ & location, Company snapshot, Decision makers, HR contacts, Current PEO /
+  payroll vendor, Recent news & triggers), and/or type your own request. Custom requests can be
+  saved as reusable flows (synced across devices)
+- **Ask Claude** opens Claude (claude.ai or the Claude app) with the request written for you,
+  and also copies it. The request tells Claude to use web search, cite sources, never guess
+  emails or phones, and end with a JSON block for import. No API keys or connectors needed
+- Paste Claude's reply back and review it: fill in missing account fields (HQ address, city/state,
+  website, LinkedIn, industry, employees, vendor, renewal), add new contacts (duplicates are
+  flagged), create the account if it's new, and save the summary, news and sources to the
+  account history. Existing values are only replaced if you tick them
+- Your request and pasted answer are kept on the device while you switch to Claude and back
+
 **Weekly activity report** (Home → Weekly report)
 - Monday–Sunday weeks with ‹ › navigation; every number compares to the previous week (▲/▼)
 - Totals: touches, calls, emails, LinkedIn, visits, meetings held, meetings booked, replies,

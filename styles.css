@@ -825,3 +825,27 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
 @media (max-width: 560px) { .report-grid .col-opt { display: none; } .report-grid .table td .muted.small { display: block; } }
 @media (max-width: 560px) { .viz-table .table th, .viz-table .table td { padding: .4rem .18rem; font-size: .78rem; } }
 @media (max-width: 560px) { .page-head .seg a { flex: 1; text-align: center; } }
+
+/* ---------- Ask Claude ---------- */
+.ask-btn { color: #c15f3c; }
+.research-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.step-badge { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-size: .8rem; margin-right: .4rem; vertical-align: 2px; }
+.flow-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+.flow-chip-wrap { display: inline-flex; align-items: center; }
+.flow-chip { font: inherit; font-size: .85rem; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: .35rem .8rem; }
+.flow-chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.btn[aria-disabled="true"] { opacity: .5; pointer-events: none; }
+.prompt-preview summary { cursor: pointer; color: var(--accent); }
+.prompt-preview pre { white-space: pre-wrap; font: .78rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); border-radius: 8px; padding: .65rem; max-height: 260px; overflow: auto; margin: .4rem 0 0; }
+.rv-company { border: 1px solid var(--border); border-radius: 10px; padding: .75rem; margin-bottom: .75rem; }
+.rv-sec { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: .7rem 0 .25rem; }
+.rv-row { display: flex; gap: .55rem; align-items: flex-start; padding: .35rem 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+.rv-row:last-child { border-bottom: none; }
+.rv-row input { width: auto; margin-top: .2rem; }
+.rv-row.same { opacity: .6; cursor: default; }
+.rv-label { flex: 0 0 9.5rem; font-size: .85rem; color: var(--muted); }
+.rv-val { min-width: 0; overflow-wrap: anywhere; }
+.research-menu a.ask-claude { color: #c15f3c; border-top: 1px solid var(--border); border-radius: 0 0 7px 7px; margin-top: .2rem; }
+@media (max-width: 900px) { .research-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .rv-label { flex-basis: 6.5rem; } }
+a.btn { text-decoration: none; }

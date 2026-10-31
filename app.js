@@ -162,7 +162,7 @@
     try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home })); } catch (e) { /* ignore */ }
   };
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], deleted: {} }; }
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
@@ -214,6 +214,7 @@
     for (const l of st.lists) yield ['l:' + l.id, l, { ...l, _ts: undefined }];
     for (const c of st.cadences) yield ['cad:' + c.id, c, { ...c, _ts: undefined }];
     for (const e of st.enrollments) yield ['enr:' + e.id, e, { ...e, _ts: undefined }];
+    for (const f of st.flows) yield ['flw:' + f.id, f, { ...f, _ts: undefined }];
     for (const t of st.tasks) yield ['t:' + t.id, t, { ...t, _ts: undefined }];
     for (const [d, day] of Object.entries(st.days)) yield ['d:' + d, day, { ...day, _ts: undefined }];
   }
@@ -266,12 +267,13 @@
     for (const [d, day] of Object.entries(days)) if (!alive('d:' + d, day)) delete days[d];
 
     return { ...emptyState(), accounts: merged, tasks: mergeList(L.tasks, R.tasks, 't:'), days, lists: mergeList(L.lists, R.lists, 'l:'),
-      cadences: mergeList(L.cadences, R.cadences, 'cad:'), enrollments: mergeList(L.enrollments, R.enrollments, 'enr:'), deleted };
+      cadences: mergeList(L.cadences, R.cadences, 'cad:'), enrollments: mergeList(L.enrollments, R.enrollments, 'enr:'),
+      flows: mergeList(L.flows, R.flows, 'flw:'), deleted };
   }
 
   const toPayload = (st) => ({
     version: 1, accounts: st.accounts, tasks: st.tasks, days: st.days, lists: st.lists,
-    cadences: st.cadences, enrollments: st.enrollments, deleted: st.deleted,
+    cadences: st.cadences, enrollments: st.enrollments, flows: st.flows, deleted: st.deleted,
   });
 
   const getAccount = (id) => state.accounts.find((a) => a.id === id);
@@ -330,7 +332,7 @@
   }
 
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch };
   const TAB_FOR = { account: 'accounts', report: 'dashboard' };
 
   function route() {
@@ -341,6 +343,9 @@
     if (view === 'planner' && arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)) ui.plannerDate = arg;
     if (view === 'lists' && arg) ui.listId = decodeURIComponent(arg);
     if (view === 'cadences' && arg) ui.cadenceId = arg;
+    if (view === 'research' && arg && getAccount(arg)) {
+      Object.assign(research, { target: getAccount(arg).name, hint: '', list: '' }); saveResearch();
+    }
     if (view === 'report') ui.reportWeek = weekStart(/^\d{4}-\d{2}-\d{2}$/.test(arg || '') ? arg : today());
     if (view === 'map') {
       const parts = location.hash.split('/');
@@ -465,7 +470,7 @@
       `This permanently deletes all ${state.accounts.length} accounts, tasks, planner days, lists and cadences` +
       `${syncCfg ? ' on this device AND every synced device' : ' on this device'}.\n\nExport a backup first if you might need it.\n\nType DELETE to confirm.`);
     if ((typed || '').trim().toUpperCase() !== 'DELETE') { if (typed !== null) toast('Nothing was deleted'); return; }
-    state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = [];
+    state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = []; state.flows = [];
     ui.listId = null;
     save(); toast('All data erased'); go('dashboard');
   }
@@ -1949,6 +1954,7 @@
       <div class="research-menu">
         <div class="small muted">Look up ${esc(q)}</div>
         ${items.map(([label, href, title]) => `<a href="${esc(href)}" target="_blank" rel="noopener" data-copy="${esc(q)}" title="${esc(title)}">${esc(label)}</a>`).join('')}
+        <a href="#research/${a.id}" class="ask-claude" title="Research ${esc(a.name)} with Claude and add the results to the CRM">✦ Ask Claude</a>
       </div>
     </details>`;
   }
@@ -2925,6 +2931,272 @@
     downloadFile(`activity-${st.ws}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
   }
 
+  // ---------- Ask Claude (research hand-off) ----------
+  // Builds a research request, opens it in Claude (claude.ai or the Claude app), and reads the
+  // answer back from a pasted reply. Claude is asked to finish with a JSON block in a fixed shape,
+  // which this page previews and merges into accounts and contacts only when you confirm.
+  const RESEARCH_FLOWS = [
+    { id: 'hq', label: 'Company HQ & location', ask: 'Headquarters: street address, city, state, ZIP and main phone number. Note other California locations if any.' },
+    { id: 'snapshot', label: 'Company snapshot', ask: 'Company snapshot: official website, LinkedIn company page URL, industry, approximate employee count, and a one-line description.' },
+    { id: 'dm', label: 'Decision makers', ask: 'Decision makers for HR / benefits / payroll purchases: owner or CEO/President, CFO or controller, COO. Name, title, LinkedIn URL, and business email/phone only if published.' },
+    { id: 'hr', label: 'HR contacts', ask: 'HR contacts: head of HR / People, HR director or manager, benefits or payroll lead. Name, title, LinkedIn URL, and business email/phone only if published.' },
+    { id: 'vendor', label: 'Current PEO / payroll vendor', ask: 'Current PEO, payroll or HR/benefits provider (e.g. ADP TotalSource, Insperity, Paychex, Justworks, Gusto) and, if publicly known, the benefits renewal timing. Say how you know.' },
+    { id: 'news', label: 'Recent news & triggers', ask: 'Recent news and sales triggers from the last 12 months: hiring growth, new locations, funding, acquisitions, leadership changes, layoffs. Date and link for each.' },
+  ];
+  const RESEARCH_KEY = 'minicrm.research';
+  let research = { target: '', hint: '', list: '', flows: ['hq', 'dm', 'hr'], custom: '', pasted: '' };
+  try { Object.assign(research, JSON.parse(localStorage.getItem(RESEARCH_KEY)) || {}); } catch (e) { /* defaults */ }
+  const saveResearch = () => { try { localStorage.setItem(RESEARCH_KEY, JSON.stringify(research)); } catch (e) { /* ignore */ } };
+
+  const allFlows = () => [...RESEARCH_FLOWS, ...state.flows.map((f) => ({ ...f, custom: true }))];
+
+  /** The companies a request is about: a saved list (max 10), or one company typed or picked. */
+  function researchTargets() {
+    if (research.list) {
+      const l = resolveList(research.list);
+      return l ? listAccounts(l).slice(0, 10).map((a) => ({ name: a.name, a })) : [];
+    }
+    const name = research.target.trim();
+    if (!name) return [];
+    const a = findAccountByName(name);
+    return [{ name: a ? a.name : name, a, hint: research.hint.trim() }];
+  }
+
+  const companyLine = ({ name, a, hint }) => {
+    const bits = [a && geoQuery(a), a && a.website, hint].filter(Boolean);
+    return `- ${name}${bits.length ? ` (${bits.join('; ')})` : ''}`;
+  };
+
+  function buildPrompt() {
+    const targets = researchTargets();
+    const flows = allFlows().filter((f) => research.flows.includes(f.id));
+    const asks = [...flows.map((f) => f.ask), research.custom.trim()].filter(Boolean);
+    if (!targets.length || !asks.length) return '';
+    return [
+      'I sell TriNet (PEO / HR outsourcing) and I am researching companies for my CRM. Please use web search.',
+      'Only include information you actually found, with a source link. If you cannot find something, leave it empty. Never guess email addresses or phone numbers.',
+      '',
+      `Compan${targets.length === 1 ? 'y' : 'ies'}:`,
+      ...targets.map(companyLine),
+      '',
+      'Find:',
+      ...asks.map((x) => `- ${x}`),
+      '',
+      'First give me a short readable summary. Then end your reply with a JSON code block in exactly this format (it is imported into my CRM), using "" or [] for anything not found or not asked for:',
+      '```json',
+      JSON.stringify({ companies: [{
+        name: '', website: '', linkedin: '', hq_address: '', city: '', state: '', zip: '', main_phone: '', industry: '', employees: '',
+        current_vendors: [''], vendor_renewal: 'YYYY-MM-DD', summary: '',
+        contacts: [{ name: '', title: '', role: 'Decision maker | HR | Finance | Executive | Operations | Other', email: '', phone: '', linkedin: '', source: '' }],
+        news: [{ date: '', headline: '', url: '' }], sources: [''],
+      }] }, null, 2),
+      '```',
+    ].join('\n');
+  }
+
+  /** Pull the JSON block out of a pasted Claude reply (fenced or bare) and normalize it. */
+  function parseResearch(text) {
+    const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((m) => m[1]).reverse();
+    const candidates = [...fenced, text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)];
+    for (const c of candidates) {
+      try {
+        const j = JSON.parse(c.trim());
+        const list = Array.isArray(j) ? j : Array.isArray(j.companies) ? j.companies : j.name ? [j] : null;
+        if (list && list.length) return list.map(normCompany).filter((x) => x.name);
+      } catch (e) { /* try next */ }
+    }
+    return null;
+  }
+
+  const str = (v) => (v == null ? '' : String(v).trim());
+  function normCompany(c) {
+    const vendors = (Array.isArray(c.current_vendors) ? c.current_vendors : [c.current_vendors]).map(str).filter(Boolean)
+      .map((v) => COMPETITORS.find((x) => x.toLowerCase() === v.toLowerCase()) || COMPETITORS.find((x) => v.toLowerCase().includes(x.toLowerCase())) || v);
+    const renewal = /^\d{4}-\d{2}-\d{2}$/.test(str(c.vendor_renewal)) ? str(c.vendor_renewal) : '';
+    const emp = str(c.employees).match(/\d[\d,]*/);
+    return {
+      name: str(c.name), website: str(c.website), linkedin: str(c.linkedin), address: str(c.hq_address),
+      location: [str(c.city), [str(c.state), str(c.zip)].filter(Boolean).join(' ')].filter(Boolean).join(', '),
+      phone: str(c.main_phone), industry: str(c.industry), employees: emp ? emp[0].replace(/,/g, '') : '',
+      vendors: [...new Set(vendors)], vendorRenewal: renewal, summary: str(c.summary),
+      contacts: (Array.isArray(c.contacts) ? c.contacts : []).map((p) => ({
+        name: str(p.name), title: str(p.title), email: str(p.email), phone: str(p.phone), linkedin: str(p.linkedin), source: str(p.source),
+        role: CONTACT_ROLES.find((r) => r.toLowerCase() === str(p.role).toLowerCase()) || (/hr|people|benefit/i.test(str(p.role) + str(p.title)) ? 'HR' : ''),
+      })).filter((p) => p.name),
+      news: (Array.isArray(c.news) ? c.news : []).filter((n) => n && n.headline).map((n) => ({ date: str(n.date), headline: str(n.headline), url: str(n.url) })),
+      sources: (Array.isArray(c.sources) ? c.sources : []).map(str).filter(Boolean),
+    };
+  }
+
+  const R_FIELDS = [
+    ['address', 'HQ street address'], ['location', 'City, State'], ['website', 'Website'], ['linkedin', 'Company LinkedIn'],
+    ['industry', 'Industry'], ['employees', 'Employees'], ['vendorRenewal', 'Vendor renewal'],
+  ];
+
+  function renderResearch() {
+    const targets = researchTargets();
+    const prompt = buildPrompt();
+    const matched = !research.list && research.target.trim() && findAccountByName(research.target);
+    $('#view').innerHTML = `
+      <div class="page-head">
+        <div>
+          <h1>Ask Claude</h1>
+          <div class="muted small">Research companies and people with Claude, then add what it finds to your CRM.</div>
+        </div>
+      </div>
+      <div class="research-grid">
+        <div class="card stack">
+          <h2 style="margin:0"><span class="step-badge">1</span> What do you want to find?</h2>
+          <div class="grid-2">
+            ${field('Company', `<input id="rs-target" list="rs-accounts" value="${esc(research.target)}" placeholder="Account name or any company" autocomplete="off" ${research.list ? 'disabled' : ''}>
+              <datalist id="rs-accounts">${state.accounts.map((a) => `<option value="${esc(a.name)}">`).join('')}</datalist>`)}
+            ${field('City or website (optional)', `<input id="rs-hint" value="${esc(research.hint)}" placeholder="e.g. Fresno, CA" ${research.list || matched ? 'disabled' : ''}>`)}
+          </div>
+          <div class="small">${matched ? `<span class="pill won">✓ Existing account</span> results will be added to <a href="#account/${matched.id}">${esc(matched.name)}</a>` : research.target.trim() && !research.list ? '<span class="pill">New company</span> you can create the account from the results' : ''}</div>
+          ${field('…or research a saved list (first 10 accounts)', `<select id="rs-list"><option value="">— one company —</option>${state.lists.map((l) => opt(l.id, `${l.name} (${listAccounts(l).length})`, research.list)).join('')}</select>`)}
+          <div>
+            <div class="small muted" style="margin-bottom:.35rem">Tap one or more:</div>
+            <div class="flow-chips">
+              ${allFlows().map((f) => `<span class="flow-chip-wrap"><button type="button" class="flow-chip ${research.flows.includes(f.id) ? 'on' : ''}" data-act="rs-flow" data-f="${esc(f.id)}" aria-pressed="${research.flows.includes(f.id)}">${research.flows.includes(f.id) ? '✓ ' : ''}${esc(f.label)}</button>${f.custom ? `<button type="button" class="icon-btn" data-act="rs-flow-del" data-f="${esc(f.id)}" title="Delete this flow">✕</button>` : ''}</span>`).join('')}
+            </div>
+          </div>
+          ${field('Anything else? (optional)', `<textarea id="rs-custom" rows="2" placeholder="e.g. Who is their benefits broker? How many California employees?">${esc(research.custom)}</textarea>`)}
+          <div class="row spread">
+            <button type="button" class="link-btn small" data-act="rs-save-flow" ${research.custom.trim() ? '' : 'hidden'}>+ Save this as a reusable flow</button>
+          </div>
+          <div class="row">
+            <a class="btn" id="rs-ask" ${prompt ? `href="https://claude.ai/new?q=${encodeURIComponent(prompt)}" target="_blank" rel="noopener"` : 'aria-disabled="true"'}>✦ Ask Claude</a>
+            <button type="button" class="btn ghost" data-act="rs-copy" ${prompt ? '' : 'disabled'}>Copy request</button>
+          </div>
+          <p class="small muted" style="margin:0">${prompt ? `Opens Claude with your request for ${targets.length === 1 ? esc(targets[0].name) : `${targets.length} companies`}. It's also copied, so you can paste it if Claude opens empty. Turn on web search in Claude for best results.` : 'Pick a company and at least one thing to find.'}</p>
+          ${prompt ? `<details class="prompt-preview"><summary class="small">See the request</summary><pre>${esc(prompt)}</pre></details>` : ''}
+        </div>
+
+        <div class="card stack">
+          <h2 style="margin:0"><span class="step-badge">2</span> Paste Claude's answer</h2>
+          <p class="small muted" style="margin:0">In Claude, tap <strong>Copy</strong> under its reply, then paste everything here. The app reads the data block at the end.</p>
+          <textarea id="rs-paste" rows="7" placeholder="Paste Claude's full reply here…">${esc(research.pasted)}</textarea>
+          <div class="row">
+            <button type="button" class="btn" data-act="rs-review" ${research.pasted.trim() ? '' : 'disabled'}>Review & add to CRM</button>
+            <button type="button" class="btn ghost" data-act="rs-clear" ${research.pasted.trim() ? '' : 'hidden'}>Clear</button>
+          </div>
+          <div id="rs-review"></div>
+        </div>
+      </div>`;
+
+    const bind = (id, key, live) => $(id).addEventListener(live ? 'input' : 'change', (e) => {
+      research[key] = e.target.value; saveResearch();
+      if (live) {
+        // Refresh the request without losing typing focus.
+        const p = buildPrompt();
+        const ask = $('#rs-ask');
+        if (p) { ask.href = `https://claude.ai/new?q=${encodeURIComponent(p)}`; ask.target = '_blank'; ask.removeAttribute('aria-disabled'); }
+        else { ask.removeAttribute('href'); ask.setAttribute('aria-disabled', 'true'); }
+        $('[data-act=rs-copy]').disabled = !p;
+        const saveFlow = $('[data-act=rs-save-flow]'); if (saveFlow) saveFlow.hidden = !research.custom.trim();
+        const rv = $('[data-act=rs-review]'); if (rv) rv.disabled = !research.pasted.trim();
+        const clr = $('[data-act=rs-clear]'); if (clr) clr.hidden = !research.pasted.trim();
+      } else rerender();
+    });
+    bind('#rs-target', 'target', true);
+    $('#rs-target').addEventListener('change', () => rerender());
+    bind('#rs-hint', 'hint', true);
+    bind('#rs-list', 'list', false);
+    bind('#rs-custom', 'custom', true);
+    bind('#rs-paste', 'pasted', true);
+    $('#rs-ask').addEventListener('click', (e) => {
+      const p = buildPrompt();
+      if (!p) { e.preventDefault(); toast('Pick a company and something to find'); return; }
+      if (navigator.clipboard) navigator.clipboard.writeText(p).catch(() => {});
+    });
+    if (research.pasted.trim() && ui.researchReview) showResearchReview();
+  }
+
+  function showResearchReview() {
+    const box = $('#rs-review');
+    const companies = parseResearch(research.pasted);
+    ui.researchReview = true;
+    if (!companies) {
+      box.innerHTML = '<div class="sync-error">Couldn\'t find the data block in that reply. Make sure you copied Claude\'s whole answer, including the JSON at the end. If it\'s missing, ask Claude: "Please add the JSON block in the format I asked for."</div>';
+      return;
+    }
+    const forced = !research.list && research.target.trim() && findAccountByName(research.target);
+    box.innerHTML = companies.map((c, ci) => {
+      const existing = (companies.length === 1 && forced) || findAccountByName(c.name);
+      const rows = R_FIELDS.filter(([k]) => c[k]).map(([k, label]) => {
+        const cur = existing ? str(existing[k]) : '';
+        const same = cur && cur.toLowerCase() === c[k].toLowerCase();
+        return `<label class="rv-row ${same ? 'same' : ''}">
+          <input type="checkbox" data-c="${ci}" data-field="${k}" ${!same && !cur ? 'checked' : ''} ${same ? 'disabled' : ''}>
+          <span class="rv-label">${label}</span>
+          <span class="rv-val">${esc(c[k])}${cur && !same ? `<span class="small muted"> · replaces "${esc(cur)}"</span>` : ''}${same ? '<span class="small muted"> · already saved</span>' : ''}</span>
+        </label>`;
+      });
+      const newVendors = c.vendors.filter((v) => !existing || !existing.vendors.includes(v));
+      if (newVendors.length) rows.push(`<label class="rv-row"><input type="checkbox" data-c="${ci}" data-field="vendors" checked><span class="rv-label">Current vendor</span><span class="rv-val">${newVendors.map((v) => `<span class="pill vendor">${esc(v)}</span>`).join(' ')}</span></label>`);
+      const people = c.contacts.map((p, pi) => {
+        const dup = existing && existing.contacts.some((x) => (p.email && x.email && x.email.toLowerCase() === p.email.toLowerCase()) || x.name.toLowerCase() === p.name.toLowerCase());
+        return `<label class="rv-row ${dup ? 'same' : ''}">
+          <input type="checkbox" data-c="${ci}" data-person="${pi}" ${dup ? 'disabled' : 'checked'}>
+          <span class="rv-val"><strong>${esc(p.name)}</strong>${p.title ? ` · ${esc(p.title)}` : ''}${p.role ? ` <span class="pill">${esc(p.role)}</span>` : ''}
+            <span class="small muted" style="display:block">${[p.email, p.phone, p.linkedin ? 'LinkedIn' : ''].filter(Boolean).map(esc).join(' · ') || 'No contact details found'}${p.source ? ` · <a href="${esc(extUrl(p.source))}" target="_blank" rel="noopener">source</a>` : ''}${dup ? ' · already in CRM' : ''}</span></span>
+        </label>`;
+      });
+      const hasNotes = c.summary || c.news.length || c.phone || c.sources.length;
+      return `<div class="rv-company">
+        <div class="row spread"><h3 style="margin:0">${esc(c.name)}</h3>
+          ${existing ? `<span class="pill won">Existing: ${esc(existing.name)}</span>` : `<label class="row small"><input type="checkbox" data-c="${ci}" data-create checked style="width:auto"> Create as new account</label>`}</div>
+        ${c.summary ? `<p class="small" style="margin:.35rem 0">${esc(c.summary)}</p>` : ''}
+        ${rows.length ? `<div class="rv-sec">Account details</div>${rows.join('')}` : ''}
+        ${people.length ? `<div class="rv-sec">Contacts (${c.contacts.length})</div>${people.join('')}` : ''}
+        ${hasNotes ? `<label class="rv-row"><input type="checkbox" data-c="${ci}" data-note checked><span class="rv-val">Save summary${c.news.length ? ', news' : ''}${c.phone ? ', main phone' : ''} and sources to the account history</span></label>` : ''}
+      </div>`;
+    }).join('') + `<div class="row"><button type="button" class="btn" data-act="rs-apply">Add to CRM</button><span class="small muted">Only checked items are added.</span></div>`;
+    ui.researchParsed = { companies, forcedId: forced ? forced.id : null };
+  }
+
+  function applyResearch() {
+    const { companies, forcedId } = ui.researchParsed || {};
+    if (!companies) return;
+    const now = new Date().toISOString();
+    const touched = [];
+    let added = 0;
+    companies.forEach((c, ci) => {
+      const q = (sel) => $(`#rs-review [data-c="${ci}"]${sel}`);
+      let a = (companies.length === 1 && forcedId && getAccount(forcedId)) || findAccountByName(c.name);
+      if (!a) {
+        const create = q('[data-create]');
+        if (!create || !create.checked) return;
+        a = migrateAccount({ id: uid(), name: c.name, type: 'prospect', stage: 'New', tags: 'claude-research', notes: '', vendors: [], contacts: [], activities: [], keyDates: [], createdAt: now, updatedAt: now });
+        state.accounts.push(a);
+      }
+      for (const [k] of R_FIELDS) { const cb = q(`[data-field="${k}"]`); if (cb && cb.checked) a[k] = c[k]; }
+      const vcb = q('[data-field="vendors"]');
+      if (vcb && vcb.checked) a.vendors = [...new Set([...a.vendors.filter((v) => v !== NO_VENDOR), ...c.vendors])];
+      c.contacts.forEach((p, pi) => {
+        const cb = q(`[data-person="${pi}"]`);
+        if (!cb || !cb.checked) return;
+        a.contacts.push({ id: uid(), name: p.name, title: p.title, email: p.email, phone: p.phone, mobile: '', linkedin: p.linkedin,
+          role: p.role, channel: '', timezone: '', status: 'Active', notes: p.source ? `Source: ${p.source}` : '', primary: a.contacts.length === 0 });
+        added++;
+      });
+      const ncb = q('[data-note]');
+      if (ncb && ncb.checked) {
+        const lines = [c.summary, c.phone && `Main phone: ${c.phone}`,
+          ...c.news.map((n) => `• ${[n.date, n.headline].filter(Boolean).join(': ')}${n.url ? ` (${n.url})` : ''}`),
+          c.sources.length ? `Sources: ${c.sources.join(' ')}` : ''].filter(Boolean);
+        a.activities.push({ id: uid(), date: today(), kind: 'Note', summary: 'Claude research', notes: lines.join('\n'), contactId: '', createdAt: now });
+      }
+      touch(a);
+      touched.push(a);
+    });
+    if (!touched.length) { toast('Nothing selected to add'); return; }
+    save();
+    research.pasted = ''; ui.researchReview = false; saveResearch();
+    toast(`Updated ${plural(touched.length, 'account')}${added ? ` · added ${plural(added, 'contact')}` : ''}`);
+    go(touched.length === 1 ? `account/${touched[0].id}` : 'accounts');
+  }
+
   // ---------- modal ----------
   const modal = $('#modal');
   const modalForm = $('#modal-form');
@@ -3275,6 +3547,33 @@
       case 'open-sync': return syncSettings();
       case 'load-sample': loadSample(); return;
       case 'erase-all': eraseAll(); return;
+      case 'rs-flow': {
+        const f = el.dataset.f;
+        research.flows = research.flows.includes(f) ? research.flows.filter((x) => x !== f) : [...research.flows, f];
+        saveResearch(); return rerender();
+      }
+      case 'rs-save-flow': {
+        const label = prompt('Name this flow (e.g. "Benefits broker"):', research.custom.trim().slice(0, 40));
+        if (!label || !label.trim()) return;
+        const f = { id: uid(), label: label.trim(), ask: research.custom.trim() };
+        state.flows.push(f); save();
+        research.flows = [...research.flows, f.id]; research.custom = ''; saveResearch();
+        toast('Flow saved'); return rerender();
+      }
+      case 'rs-flow-del': {
+        const f = state.flows.find((x) => x.id === el.dataset.f);
+        if (!f || !confirm(`Delete the flow "${f.label}"?`)) return;
+        state.flows = state.flows.filter((x) => x !== f); save();
+        research.flows = research.flows.filter((x) => x !== f.id); saveResearch(); return rerender();
+      }
+      case 'rs-copy': {
+        const text = buildPrompt();
+        if (text && navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Request copied. Paste it into Claude'), () => toast('Copy not available'));
+        return;
+      }
+      case 'rs-review': return showResearchReview();
+      case 'rs-clear': research.pasted = ''; ui.researchReview = false; saveResearch(); return rerender();
+      case 'rs-apply': return applyResearch();
       case 'report-week': return go(`report/${addDays(ui.reportWeek, Number(el.dataset.n))}`);
       case 'report-this': return go('report');
       case 'report-csv': return reportCsv();
@@ -3423,6 +3722,7 @@
     if (e.key === 'Enter' && e.target.matches && e.target.matches('.acard[role=link]')) e.target.click();
   });
   $('#btn-search').addEventListener('click', openSearch);
+  $('#btn-ask').addEventListener('click', () => go('research'));
   document.addEventListener('keydown', (e) => {
     const typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
     if (modal.open) return;
