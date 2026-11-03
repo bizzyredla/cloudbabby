@@ -285,7 +285,7 @@
     return [...COMPETITORS, ...[...used].filter((v) => !COMPETITORS.includes(v) && v !== NO_VENDOR).sort(), NO_VENDOR];
   };
   const haystack = (a) => [a.name, a.industry, a.tags, a.notes, ...a.vendors,
-    a.location, a.address, ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone, c.mobile])].join(' ').toLowerCase();
+    a.location, a.address, a.mainPhone, ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone, c.mobile])].join(' ').toLowerCase();
   const vendorPills = (a) => a.vendors.map((v) => `<span class="pill vendor">${esc(v)}</span>`).join(' ');
   const getDay = (iso) => state.days[iso] || { priorities: ['', '', ''], notes: '' };
   const findAccountByName = (name) => {
@@ -744,8 +744,10 @@
 
         <div class="facts">
           <div class="span-all"><span>Current vendors</span>${a.vendors.length ? vendorPills(a) : '—'}</div>
+          <div class="span-all"><span>Address</span>${geoQuery(a) ? `${esc(geoQuery(a))}${hasGeo(a) ? ` · <a href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}</div>
           <div><span>Vendor renewal</span>${a.vendorRenewal ? `${fmtDate(a.vendorRenewal)} <span class="small muted">${relDays(a.vendorRenewal)}</span>` : '—'}</div>
           <div><span>Employees</span>${esc(a.employees) || '—'}</div>
+          <div><span>Main phone</span>${a.mainPhone ? `<a href="tel:${esc(a.mainPhone)}">${esc(a.mainPhone)}</a>` : '—'}</div>
           <div><span>${a.type === 'partner' ? 'Annual value' : 'Deal value'}</span>${money(a.value)}</div>
           <div><span>Next follow-up</span>${a.nextFollowUp ? `<span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp)}</span> <span class="small muted">${relDays(a.nextFollowUp)}</span>` : '—'}</div>
           <div><span>Next revisit</span>${a.revisitDate ? `<span class="pill ${dueClass(a.revisitDate)}">${fmtDate(a.revisitDate)}</span> <span class="small muted">${relDays(a.revisitDate)}</span>${a.revisitNote ? `<div class="small muted">${esc(a.revisitNote)}</div>` : ''}` : '—'}</div>
@@ -755,7 +757,6 @@
           <summary>More details</summary>
           <div class="facts">
             <div><span>Industry</span>${esc(a.industry) || '—'}</div>
-            <div><span>Address</span>${geoQuery(a) ? `${esc(geoQuery(a))}${hasGeo(a) ? ` · <a href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}</div>
             <div><span>Website</span>${a.website ? `<a href="${esc(extUrl(a.website))}" target="_blank" rel="noopener">${esc(a.website)}</a>` : '—'}</div>
             <div><span>Company LinkedIn</span>${a.linkedin ? `<a href="${esc(extUrl(a.linkedin))}" target="_blank" rel="noopener">Open profile</a>` : '—'}</div>
             <div><span>Lead source</span>${esc(a.leadSource) || '—'}</div>
@@ -1340,10 +1341,10 @@
 
   function accountsCsv(title, accounts) {
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Account', 'Website', 'Company LinkedIn', 'Type', 'Stage', 'Industry', 'Employees', 'Street address', 'Location', 'Value', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
+    const rows = [['Account', 'Website', 'Company LinkedIn', 'Type', 'Stage', 'Industry', 'Employees', 'Street address', 'Location', 'Main phone', 'Value', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
     for (const a of accounts) {
       const p = primaryContact(a) || {};
-      rows.push([a.name, a.website, a.linkedin, a.type, a.stage, a.industry, a.employees, a.address, a.location, a.value, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
+      rows.push([a.name, a.website, a.linkedin, a.type, a.stage, a.industry, a.employees, a.address, a.location, a.mainPhone, a.value, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
         a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.tags]);
     }
     downloadFile(`${title.replace(/[^\w-]+/g, '-')}-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
@@ -2014,6 +2015,7 @@
     location: ['location', 'companylocation'],
     address: ['companystreetaddress', 'streetaddress', 'address', 'companyaddress', 'street', 'hqaddress', 'address1'],
     zip: ['companyzipcode', 'zipcode', 'zip', 'postalcode', 'companypostalcode'],
+    companyPhone: ['companyphone', 'companyphonenumber', 'companymainphone', 'mainphone', 'hqphone', 'officephone', 'companyhqphone'],
     companyLinkedin: ['companylinkedinurl', 'linkedincompanyurl', 'companylinkedin', 'linkedincompanyprofileurl'],
     first: ['firstname', 'first'],
     last: ['lastname', 'last'],
@@ -2041,7 +2043,7 @@
         company: get(r, 'company'), website: get(r, 'website'), industry: get(r, 'industry'),
         employees: emp ? emp[0].replace(/,/g, '') : '',
         location: get(r, 'location') || [get(r, 'city'), [get(r, 'state'), get(r, 'zip')].filter(Boolean).join(' ')].filter(Boolean).join(', '),
-        address: get(r, 'address'),
+        address: get(r, 'address'), mainPhone: get(r, 'companyPhone'),
         companyLinkedin: get(r, 'companyLinkedin'),
         contact: name ? { name, title: get(r, 'title'), email: get(r, 'email'), phone: get(r, 'phone'), mobile: get(r, 'mobile'), linkedin: get(r, 'linkedin') } : null,
       };
@@ -2066,7 +2068,7 @@
         stats.newAccounts++;
         if (commit) state.accounts.push(a);
       } else if (!made.has(key)) stats.updatedAccounts.add(a.id);
-      const fill = { website: r.website, industry: r.industry, employees: r.employees, location: r.location, address: r.address, linkedin: r.companyLinkedin };
+      const fill = { website: r.website, industry: r.industry, employees: r.employees, location: r.location, address: r.address, mainPhone: r.mainPhone, linkedin: r.companyLinkedin };
       if (commit) for (const [k, v] of Object.entries(fill)) if (v && !a[k]) a[k] = v;
       if (r.contact) {
         const c = r.contact;
@@ -2100,7 +2102,7 @@
     const s = preview();
     const found = Object.keys(col).filter((k) => !['first', 'last', 'city', 'state', 'zip'].includes(k))
       .map((k) => ({ company: 'Company', website: 'Website', industry: 'Industry', employees: 'Employees', location: 'Location', companyLinkedin: 'Company LinkedIn',
-        name: 'Name', title: 'Title', email: 'Email', phone: 'Phone', mobile: 'Mobile', linkedin: 'LinkedIn', address: 'Street address' })[k]);
+        name: 'Name', title: 'Title', email: 'Email', phone: 'Phone', mobile: 'Mobile', linkedin: 'LinkedIn', address: 'Street address', companyPhone: 'Main phone' })[k]);
     if (col.first !== undefined || col.last !== undefined) found.push('Name');
     if (col.city !== undefined || col.state !== undefined) found.push('City/State');
     const fromZoomInfo = /zoominfo/i.test(fileName) || col.companyLinkedin !== undefined || rows[0].some((h) => /zoominfo/i.test(h));
@@ -3067,7 +3069,7 @@
     return {
       name: str(c.name), website: str(c.website), linkedin: str(c.linkedin), address: str(c.hq_address),
       location: [str(c.city), [str(c.state), str(c.zip)].filter(Boolean).join(' ')].filter(Boolean).join(', '),
-      phone: str(c.main_phone), industry: str(c.industry), employees: emp ? emp[0].replace(/,/g, '') : '',
+      phone: str(c.main_phone), mainPhone: str(c.main_phone), industry: str(c.industry), employees: emp ? emp[0].replace(/,/g, '') : '',
       vendors: [...new Set(vendors)], vendorRenewal: renewal, summary: str(c.summary),
       contacts: (Array.isArray(c.contacts) ? c.contacts : []).map((p) => ({
         name: str(p.name), title: str(p.title), email: str(p.email), phone: str(p.phone), linkedin: str(p.linkedin), source: str(p.source),
@@ -3079,7 +3081,7 @@
   }
 
   const R_FIELDS = [
-    ['address', 'HQ street address'], ['location', 'City, State'], ['website', 'Website'], ['linkedin', 'Company LinkedIn'],
+    ['address', 'HQ street address'], ['location', 'City, State ZIP'], ['mainPhone', 'Main phone'], ['website', 'Website'], ['linkedin', 'Company LinkedIn'],
     ['industry', 'Industry'], ['employees', 'Employees'], ['vendorRenewal', 'Vendor renewal'],
   ];
 
@@ -3296,7 +3298,8 @@
         ${field('Website', `<input name="website" value="${esc(a.website)}" autocapitalize="off" placeholder="company.com">`)}
         ${field('Company LinkedIn', `<input name="linkedin" value="${esc(a.linkedin)}" autocapitalize="off" placeholder="linkedin.com/company/…">`)}
         ${field('Street address', `<input name="address" value="${esc(a.address)}" placeholder="e.g. 1200 J St" autocomplete="street-address">`)}
-        ${field('City, State', `<input name="location" value="${esc(a.location)}" placeholder="e.g. Sacramento, CA">`)}
+        ${field('City, State ZIP', `<input name="location" value="${esc(a.location)}" placeholder="e.g. Sacramento, CA 95814">`)}
+        ${field('Main phone', `<input name="mainPhone" type="tel" value="${esc(a.mainPhone)}" placeholder="e.g. 310-555-0147" autocomplete="tel">`)}
         ${field('Lead source', `<select name="leadSource"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, a.leadSource)).join('')}</select>`)}
       </div></fieldset>
       ${existing ? '' : `
