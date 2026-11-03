@@ -498,6 +498,7 @@
   const stageIndex = (a) => STAGES[a.type].indexOf(a.stage) + (a.type === 'partner' ? 100 : 0);
   const SORTERS = {
     name: (x, y) => x.name.localeCompare(y.name),
+    location: (x, y) => (x.location || '~').localeCompare(y.location || '~'),
     stage: (x, y) => stageIndex(x) - stageIndex(y),
     value: (x, y) => (Number(y.value) || 0) - (Number(x.value) || 0),
     followup: (x, y) => (x.nextFollowUp || FAR).localeCompare(y.nextFollowUp || FAR),
@@ -506,7 +507,7 @@
     lasttouch: (x, y) => ((lastActivity(y) || {}).date || '').localeCompare((lastActivity(x) || {}).date || ''),
     updated: (x, y) => (y.updatedAt || '').localeCompare(x.updatedAt || ''),
   };
-  const SORT_LABELS = { followup: 'Next follow-up', revisit: 'Next revisit', renewal: 'Vendor renewal', name: 'Name', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', updated: 'Recently updated' };
+  const SORT_LABELS = { followup: 'Next follow-up', revisit: 'Next revisit', renewal: 'Vendor renewal', name: 'Name', location: 'Location', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', updated: 'Recently updated' };
   const sortAccounts = (list) => list.sort((x, y) => SORTERS[ui.sort](x, y) * ui.sortDir || x.name.localeCompare(y.name));
 
   function filteredAccounts() {
@@ -552,12 +553,13 @@
       <div class="card table-card">
         <div class="table-wrap">
           <table class="table acct-table">
-            <thead><tr>${th('Account', 'name')}${th('Stage', 'stage')}${th('Primary contact')}${th('Current vendors')}${th('Renewal', 'renewal')}${th('Value', 'value')}${th('Follow-up', 'followup')}${th('Revisit', 'revisit')}${th('Last touch', 'lasttouch')}</tr></thead>
+            <thead><tr>${th('Account', 'name')}${th('Location', 'location')}${th('Stage', 'stage')}${th('Primary contact')}${th('Current vendors')}${th('Renewal', 'renewal')}${th('Value', 'value')}${th('Follow-up', 'followup')}${th('Revisit', 'revisit')}${th('Last touch', 'lasttouch')}</tr></thead>
             <tbody>${list.map((a) => {
               const p = primaryContact(a);
               const last = lastActivity(a);
               return `<tr class="click-row" data-act="open-account" data-id="${a.id}">
                 <td class="sticky-col"><strong>${esc(a.name)}</strong><div class="row" style="gap:.35rem">${typePill(a)}${accountLinks(a)}</div></td>
+                <td class="loc-cell">${a.location ? esc(a.location) : '<span class="muted">—</span>'}</td>
                 <td>${esc(a.stage)}</td>
                 <td>${p ? `${esc(p.name)}${p.title ? `<div class="small muted">${esc(p.title)}</div>` : ''}` : '<span class="muted">—</span>'}${a.contacts.length > 1 ? `<div class="small muted">+${a.contacts.length - 1} more</div>` : ''}</td>
                 <td>${vendorPills(a) || '<span class="muted">—</span>'}</td>
@@ -580,6 +582,7 @@
         <div class="acard" role="link" tabindex="0" data-act="open-account" data-id="${a.id}">
           <div class="row spread"><span class="row" style="gap:.35rem"><strong class="acard-name">${esc(a.name)}</strong>${accountLinks(a)}</span>${typePill(a)}</div>
           <div class="small muted">${esc(a.stage)}${a.value ? ' · ' + money(a.value) : ''}${a.industry ? ' · ' + esc(a.industry) : ''}</div>
+          ${a.location ? `<div class="small acard-loc">📍 ${esc(a.location)}</div>` : ''}
           ${p ? `<div class="small">${esc(p.name)}${p.title ? ` <span class="muted">· ${esc(p.title)}</span>` : ''}${a.contacts.length > 1 ? ` <span class="muted">+${a.contacts.length - 1}</span>` : ''}</div>` : ''}
           ${a.vendors.length ? `<div class="row">${vendorPills(a)}</div>` : ''}
           <div class="acard-dates small">
@@ -614,6 +617,7 @@
                   return `
                   <div class="kcard" draggable="${!touchUI}" data-id="${a.id}" data-act="open-account">
                     <div class="row spread" style="gap:.3rem;flex-wrap:nowrap"><strong>${esc(a.name)}</strong>${accountLinks(a)}</div>
+                    ${a.location ? `<div class="small muted">📍 ${esc(a.location)}</div>` : ''}
                     ${p ? `<div class="small muted">${esc(p.name)}</div>` : ''}
                     ${a.vendors.length ? `<div class="small">${esc(a.vendors.join(', '))}</div>` : ''}
                     <div class="row small" style="margin-top:.3rem">${a.value ? `<span>${money(a.value)}</span>` : ''}${a.nextFollowUp ? dueChip(a.nextFollowUp) : ''}</div>

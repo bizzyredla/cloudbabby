@@ -351,7 +351,7 @@ code { background: var(--surface-2); padding: .05rem .3rem; border-radius: 4px; 
 .board-type { margin-bottom: .75rem; }
 
 .table-card { padding: 0; overflow: hidden; }
-.acct-table { min-width: 860px; }
+.acct-table { min-width: 980px; }
 .acct-table th { background: var(--surface); position: sticky; top: 0; }
 .th-sort { border: none; background: none; font: inherit; color: inherit; cursor: pointer; padding: 0; text-transform: inherit; }
 .th-sort.on { color: var(--text); }
@@ -854,3 +854,5 @@ a.btn { text-decoration: none; }
 /* Darken the street map in dark mode (OpenStreetMap has no dark style of its own). */
 .map.dark-tiles .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.6); }
 .map .leaflet-control-attribution { font-size: 10px; }
+.loc-cell { white-space: nowrap; }
+.acard-loc { color: var(--text); }
