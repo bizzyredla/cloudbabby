@@ -2216,15 +2216,36 @@
     el.innerHTML = `<div class="small">Finding addresses… ${done}/${total}</div><div class="progress"><div style="width:${Math.round((done / total) * 100)}%"></div></div>`;
   }
 
+  // Free street-map tiles that need no API key: OpenStreetMap first, Esri's street map as a backup
+  // if OpenStreetMap's tiles fail to load. Dark mode darkens the tiles with a CSS filter.
+  const TILE_SOURCES = [
+    { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' },
+    { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', maxZoom: 19,
+      attribution: 'Tiles &copy; <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a> &mdash; Esri, HERE, Garmin, OpenStreetMap contributors' },
+  ];
+  function addBaseTiles(map, dark, i = mapState.tileSource || 0) {
+    const src = TILE_SOURCES[i];
+    $('#map').classList.toggle('dark-tiles', dark);
+    let loaded = 0; let failed = 0;
+    const layer = L.tileLayer(src.url, { maxZoom: src.maxZoom, attribution: src.attribution }).addTo(map);
+    layer.on('tileload', () => { loaded++; });
+    layer.on('tileerror', () => {
+      failed++;
+      if (!loaded && failed >= 4 && i + 1 < TILE_SOURCES.length) {
+        map.removeLayer(layer);
+        mapState.tileSource = i + 1; // remember for the rest of the session
+        addBaseTiles(map, dark, i + 1);
+      }
+    });
+  }
+
   /** Create (or recreate) the Leaflet map inside #map, keeping the previous view if there was one. */
   function mountMap() {
     const keep = mapState.keep;
     const dark = matchMedia('(prefers-color-scheme: dark)').matches;
     const map = L.map('map', { zoomControl: true, attributionControl: true });
-    L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? 'dark_all' : 'rastertiles/voyager'}/{z}/{x}/{y}{r}.png`, {
-      subdomains: 'abcd', maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
-    }).addTo(map);
+    addBaseTiles(map, dark);
     if (keep) map.setView(keep.c, keep.z); else map.setView(CA_CENTER, 6);
     map.on('click', (e) => {
       if (!mapState.placing) return;

@@ -91,7 +91,7 @@ No install, no build step: open `index.html` in a browser.
   route, and ➤ to navigate to each stop (Apple Maps on iPhone). **Visited** logs the visit to the
   account and your daily plan, and revisits ask when to go back
 - Accounts have a street address field; CSV import reads street address and ZIP columns
-- Map: Leaflet (bundled in `vendor/leaflet`, BSD-2 license), © OpenStreetMap contributors, © CARTO
+- Map: Leaflet (bundled in `vendor/leaflet`, BSD-2 license), map tiles © OpenStreetMap contributors (Esri World Street Map as a backup); no API key needed
 
 **Web links, LinkedIn & ZoomInfo**
 - Website and LinkedIn icons on accounts (record, table, cards, board) and contacts (cards,

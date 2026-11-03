@@ -850,3 +850,7 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
 @media (max-width: 560px) { .rv-label { flex-basis: 6.5rem; } }
 a.btn { text-decoration: none; }
 .show-more { display: flex; justify-content: center; margin: 1rem 0; }
+
+/* Darken the street map in dark mode (OpenStreetMap has no dark style of its own). */
+.map.dark-tiles .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.6); }
+.map .leaflet-control-attribution { font-size: 10px; }
