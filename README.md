@@ -173,6 +173,10 @@ No install, no build step: open `index.html` in a browser.
   nothing is downloaded and text works offline
 
 **Daily planner**
+- Desktop: three columns side by side: the daily activity plan, the hour-by-hour schedule, and
+  priorities / cadence steps / follow-ups / notes. Narrower screens stack them
+- Cadence steps due are grouped by cadence with a count each; the first 3 people show, the rest
+  open with "Show N more"
 - Hour-by-hour schedule (7 AM–7 PM); click an hour to add a task
 - Tasks with time, duration, priority, linked account and notes, plus an "Anytime" list
 - Pulls in account follow-ups and key dates due that day automatically (today's page also

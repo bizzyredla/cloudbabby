@@ -1300,7 +1300,8 @@
       </div>
 
       <div class="planner-grid">
-        <div class="card">
+        <div class="plan-col">${planSection(d)}</div>
+        <div class="card sched-col">
           <div class="row spread" style="margin-bottom:.5rem">
             <h2 style="margin:0">Schedule</h2>
             <span class="small muted">Click an hour to add a task</span>
@@ -1316,7 +1317,7 @@
           ${late.length ? `<div class="stack" style="margin-top:.5rem">${late.map(taskCard).join('')}</div>` : ''}
         </div>
 
-        <div class="stack">
+        <div class="stack side-col">
           <div class="card">
             <h3>Progress</h3>
             <div class="progress"><div style="width:${tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0}%"></div></div>
@@ -1328,18 +1329,38 @@
           </div>
 
           <div class="card">
-            <div class="row spread"><h3 style="margin:0">Cadence steps due</h3><a class="small" href="#cadences">Cadences →</a></div>
+            <div class="row spread"><h3 style="margin:0">Cadence steps due ${dueSteps(d).length ? `<span class="count-badge">${dueSteps(d).length}</span>` : ''}</h3><a class="small" href="#cadences">Cadences →</a></div>
             ${(() => {
+              // Grouped by cadence: a count per cadence, the first few people, the rest one click away.
               const steps = dueSteps(d);
-              return steps.length ? `<div class="stack" style="margin-top:.5rem">${steps.map((p) => `
+              if (!steps.length) return '<div class="empty">No cadence steps due.</div>';
+              const groups = new Map();
+              for (const p of steps) { if (!groups.has(p.cad.id)) groups.set(p.cad.id, []); groups.get(p.cad.id).push(p); }
+              const row = (p) => `
                 <div class="task cad-task" style="--c:${p.cad.color}">
                   ${stepIcon(p.step)}
                   <div class="t-main">
                     <div class="t-title">${esc(p.contact.name)} <span class="muted">· ${esc(p.acct.name)}</span></div>
-                    <div class="t-sub">${esc(p.cad.name)} · ${esc(p.step.title || stepType(p.step).label)}${p.e.dueDate < d ? ` · <span class="pill overdue">${esc(relDays(p.e.dueDate))}</span>` : ''}</div>
+                    <div class="t-sub">${esc(p.step.title || stepType(p.step).label)}${p.e.dueDate < d ? ` · <span class="pill overdue">${esc(relDays(p.e.dueDate))}</span>` : ''}</div>
                   </div>
                   <button class="btn sm" data-act="enr-log" data-eid="${p.e.id}">Do it</button>
-                </div>`).join('')}</div>` : '<div class="empty">No cadence steps due.</div>';
+                </div>`;
+              const SHOW = 3;
+              return `<div class="cad-groups">${[...groups.values()].map((list) => {
+                const cad = list[0].cad;
+                const late = list.filter((p) => p.e.dueDate < d).length;
+                return `
+                <div class="cad-group" style="--c:${cad.color}">
+                  <div class="cad-group-head">
+                    <span class="cad-dot"></span>
+                    <a href="#cadences/${cad.id}" class="grow">${esc(cad.name)}</a>
+                    ${late ? `<span class="pill overdue">${late} overdue</span>` : ''}
+                    <span class="pill">${list.length} due</span>
+                  </div>
+                  <div class="stack">${list.slice(0, SHOW).map(row).join('')}</div>
+                  ${list.length > SHOW ? `<details class="cad-more"><summary>Show ${list.length - SHOW} more</summary><div class="stack">${list.slice(SHOW).map(row).join('')}</div></details>` : ''}
+                </div>`;
+              }).join('')}</div>`;
             })()}
           </div>
 
@@ -1370,9 +1391,7 @@
           ${tasks.some((x) => !x.done) ? `
           <button class="btn ghost" data-act="carry-over" style="width:100%">Move unfinished tasks to ${esc(fmtDate(addDays(d, 1), { weekday: 'short', month: 'short', day: 'numeric' }))}</button>` : ''}
         </div>
-      </div>
-
-      ${planSection(d)}`;
+      </div>`;
 
     $('#planner-date').addEventListener('change', (e) => { if (e.target.value) location.hash = `planner/${e.target.value}`; });
     $$('[data-prio]').forEach((inp) => inp.addEventListener('input', (e) => {

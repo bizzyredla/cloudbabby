@@ -1229,3 +1229,31 @@ input, select, textarea { border-radius: 10px; }
   .ct-row > .ct-sit, .ct-row > .ct-act { grid-row: 3; }
   .ct-row > .ct-last, .ct-row > .ct-next { grid-row: 4; }
 }
+
+/* ----- Planner: plan | schedule | the rest (desktop) ----- */
+.planner-grid { grid-template-columns: minmax(0, 1fr) 340px; grid-template-areas: "sched side" "plan plan"; }
+.plan-col { grid-area: plan; min-width: 0; }
+.sched-col { grid-area: sched; }
+.side-col { grid-area: side; }
+.plan-col .plan-card { margin-top: 0; }
+@media (min-width: 1280px) {
+  .planner-grid { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(280px, .85fr); grid-template-areas: "plan sched side"; }
+  .plan-col .plan-grid { grid-template-columns: minmax(0, 1fr); }
+  .plan-col .plan-card > .row.spread { flex-direction: column; align-items: stretch; }
+  .plan-col .plan-card > .row.spread > .row { justify-content: flex-start; }
+  .plan-col .plan-row { grid-template-columns: 18px 16px minmax(0, 1.25fr) 84px minmax(0, 1.25fr) 14px; gap: .3rem; }
+}
+@media (max-width: 900px) {
+  .planner-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sched" "side" "plan"; }
+}
+.cad-groups { display: flex; flex-direction: column; gap: .85rem; margin-top: .6rem; }
+.cad-group-head { display: flex; align-items: center; gap: .4rem; margin-bottom: .4rem; font-weight: 600; font-size: .88rem; }
+.cad-group-head a { color: inherit; text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cad-group-head a:hover { color: var(--accent); }
+.cad-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: 0 0 auto; }
+.cad-more { margin-top: .35rem; }
+.cad-more summary { cursor: pointer; font-size: .82rem; color: var(--accent); font-weight: 600; list-style: none; padding: .2rem 0; }
+.cad-more summary::-webkit-details-marker { display: none; }
+.cad-more[open] summary { margin-bottom: .35rem; }
+.cad-more[open] summary::after { content: " ▴"; }
+.cad-more:not([open]) summary::after { content: " ▾"; }
