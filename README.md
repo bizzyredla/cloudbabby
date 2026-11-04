@@ -144,7 +144,7 @@ No install, no build step: open `index.html` in a browser.
 - **Log touch** records the activity and restarts the clock; **↻ Reset** restarts it from today
   without logging anything (for a text or a chance meeting)
 - Due contacts appear on the Overview's Stay in touch card and fill empty slots in the planner's
-  25 calls/emails/LinkedIn; checking one off logs the touch
+  calls/emails/LinkedIn rows; checking one off logs the touch
 - Included in CSV export and import ("Stay in touch" column, primary contact)
 
 **Contacts**
@@ -184,7 +184,8 @@ No install, no build step: open `index.html` in a browser.
 - Top-3 priorities, day notes and a progress bar
 - Move unfinished tasks to the next day in one click
 - **Daily activity plan** with target slots for each day:
-  - 25 calls / emails / LinkedIn touches
+  - 25 calls / emails / LinkedIn touches (10 rows shown to start; "+ Add row" adds more, and the
+    25 goal still counts)
   - 5 visits
   - 5 channel accounts (suggestions limited to partner accounts)
   - 5 revisits. Accounts whose revisit date is that day (or overdue, on today's page) fill in

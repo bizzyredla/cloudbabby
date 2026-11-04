@@ -12,7 +12,7 @@
   const ACTIVITY_KINDS = ['Call', 'Email', 'LinkedIn', 'Visit', 'Text', 'Meeting', 'Demo', 'Note', 'Other'];
   // Daily activity plan targets shown on the planner.
   const PLAN_SECTIONS = [
-    { key: 'outreach', label: 'Calls / Emails / LinkedIn', short: 'Outreach', count: 25, kinds: ['Call', 'Email', 'LinkedIn'] },
+    { key: 'outreach', label: 'Calls / Emails / LinkedIn', short: 'Outreach', count: 25, rows: 10, kinds: ['Call', 'Email', 'LinkedIn'] },
     { key: 'visits', label: 'Visits', short: 'Visit', count: 5, kinds: ['Visit'] },
     { key: 'channel', label: 'Channel accounts', short: 'Channel account touch', count: 5, kinds: ['Call', 'Email', 'LinkedIn', 'Visit', 'Meeting'], partners: true },
     { key: 'revisits', label: 'Revisits', short: 'Revisit', count: 5, kinds: ['Visit'] },
@@ -297,13 +297,19 @@
 
   const blankPlanRow = (sec) => ({ name: '', kind: sec.kinds[0], note: '', done: false });
 
-  /** Plan rows for a day, padded to each section's target count. Read-only unless `persist`. */
+  /**
+   * Plan rows for a day: each section shows `rows` slots (default: its target count); "+ Add row"
+   * adds more. Unused blank slots past that are dropped. Read-only unless `persist`.
+   */
   function getPlan(iso, persist = false) {
     const stored = getDay(iso).plan || {};
     const plan = {};
+    const blank = (r) => !r.added && !(r.name || '').trim() && !(r.note || '').trim() && !r.done;
     for (const sec of PLAN_SECTIONS) {
+      const show = sec.rows || sec.count;
       const rows = (stored[sec.key] || []).slice();
-      while (rows.length < sec.count) rows.push(blankPlanRow(sec));
+      while (rows.length > show && blank(rows[rows.length - 1])) rows.pop();
+      while (rows.length < show) rows.push(blankPlanRow(sec));
       plan[sec.key] = rows;
     }
     if (persist) state.days[iso] = { ...getDay(iso), plan };
@@ -4184,7 +4190,7 @@
       }
       case 'plan-add': {
         const sec = PLAN_SECTIONS.find((x) => x.key === el.dataset.sec);
-        getPlan(ui.plannerDate, true)[sec.key].push(blankPlanRow(sec));
+        getPlan(ui.plannerDate, true)[sec.key].push({ ...blankPlanRow(sec), added: true }); // kept even while blank
         save(); rerender(); return;
       }
       case 'plan-carry': {
