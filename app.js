@@ -351,7 +351,7 @@
     const used = new Set(state.accounts.flatMap((a) => a.vendors));
     return [...COMPETITORS, ...[...used].filter((v) => !COMPETITORS.includes(v) && v !== NO_VENDOR).sort(), NO_VENDOR];
   };
-  const haystack = (a) => [a.name, a.industry, a.tags, a.notes, ...a.vendors,
+  const haystack = (a) => [a.name, a.industry, a.tags, a.notes, a.partnerType, a.stage, ...a.vendors,
     a.location, a.address, a.mainPhone, ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone, c.mobile])].join(' ').toLowerCase();
   const vendorPills = (a) => a.vendors.map((v) => `<span class="pill vendor">${esc(v)}</span>`).join(' ');
   const getDay = (iso) => state.days[iso] || { priorities: ['', '', ''], notes: '' };
@@ -1117,6 +1117,41 @@
   function logStageChange(a, from, to) {
     if (!from || !to || from === to) return;
     a.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Stage changed: ${from} → ${to}`, notes: '', createdAt: new Date().toISOString() });
+    setTimeout(() => afterStageChange(a, to), 80); // once the current dialog has closed
+  }
+
+  /** The next step a stage implies: a revisit date for Revisit, stopping outreach for closed accounts. */
+  function afterStageChange(a, to) {
+    if (!getAccount(a.id) || a.stage !== to) return;
+    const running = liveEnrollments().filter((p) => p.acct.id === a.id && p.e.status !== 'finished');
+    if (isClosedStage(to) && running.length) {
+      const names = [...new Set(running.map((p) => p.contact.name))].join(', ');
+      if (confirm(`${a.name} is now ${to}. Stop ${plural(running.length, 'cadence')} for ${names}?`)) {
+        const outcome = to === 'Closed Won' ? 'meeting' : to === 'Closed Lost' ? 'notinterested' : 'notinterested';
+        running.forEach((p) => finishEnrollment(p.e, outcome));
+        save(); rerender(); toast(`Stopped ${plural(running.length, 'cadence')}`);
+      }
+      return;
+    }
+    if (to === 'Revisit' && !a.revisitDate && !modal.open) revisitDateForm(a);
+  }
+
+  function revisitDateForm(acct) {
+    const d = today();
+    openModal(`When should you revisit ${acct.name}?`, `
+      <p class="small muted" style="margin:0">The revisit lands in your planner's Revisits that day.</p>
+      <div class="row">${[14, 30, 60, 90].map((n) => `<button type="button" class="btn sm ghost" data-days="${n}">${n} days</button>`).join('')}</div>
+      <div class="grid-2">
+        ${field('Revisit date', `<input name="revisitDate" type="date" value="${addDays(d, 30)}">`)}
+        ${field('Purpose (optional)', `<input name="revisitNote" value="${esc(acct.revisitNote)}" placeholder="e.g. Check in before renewal">`)}
+      </div>`, (data) => {
+      acct.revisitDate = data.revisitDate; acct.revisitNote = data.revisitNote; touch(acct);
+      if (data.revisitDate) toast(`Revisit set for ${fmtDate(data.revisitDate, { month: 'short', day: 'numeric' })}`);
+    }, 'Set revisit');
+    $$('[data-days]', modalForm).forEach((b) => b.addEventListener('click', () => {
+      $('[name=revisitDate]', modalForm).value = addDays(d, Number(b.dataset.days));
+    }));
+    $('.modal-actions [data-close]', modalForm).textContent = 'Not now';
   }
 
   /** Move an account to a new stage and record the change in its history. */
@@ -1222,7 +1257,7 @@
       <div class="card stack">
         <div class="detail-head">
           <div>
-            <div class="row"><h1 style="margin:0">${esc(a.name)}</h1>${accountLinks(a)}<span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span><span class="pill">${esc(a.stage)}</span></div>
+            <div class="row"><h1 style="margin:0">${esc(a.name)}</h1>${accountLinks(a)}<span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span><span class="pill" title="${esc(STAGE_HINTS[a.stage] || '')}">${esc(a.stage)}</span>${a.type === 'partner' && a.partnerType ? `<span class="pill">${esc(a.partnerType)}</span>` : ''}</div>
             ${a.tags ? `<div class="row small muted" style="margin-top:.35rem">${tagList(a).map((x) => `<span class="pill">#${esc(x)}</span>`).join('')}</div>` : ''}
           </div>
           <div class="row">
@@ -1234,14 +1269,20 @@
         </div>
 
         <div class="facts">
-          <div class="span-all"><span>Current vendors</span>${a.vendors.length ? vendorPills(a) : '—'}</div>
+          ${a.type === 'prospect' || a.vendors.length ? `<div class="span-all"><span>Current vendors</span>${a.vendors.length ? vendorPills(a) : '—'}</div>` : ''}
           <div class="span-all"><span>Address</span>${geoQuery(a) ? `${esc(geoQuery(a))}${hasGeo(a) ? ` · <a href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}</div>
-          <div><span>Vendor renewal</span>${a.vendorRenewal ? `${fmtDate(a.vendorRenewal)} <span class="small muted">${relDays(a.vendorRenewal)}</span>` : '—'}</div>
+          ${a.type === 'partner' ? (() => {
+            const ref = lastReferralDate(a);
+            const stale = ref && daysBetween(ref, today()) > 182;
+            return `<div><span>Partner type</span>${esc(a.partnerType) || '—'}</div>
+          <div><span>Last referral</span>${ref ? `${fmtDate(ref)} <span class="small muted">${relDays(ref)}</span>${stale && a.stage === 'Producing' ? '<div class="small" style="color:var(--warn)">Over 6 months: Dormant?</div>' : ''}` : 'None yet'}</div>`;
+          })() : ''}
+          ${a.type === 'partner' && !a.vendorRenewal ? '' : `<div><span>Vendor renewal</span>${a.vendorRenewal ? `${fmtDate(a.vendorRenewal)} <span class="small muted">${relDays(a.vendorRenewal)}</span>` : '—'}</div>`}
           <div><span>Employees</span>${esc(a.employees) || '—'}</div>
           <div><span>Main phone</span>${a.mainPhone ? `<a href="tel:${esc(a.mainPhone)}">${esc(a.mainPhone)}</a>` : '—'}</div>
           <div><span>${a.type === 'partner' ? 'Annual value' : 'Deal value'}</span>${money(a.value)}</div>
-          <div><span>Admin fees</span>${a.adminFees ? money(a.adminFees) : '—'}</div>
-          <div><span>Expected close</span>${a.closeDate ? `<span class="pill ${isClosedStage(a.stage) ? '' : dueClass(a.closeDate)}">${fmtDate(a.closeDate)}</span> <span class="small muted">${relDays(a.closeDate)}</span>` : '—'}</div>
+          ${a.type === 'partner' && !a.adminFees ? '' : `<div><span>Admin fees</span>${a.adminFees ? money(a.adminFees) : '—'}</div>`}
+          ${a.type === 'partner' && !a.closeDate ? '' : `<div><span>Expected close</span>${a.closeDate ? `<span class="pill ${isClosedStage(a.stage) ? '' : dueClass(a.closeDate)}">${fmtDate(a.closeDate)}</span> <span class="small muted">${relDays(a.closeDate)}</span>` : '—'}</div>`}
           ${(() => {
             const pa = a.channelPartnerId && getAccount(a.channelPartnerId);
             if (!pa) return '';
@@ -1250,12 +1291,6 @@
           })()}
           <div><span>Next follow-up</span>${a.nextFollowUp ? `<span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp)}</span> <span class="small muted">${relDays(a.nextFollowUp)}</span>` : '—'}</div>
           <div><span>Next revisit</span>${a.revisitDate ? `<span class="pill ${dueClass(a.revisitDate)}">${fmtDate(a.revisitDate)}</span> <span class="small muted">${relDays(a.revisitDate)}</span>${a.revisitNote ? `<div class="small muted">${esc(a.revisitNote)}</div>` : ''}` : '—'}</div>
-          ${a.type === 'partner' ? (() => {
-            const ref = lastReferralDate(a);
-            const stale = ref && daysBetween(ref, today()) > 182;
-            return `<div><span>Partner type</span>${esc(a.partnerType) || '—'}</div>
-          <div><span>Last referral</span>${ref ? `${fmtDate(ref)} <span class="small muted">${relDays(ref)}</span>${stale && a.stage === 'Producing' ? '<div class="small" style="color:var(--warn)">Over 6 months: Dormant?</div>' : ''}` : 'None yet'}</div>`;
-          })() : ''}
           <div><span>Last touch</span>${(() => {
             const d = lastTouchDate(a);
             if (!d) return 'Never';
@@ -1297,8 +1332,12 @@
         </div>
 
         ${(() => {
+          if (a.type !== 'partner') return '';
           const referred = state.accounts.filter((x) => x.channelPartnerId === a.id);
-          if (!referred.length) return '';
+          if (!referred.length) {
+            return `<div><div class="section-head"><h2 style="margin:0">Referred accounts</h2></div>
+              <div class="empty">No referrals linked yet. On a prospect, pick this partner under "Referred by partner".</div></div>`;
+          }
           const total = referred.filter(isOpenDeal).reduce((n, x) => n + (Number(x.value) || 0), 0);
           return `<div>
             <div class="section-head"><h2 style="margin:0">Referred accounts <span class="muted small">(${referred.length}${total ? ` · ${money(total)} open` : ''})</span></h2></div>
@@ -1739,13 +1778,14 @@
   // Saved lists are filters: an account matches when it meets every filled-in section and any
   // value ticked within a section. Built-in "vendor:<name>" lists group accounts by current vendor.
   const VENDOR_LIST = 'vendor:';
-  const emptyCriteria = () => ({ type: 'all', stages: [], tags: [], vendors: [], text: '', renewalDays: 0 });
+  const emptyCriteria = () => ({ type: 'all', stages: [], tags: [], vendors: [], partnerTypes: [], text: '', renewalDays: 0 });
 
   function matchesCriteria(a, c) {
     if (c.type !== 'all' && a.type !== c.type) return false;
     if (c.stages.length && !c.stages.includes(a.stage)) return false;
     if (c.tags.length && !tagList(a).some((t) => c.tags.includes(t.toLowerCase()))) return false;
     if (c.vendors.length && !a.vendors.some((v) => c.vendors.includes(v))) return false;
+    if (c.partnerTypes.length && !(a.type === 'partner' && c.partnerTypes.includes(a.partnerType))) return false;
     if (c.text && !haystack(a).includes(c.text.toLowerCase())) return false;
     if (c.renewalDays) {
       const n = a.vendorRenewal ? daysBetween(today(), a.vendorRenewal) : -1;
@@ -1773,6 +1813,7 @@
     }
     if (c.tags.length) parts.push('Tag: ' + c.tags.map((t) => '#' + t).join(' or '));
     if (c.stages.length) parts.push('Stage: ' + c.stages.join(' or '));
+    if (c.partnerTypes.length) parts.push('Partner type: ' + c.partnerTypes.join(' or '));
     if (c.text) parts.push(`Contains "${c.text}"`);
     if (c.renewalDays) parts.push(`Vendor renewal within ${c.renewalDays} days`);
     return parts.length ? parts : ['All accounts'];
@@ -1842,7 +1883,7 @@
 
   const readCriteria = (fd) => ({
     type: fd.get('type') || 'all', vendors: fd.getAll('vendors'), tags: fd.getAll('tags'),
-    stages: fd.getAll('stages'), text: (fd.get('text') || '').trim(), renewalDays: Number(fd.get('renewalDays')) || 0,
+    stages: fd.getAll('stages'), partnerTypes: fd.getAll('partnerTypes'), text: (fd.get('text') || '').trim(), renewalDays: Number(fd.get('renewalDays')) || 0,
   });
 
   function listForm(existing) {
@@ -1860,6 +1901,7 @@
       <div class="field"><span>Tagged with any of</span>${checks('tags', [...new Set([...allTags(), ...PARTNER_TAGS.map((t) => t.toLowerCase())])].sort(), c.tags, (t) => '#' + (PARTNER_TAGS.find((x) => x.toLowerCase() === t) || t))}</div>
       <div class="field"><span>Prospect (deal) stage is any of</span>${checks('stages', STAGES.prospect, c.stages)}</div>
       <div class="field"><span>Partner (channel) stage is any of</span>${checks('stages', STAGES.partner, c.stages)}</div>
+      <div class="field"><span>Partner type is any of</span>${checks('partnerTypes', PARTNER_TYPES, c.partnerTypes)}</div>
       <div class="grid-2">
         ${field('Name, contacts or notes contain', `<input name="text" value="${esc(c.text)}">`)}
         ${field('Vendor renewal within (days)', `<input name="renewalDays" type="number" min="0" step="15" value="${c.renewalDays || ''}" placeholder="e.g. 120">`)}
@@ -3995,7 +4037,7 @@
         ${field('Industry', `<input name="industry" value="${esc(a.industry)}">`)}
         ${field('Employees', `<input name="employees" type="number" min="0" value="${esc(a.employees)}">`)}
         ${field(a.type === 'partner' ? 'Annual value ($)' : 'Deal value ($)', `<input name="value" type="number" min="0" step="any" value="${esc(a.value)}">`)}
-        ${field('Admin fees ($)', `<input name="adminFees" type="number" min="0" step="any" value="${esc(a.adminFees)}">`)}
+        ${field('Admin fees ($)', `<input name="adminFees" type="number" min="0" step="any" value="${esc(a.adminFees)}">`, 'only-prospect')}
         ${field('Website', `<input name="website" value="${esc(a.website)}" autocapitalize="off" placeholder="company.com">`)}
         ${field('Company LinkedIn', `<input name="linkedin" value="${esc(a.linkedin)}" autocapitalize="off" placeholder="linkedin.com/company/…">`)}
         ${field('Street address', `<input name="address" value="${esc(a.address)}" placeholder="e.g. 1200 J St" autocomplete="street-address">`)}
@@ -4010,12 +4052,12 @@
         ${field('Email', `<input name="c_email" type="email">`)}
         ${field('Phone', `<input name="c_phone" type="tel">`)}
       </div></fieldset>`}
-      <fieldset class="form-sec"><legend>Current vendor</legend><div class="grid-3">
+      <fieldset class="form-sec only-prospect"><legend>Current vendor</legend><div class="grid-3">
         <div class="field span-2"><span>Current vendors</span>${vendorPicker(a.vendors || [])}</div>
         ${field('Vendor renewal date', `<input name="vendorRenewal" type="date" value="${esc(a.vendorRenewal)}">`)}
       </div></fieldset>
       <fieldset class="form-sec"><legend>Next steps</legend><div class="grid-3">
-        ${field('Expected close', `<input name="closeDate" type="date" value="${esc(a.closeDate)}">`)}
+        ${field('Expected close', `<input name="closeDate" type="date" value="${esc(a.closeDate)}">`, 'only-prospect')}
         ${field('Next follow-up', `<input name="nextFollowUp" type="date" value="${esc(a.nextFollowUp)}">`)}
         ${field('Next revisit date', `<input name="revisitDate" type="date" value="${esc(a.revisitDate)}">`)}
         ${field('Revisit purpose', `<input name="revisitNote" value="${esc(a.revisitNote)}" placeholder="e.g. Drop off comparison">`)}
@@ -4026,7 +4068,7 @@
         ${field('Last referral date', `<input name="lastReferralDate" type="date" value="${esc(existing ? lastReferralDate(a) : '')}"><span class="small muted">Updates when you link a referred account to this partner.</span>`)}
       </div></fieldset>
       ${a.type === 'partner' && existing ? '' : `
-      <fieldset class="form-sec"><legend>Channel partner</legend><div class="grid-2">
+      <fieldset class="form-sec only-prospect"><legend>Channel partner</legend><div class="grid-2">
         ${field('Referred by partner', `<select name="channelPartnerId" id="f-partner"><option value="">— none —</option>${state.accounts.filter((x) => x.type === 'partner' && x !== existing).sort((x, y) => x.name.localeCompare(y.name)).map((x) => opt(x.id, x.name, a.channelPartnerId)).join('')}</select>`)}
         ${field('Partner contact', `<select name="channelContactId" id="f-pcontact"></select>`)}
       </div></fieldset>`}
@@ -4064,7 +4106,10 @@
       stageHint();
     });
     $('#f-stage').addEventListener('change', stageHint);
+    const showFor = (type) => $$('#modal-form .only-prospect').forEach((el) => { el.hidden = type === 'partner'; });
+    showFor(a.type);
     $('#f-type').addEventListener('change', (e) => {
+      showFor(e.target.value);
       $('#f-partner-sec').hidden = e.target.value !== 'partner';
       $('#f-tag-chips').hidden = e.target.value !== 'partner';
     });
@@ -4525,23 +4570,27 @@
       const accts = state.accounts.filter((a) => haystack(a).includes(q)).slice(0, 8);
       const people = state.accounts.flatMap((a) => a.contacts.map((c) => ({ a, c })))
         .filter(({ c }) => [c.name, c.title, c.email, c.phone, c.mobile].join(' ').toLowerCase().includes(q)).slice(0, 8);
-      results.innerHTML = (accts.length ? `<div class="gs-h">Accounts</div>${accts.map((a) => `
+      // People first when the words match a person rather than an account's own name.
+      const accountsHtml = (accts.length ? `<div class="gs-h">Accounts</div>${accts.map((a) => `
           <a class="gs-item" href="#account/${a.id}" data-close>
-            <span class="grow"><strong>${esc(a.name)}</strong><span class="small muted"> · ${esc(a.stage)}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</span></span>${typePill(a)}
-          </a>`).join('')}` : '')
-        + (people.length ? `<div class="gs-h">Contacts</div>${people.map(({ a, c }) => `
-          <a class="gs-item" href="#account/${a.id}" data-close>
+            <span class="grow"><strong>${esc(a.name)}</strong><span class="small muted"> · ${esc(a.stage)}${a.partnerType ? ' · ' + esc(a.partnerType) : ''}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</span></span>${typePill(a)}
+          </a>`).join('')}` : '');
+      const peopleHtml = (people.length ? `<div class="gs-h">Contacts</div>${people.map(({ a, c }) => `
+          <a class="gs-item" href="#account/${a.id}" data-cid="${c.id}" data-close>
             <span class="avatar sm">${esc(initials(c.name))}</span>
             <span class="grow"><strong>${esc(c.name)}</strong><span class="small muted">${c.title ? ' · ' + esc(c.title) : ''} · ${esc(a.name)}</span></span>
-          </a>`).join('')}` : '')
+          </a>`).join('')}` : '');
+      const peopleFirst = people.length && !accts.some((a) => a.name.toLowerCase().includes(q));
+      results.innerHTML = (peopleFirst ? peopleHtml + accountsHtml : accountsHtml + peopleHtml)
         || '<div class="empty">No matches.</div>';
     };
     input.addEventListener('input', draw);
+    results.addEventListener('click', (e) => { const it = e.target.closest('.gs-item'); if (it && it.dataset.cid) ui.focusContact = it.dataset.cid; });
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
       const first = $('.gs-item', results);
-      if (first) { modal.close(); location.hash = first.getAttribute('href').slice(1); }
+      if (first) { if (first.dataset.cid) ui.focusContact = first.dataset.cid; modal.close(); go(first.getAttribute('href').slice(1)); }
     });
     draw();
     input.focus();
@@ -4615,6 +4664,9 @@
       value: 22000, nextFollowUp: '', activities: [], keyDates: [],
     });
 
+    Object.assign(brightpath, { partnerType: 'Business Consultant' });
+    Object.assign(summit, { partnerType: 'Payroll / HR Technology' });
+    Object.assign(northwind, { channelPartnerId: brightpath.id, referredAt: addDays(t, -40) });
     [northwind, brightpath, helix, summit, oak].forEach(migrateAccount);
     const contact = (name, title, role, email = '', phone = '') => ({ id: uid(), name, title, role, email, phone, notes: '', primary: false });
     northwind.contacts[0].role = 'Champion';

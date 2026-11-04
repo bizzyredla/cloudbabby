@@ -1280,3 +1280,4 @@ input, select, textarea { border-radius: 10px; }
 }
 .ov-col .empty-soft { padding: 1.1rem 1rem; }
 @media (min-width: 701px) { .sit-when { width: 112px; } }
+.only-prospect[hidden], #modal-form [hidden] { display: none !important; }

@@ -28,6 +28,13 @@ No install, no build step: open `index.html` in a browser.
   - **Ready-made tags:** tap to add EB-Small-Target / -Engaged / -Active, EB-Large-Target / -Engaged /
     -Active, AgcyProd-EB-Cold / -Warm / -Active. Lists can filter on them before they're in use
   - All three are in CSV export and import ("Partner type", "Last touch", "Last referral")
+  - Partner pages and forms leave out deal-only fields (expected close, admin fees, current
+    vendors) and always show **Referred accounts**
+- **Stage changes do the follow-up:** moving a prospect to Revisit asks when to go back (14 / 30 /
+  60 / 90 days or a date); moving any account to Closed Won, Closed Lost or Closed offers to stop
+  its running cadences
+- Lists can also filter by partner type. Search matches partner type and stage, and a contact
+  result opens the account scrolled to that person
 - **Multiple contacts** per account: name, title, email, phone, role in the deal (decision maker,
   champion, HR…), notes, and one marked primary. Activities can be logged against a contact
 - **Current vendors**: pick from a dropdown of the top 20 TriNet competitors (ADP TotalSource,
