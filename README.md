@@ -99,12 +99,20 @@ No install, no build step: open `index.html` in a browser.
 - **Look up** menu on every account and contact: LinkedIn, Sales Navigator, ZoomInfo, the
   company's public ZoomInfo profile, and Google. The name is copied to the clipboard as well, so
   you can paste it if a site opens without the search filled in
-- **Import CSV** (Accounts page or Settings): bring in accounts and contacts from a ZoomInfo
-  export or any spreadsheet. Columns are recognized automatically (company, website, company
+- **Import** (Accounts page or Settings): bring in accounts and contacts from an Excel file (.xlsx),
+  a ZoomInfo export, or any spreadsheet saved as CSV. Opportunity columns are read too: value,
+  admin fees, current vendors, lead source, stage, close date, channel partner and channel contact
+  (brokers become partner accounts, linked to the accounts they referred). Columns are recognized automatically (company, website, company
   LinkedIn, employees, industry, city/state, first/last name, title, email, direct and mobile
   phone, contact LinkedIn). A preview shows what will be added. Existing accounts are matched by
   name, only empty fields are filled, duplicate contacts are skipped, and new accounts are tagged
   so they're easy to list. CSV exports include website and LinkedIn columns and re-import cleanly
+
+**Opportunity fields & channel partners**
+- Accounts carry **Admin fees** and an **Expected close** date (a Table column and sort, shown on
+  Cards, Board and the account page, with Dashboard reminders as it approaches)
+- **Channel partner**: link an account to the partner (broker) that referred it and the partner
+  contact. The partner's page lists its referred accounts and their open value
 
 **Contact & account fields**
 - Contacts: title, role in deal, email, direct phone, mobile, LinkedIn URL, preferred channel,

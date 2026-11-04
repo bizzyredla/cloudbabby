@@ -326,6 +326,7 @@
     for (const a of state.accounts) {
       if (a.nextFollowUp) items.push({ kind: 'followup', date: a.nextFollowUp, label: 'Follow up', account: a });
       if (a.revisitDate) items.push({ kind: 'revisit', date: a.revisitDate, label: 'Revisit', account: a });
+      if (a.closeDate && !['Won', 'Lost'].includes(a.stage)) items.push({ kind: 'close', date: a.closeDate, label: 'Expected close', account: a });
       for (const k of a.keyDates) if (!k.done) items.push({ kind: 'keydate', date: k.date, label: k.label, account: a, keyDate: k });
     }
     return items.sort((x, y) => x.date.localeCompare(y.date));
@@ -489,6 +490,7 @@
         </div>
         ${i.kind === 'followup' ? `<button class="btn sm ghost" data-act="log" data-id="${i.account.id}">Log</button>`
           : i.kind === 'revisit' ? `<a class="btn sm ghost" href="#planner/${i.date > today() ? i.date : today()}">Planner</a>`
+          : i.kind === 'close' ? `<a class="btn sm ghost" href="#account/${i.account.id}">Open</a>`
           : `<button class="btn sm ghost" data-act="keydate-done" data-id="${i.account.id}" data-kid="${i.keyDate.id}">Done</button>`}
       </li>`).join('')}</ul>`;
   }
@@ -504,10 +506,11 @@
     followup: (x, y) => (x.nextFollowUp || FAR).localeCompare(y.nextFollowUp || FAR),
     revisit: (x, y) => (x.revisitDate || FAR).localeCompare(y.revisitDate || FAR),
     renewal: (x, y) => (x.vendorRenewal || FAR).localeCompare(y.vendorRenewal || FAR),
+    close: (x, y) => (x.closeDate || FAR).localeCompare(y.closeDate || FAR),
     lasttouch: (x, y) => ((lastActivity(y) || {}).date || '').localeCompare((lastActivity(x) || {}).date || ''),
     updated: (x, y) => (y.updatedAt || '').localeCompare(x.updatedAt || ''),
   };
-  const SORT_LABELS = { followup: 'Next follow-up', revisit: 'Next revisit', renewal: 'Vendor renewal', name: 'Name', location: 'Location', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', updated: 'Recently updated' };
+  const SORT_LABELS = { close: 'Expected close', followup: 'Next follow-up', revisit: 'Next revisit', renewal: 'Vendor renewal', name: 'Name', location: 'Location', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', updated: 'Recently updated' };
   const sortAccounts = (list) => list.sort((x, y) => SORTERS[ui.sort](x, y) * ui.sortDir || x.name.localeCompare(y.name));
 
   function filteredAccounts() {
@@ -553,7 +556,7 @@
       <div class="card table-card">
         <div class="table-wrap">
           <table class="table acct-table">
-            <thead><tr>${th('Account', 'name')}${th('Location', 'location')}${th('Stage', 'stage')}${th('Primary contact')}${th('Current vendors')}${th('Renewal', 'renewal')}${th('Value', 'value')}${th('Follow-up', 'followup')}${th('Revisit', 'revisit')}${th('Last touch', 'lasttouch')}</tr></thead>
+            <thead><tr>${th('Account', 'name')}${th('Location', 'location')}${th('Stage', 'stage')}${th('Primary contact')}${th('Current vendors')}${th('Renewal', 'renewal')}${th('Value', 'value')}${th('Close', 'close')}${th('Follow-up', 'followup')}${th('Revisit', 'revisit')}${th('Last touch', 'lasttouch')}</tr></thead>
             <tbody>${list.map((a) => {
               const p = primaryContact(a);
               const last = lastActivity(a);
@@ -565,6 +568,7 @@
                 <td>${vendorPills(a) || '<span class="muted">—</span>'}</td>
                 <td>${a.vendorRenewal ? `<span class="small">${fmtDate(a.vendorRenewal, { month: 'short', day: 'numeric', year: '2-digit' })}</span>` : '<span class="muted">—</span>'}</td>
                 <td class="num">${a.value ? money(a.value) : '<span class="muted">—</span>'}</td>
+                <td>${dueChip(a.closeDate)}</td>
                 <td>${dueChip(a.nextFollowUp)}</td>
                 <td>${dueChip(a.revisitDate)}</td>
                 <td class="small">${last ? `${esc(relDays(last.date))}<div class="muted">${esc(last.kind)}</div>` : '<span class="muted">Never</span>'}</td>
@@ -586,6 +590,7 @@
           ${p ? `<div class="small">${esc(p.name)}${p.title ? ` <span class="muted">· ${esc(p.title)}</span>` : ''}${a.contacts.length > 1 ? ` <span class="muted">+${a.contacts.length - 1}</span>` : ''}</div>` : ''}
           ${a.vendors.length ? `<div class="row">${vendorPills(a)}</div>` : ''}
           <div class="acard-dates small">
+            ${a.closeDate ? `<span>Close ${dueChip(a.closeDate)}</span>` : ''}
             <span>Follow-up ${dueChip(a.nextFollowUp)}</span>
             <span>Revisit ${dueChip(a.revisitDate)}</span>
           </div>
@@ -620,7 +625,7 @@
                     ${a.location ? `<div class="small muted">📍 ${esc(a.location)}</div>` : ''}
                     ${p ? `<div class="small muted">${esc(p.name)}</div>` : ''}
                     ${a.vendors.length ? `<div class="small">${esc(a.vendors.join(', '))}</div>` : ''}
-                    <div class="row small" style="margin-top:.3rem">${a.value ? `<span>${money(a.value)}</span>` : ''}${a.nextFollowUp ? dueChip(a.nextFollowUp) : ''}</div>
+                    <div class="row small" style="margin-top:.3rem">${a.value ? `<span>${money(a.value)}</span>` : ''}${a.closeDate ? `<span class="muted">Close</span> ${dueChip(a.closeDate)}` : a.nextFollowUp ? dueChip(a.nextFollowUp) : ''}</div>
                     ${touchUI ? `<select class="kcard-stage" data-id="${a.id}" aria-label="Move ${esc(a.name)} to stage">${STAGES[type].map((s2) => opt(s2, s2, a.stage)).join('')}</select>` : ''}
                   </div>`;
                 }).join('') || '<div class="kcol-empty">Drop here</div>'}
@@ -753,6 +758,14 @@
           <div><span>Employees</span>${esc(a.employees) || '—'}</div>
           <div><span>Main phone</span>${a.mainPhone ? `<a href="tel:${esc(a.mainPhone)}">${esc(a.mainPhone)}</a>` : '—'}</div>
           <div><span>${a.type === 'partner' ? 'Annual value' : 'Deal value'}</span>${money(a.value)}</div>
+          <div><span>Admin fees</span>${a.adminFees ? money(a.adminFees) : '—'}</div>
+          <div><span>Expected close</span>${a.closeDate ? `<span class="pill ${['Won', 'Lost'].includes(a.stage) ? '' : dueClass(a.closeDate)}">${fmtDate(a.closeDate)}</span> <span class="small muted">${relDays(a.closeDate)}</span>` : '—'}</div>
+          ${(() => {
+            const pa = a.channelPartnerId && getAccount(a.channelPartnerId);
+            if (!pa) return '';
+            const pc = a.channelContactId && pa.contacts.find((c) => c.id === a.channelContactId);
+            return `<div class="span-all"><span>Channel partner</span><a href="#account/${pa.id}">${esc(pa.name)}</a>${pc ? ` · ${esc(pc.name)}${pc.phone ? ` · <a href="tel:${esc(pc.phone)}">${esc(pc.phone)}</a>` : ''}${pc.email ? ` · <a href="mailto:${esc(pc.email)}">${esc(pc.email)}</a>` : ''}` : ''}</div>`;
+          })()}
           <div><span>Next follow-up</span>${a.nextFollowUp ? `<span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp)}</span> <span class="small muted">${relDays(a.nextFollowUp)}</span>` : '—'}</div>
           <div><span>Next revisit</span>${a.revisitDate ? `<span class="pill ${dueClass(a.revisitDate)}">${fmtDate(a.revisitDate)}</span> <span class="small muted">${relDays(a.revisitDate)}</span>${a.revisitNote ? `<div class="small muted">${esc(a.revisitNote)}</div>` : ''}` : '—'}</div>
           <div><span>Last touch</span>${last ? `${fmtDate(last.date)} <span class="small muted">(${esc(last.kind)})</span>` : 'Never'}</div>
@@ -789,6 +802,23 @@
               ${c.notes ? `<div class="small muted" style="white-space:pre-wrap;margin-top:.25rem">${esc(c.notes)}</div>` : ''}
             </div>`).join('')}</div>` : '<div class="empty">No contacts yet. Add the decision maker, champion, HR lead…</div>'}
         </div>
+
+        ${(() => {
+          const referred = state.accounts.filter((x) => x.channelPartnerId === a.id);
+          if (!referred.length) return '';
+          const total = referred.filter((x) => !['Won', 'Lost'].includes(x.stage)).reduce((n, x) => n + (Number(x.value) || 0), 0);
+          return `<div>
+            <div class="section-head"><h2 style="margin:0">Referred accounts <span class="muted small">(${referred.length}${total ? ` · ${money(total)} open` : ''})</span></h2></div>
+            <ul class="list">${referred.sort((x, y) => (x.closeDate || '9').localeCompare(y.closeDate || '9')).map((x) => {
+              const pc = x.channelContactId && a.contacts.find((c) => c.id === x.channelContactId);
+              return `<li>
+                <div class="grow"><a class="title" href="#account/${x.id}">${esc(x.name)}</a>
+                  <div class="small muted">${esc(x.stage)}${x.value ? ' · ' + money(x.value) : ''}${x.location ? ' · ' + esc(x.location) : ''}${pc ? ' · via ' + esc(pc.name) : ''}</div></div>
+                ${x.closeDate ? `<span class="small muted">Close</span> ${dueChip(x.closeDate)}` : ''}
+              </li>`;
+            }).join('')}</ul>
+          </div>`;
+        })()}
 
         <div>
           <div class="section-head"><h2 style="margin:0">Key dates</h2><button class="btn sm ghost" data-act="new-keydate" data-id="${a.id}">+ Add date</button></div>
@@ -1345,11 +1375,13 @@
 
   function accountsCsv(title, accounts) {
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Account', 'Website', 'Company LinkedIn', 'Type', 'Stage', 'Industry', 'Employees', 'Street address', 'Location', 'Main phone', 'Value', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Tags']];
+    const rows = [['Account', 'Website', 'Company LinkedIn', 'Type', 'Stage', 'Industry', 'Employees', 'Street address', 'Location', 'Main phone', 'Value', 'Admin fees', 'Expected close', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Lead source', 'Channel partner', 'Channel contact', 'Tags']];
     for (const a of accounts) {
       const p = primaryContact(a) || {};
-      rows.push([a.name, a.website, a.linkedin, a.type, a.stage, a.industry, a.employees, a.address, a.location, a.mainPhone, a.value, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
-        a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.tags]);
+      rows.push([a.name, a.website, a.linkedin, a.type, a.stage, a.industry, a.employees, a.address, a.location, a.mainPhone, a.value, a.adminFees, a.closeDate, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
+        a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.leadSource,
+        (getAccount(a.channelPartnerId) || {}).name || '',
+        ((getAccount(a.channelPartnerId) || { contacts: [] }).contacts.find((c) => c.id === a.channelContactId) || {}).name || '', a.tags]);
     }
     downloadFile(`${title.replace(/[^\w-]+/g, '-')}-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
   }
@@ -2029,7 +2061,36 @@
     phone: ['directphonenumber', 'directphone', 'phone', 'phonenumber', 'workphone', 'businessphone'],
     mobile: ['mobilephone', 'mobile', 'cellphone', 'mobilenumber'],
     linkedin: ['linkedincontactprofileurl', 'contactlinkedin', 'linkedinurl', 'linkedinprofile', 'linkedinprofileurl', 'personlinkedinurl', 'profileurl', 'linkedin'],
+    value: ['value', 'dealvalue', 'amount', 'opportunityvalue', 'oppvalue', 'annualvalue', 'dealsize', 'arr'],
+    adminFees: ['adminfees', 'adminfee', 'annualadminfees', 'adminfeerevenue'],
+    vendors: ['currentvendors', 'currentvendor', 'vendors', 'vendor', 'currentpeo', 'incumbent'],
+    leadSource: ['leadsource', 'source'],
+    stage: ['stage', 'dealstage', 'opportunitystage', 'status'],
+    closeDate: ['closedate', 'expectedclose', 'expectedclosedate', 'closingdate', 'targetclosedate'],
+    channelPartner: ['channelpartner', 'referralpartner', 'broker', 'partner', 'channel'],
+    channelContact: ['channelcontact', 'partnercontact', 'brokercontact', 'channelpartnercontact'],
   };
+  const parseMoney = (v) => { const n = Number(String(v).replace(/[$,\s]/g, '')); return v !== '' && Number.isFinite(n) ? n : ''; };
+  /** Spreadsheet dates in, YYYY-MM-DD out: 2027-01-15, 2027-01-15 00:00:00, 1/15/2027 or 1/15/27. */
+  function normDate(v) {
+    v = String(v).trim();
+    if (/^\d{5}(\.\d+)?$/.test(v)) return serialToISO(Number(v)); // raw Excel date number
+    let m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+    m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+    if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${pad(m[1])}-${pad(m[2])}`;
+    return '';
+  }
+  /** "Insperity; ADP TotalSource" → known vendor names; "None / in-house" stays one value. */
+  function parseVendors(v) {
+    v = String(v).trim();
+    if (!v) return [];
+    if (/^(none|n\/a|in[- ]?house|none\s*\/\s*in[- ]?house)$/i.test(v)) return [NO_VENDOR];
+    const whole = COMPETITORS.find((x) => x.toLowerCase() === v.toLowerCase());
+    const parts = whole ? [v] : v.split(/[;|,]/).map((x) => x.trim()).filter(Boolean);
+    return [...new Set(parts.map((x) => COMPETITORS.find((c) => c.toLowerCase() === x.toLowerCase())
+      || COMPETITORS.find((c) => x.toLowerCase().includes(c.toLowerCase())) || x))];
+  }
   const normHeader = (h) => h.toLowerCase().replace(/[^a-z0-9]/g, '');
 
   function mapCsv(rows) {
@@ -2050,6 +2111,10 @@
         address: get(r, 'address'), mainPhone: get(r, 'companyPhone'),
         companyLinkedin: get(r, 'companyLinkedin'),
         contact: name ? { name, title: get(r, 'title'), email: get(r, 'email'), phone: get(r, 'phone'), mobile: get(r, 'mobile'), linkedin: get(r, 'linkedin') } : null,
+        value: parseMoney(get(r, 'value')), adminFees: parseMoney(get(r, 'adminFees')), vendors: parseVendors(get(r, 'vendors')),
+        leadSource: LEAD_SOURCES.find((x) => x.toLowerCase() === get(r, 'leadSource').toLowerCase()) || get(r, 'leadSource'),
+        stage: get(r, 'stage'), closeDate: normDate(get(r, 'closeDate')),
+        channelPartner: get(r, 'channelPartner'), channelContact: get(r, 'channelContact'),
       };
     }).filter((x) => x.company);
     return { col, records };
@@ -2059,29 +2124,50 @@
   function applyImport(records, opts, commit) {
     const now = new Date().toISOString();
     const made = new Map(); // lower-case name -> new account (dry run keeps them here)
-    const stats = { newAccounts: 0, updatedAccounts: new Set(), newContacts: 0, skippedContacts: 0 };
+    const stats = { newAccounts: 0, updatedAccounts: new Set(), newContacts: 0, skippedContacts: 0, newPartners: 0 };
+    const addContact = (a, c) => {
+      const dup = a.contacts.find((x) => (c.email && x.email && x.email.toLowerCase() === c.email.toLowerCase()) || x.name.toLowerCase() === c.name.toLowerCase());
+      if (dup) { stats.skippedContacts++; return dup; }
+      stats.newContacts++;
+      const contact = { id: uid(), title: '', email: '', phone: '', mobile: '', linkedin: '', ...c, role: '', notes: '', status: 'Active', channel: '', timezone: '', primary: a.contacts.length === 0 };
+      if (commit) a.contacts.push(contact); else a.contacts = [...a.contacts, contact];
+      return contact;
+    };
+    const findOrCreate = (name, type, stage, source) => {
+      const key = name.toLowerCase();
+      let a = findAccountByName(name) || made.get(key);
+      if (a) return { a, created: false };
+      a = migrateAccount({
+        id: uid(), name, type, stage, tags: opts.tag, notes: '', vendors: [],
+        contacts: [], activities: [], keyDates: [], leadSource: source, createdAt: now, updatedAt: now,
+      });
+      made.set(key, a);
+      if (commit) state.accounts.push(a);
+      return { a, created: true };
+    };
     for (const r of records) {
-      const key = r.company.toLowerCase();
-      let a = findAccountByName(r.company) || made.get(key);
-      if (!a) {
-        a = migrateAccount({
-          id: uid(), name: r.company, type: opts.type, stage: STAGES[opts.type][0], tags: opts.tag, notes: '', vendors: [],
-          contacts: [], activities: [], keyDates: [], leadSource: opts.source, createdAt: now, updatedAt: now,
-        });
-        made.set(key, a);
-        stats.newAccounts++;
-        if (commit) state.accounts.push(a);
-      } else if (!made.has(key)) stats.updatedAccounts.add(a.id);
-      const fill = { website: r.website, industry: r.industry, employees: r.employees, location: r.location, address: r.address, mainPhone: r.mainPhone, linkedin: r.companyLinkedin };
-      if (commit) for (const [k, v] of Object.entries(fill)) if (v && !a[k]) a[k] = v;
-      if (r.contact) {
-        const c = r.contact;
-        const dup = a.contacts.some((x) => (c.email && x.email && x.email.toLowerCase() === c.email.toLowerCase()) || x.name.toLowerCase() === c.name.toLowerCase());
-        if (dup) stats.skippedContacts++;
-        else {
-          stats.newContacts++;
-          const contact = { id: uid(), ...c, role: '', notes: '', status: 'Active', channel: '', timezone: '', primary: a.contacts.length === 0 };
-          if (commit) a.contacts.push(contact); else a.contacts = [...a.contacts, contact];
+      const stage = STAGES[opts.type].find((x) => x.toLowerCase() === (r.stage || '').toLowerCase()) || STAGES[opts.type][0];
+      const { a, created } = findOrCreate(r.company, opts.type, stage, r.leadSource || opts.source);
+      if (created) stats.newAccounts++;
+      else if (!made.has(r.company.toLowerCase())) stats.updatedAccounts.add(a.id); // already in the CRM
+      const fill = {
+        website: r.website, industry: r.industry, employees: r.employees, location: r.location, address: r.address, mainPhone: r.mainPhone,
+        linkedin: r.companyLinkedin, value: r.value, adminFees: r.adminFees, closeDate: r.closeDate, leadSource: r.leadSource,
+      };
+      if (commit) {
+        for (const [k, v] of Object.entries(fill)) if (v !== '' && v != null && !a[k]) a[k] = v;
+        if (r.vendors.length && !a.vendors.length) a.vendors = r.vendors;
+      }
+      if (r.contact) addContact(a, r.contact);
+      // Channel partner (broker): its own partner account, with its contact, linked from this account.
+      if (r.channelPartner) {
+        const pr = findOrCreate(r.channelPartner, 'partner', 'Active', 'Partner / broker');
+        if (pr.created) stats.newPartners++;
+        const pc = r.channelContact ? addContact(pr.a, { name: r.channelContact }) : null;
+        if (commit) {
+          if (!a.channelPartnerId) a.channelPartnerId = pr.a.id;
+          if (pc && !a.channelContactId && a.channelPartnerId === pr.a.id) a.channelContactId = pc.id;
+          touch(pr.a);
         }
       }
       if (commit) touch(a);
@@ -2089,8 +2175,9 @@
     return stats;
   }
 
-  function importCsvForm(text, fileName) {
-    const rows = parseCsv(text);
+  function importCsvForm(text, fileName) { importRows(parseCsv(text), fileName); }
+
+  function importRows(rows, fileName) {
     if (rows.length < 2) { alert('That file has no rows to import.'); return; }
     const { col, records } = mapCsv(rows);
     if (col.company === undefined) {
@@ -2106,13 +2193,16 @@
     const s = preview();
     const found = Object.keys(col).filter((k) => !['first', 'last', 'city', 'state', 'zip'].includes(k))
       .map((k) => ({ company: 'Company', website: 'Website', industry: 'Industry', employees: 'Employees', location: 'Location', companyLinkedin: 'Company LinkedIn',
-        name: 'Name', title: 'Title', email: 'Email', phone: 'Phone', mobile: 'Mobile', linkedin: 'LinkedIn', address: 'Street address', companyPhone: 'Main phone' })[k]);
+        name: 'Name', title: 'Title', email: 'Email', phone: 'Phone', mobile: 'Mobile', linkedin: 'LinkedIn', address: 'Street address', companyPhone: 'Main phone',
+        value: 'Value', adminFees: 'Admin fees', vendors: 'Current vendors', leadSource: 'Lead source', stage: 'Stage', closeDate: 'Close date',
+        channelPartner: 'Channel partner', channelContact: 'Channel contact' })[k]);
     if (col.first !== undefined || col.last !== undefined) found.push('Name');
     if (col.city !== undefined || col.state !== undefined) found.push('City/State');
     const fromZoomInfo = /zoominfo/i.test(fileName) || col.companyLinkedin !== undefined || rows[0].some((h) => /zoominfo/i.test(h));
     openModal('Import accounts & contacts', `
       <div class="import-summary">
-        <div><b>${s.newAccounts}</b><span>new accounts</span></div>
+        <div><b>${s.newAccounts - s.newPartners}</b><span>new accounts</span></div>
+        ${s.newPartners ? `<div><b>${s.newPartners}</b><span>new channel partners</span></div>` : ''}
         <div><b>${s.updatedAccounts.size}</b><span>existing accounts</span></div>
         <div><b>${s.newContacts}</b><span>new contacts</span></div>
         <div><b>${s.skippedContacts}</b><span>duplicates skipped</span></div>
@@ -2121,11 +2211,11 @@
       <p class="small muted" style="margin:0">Existing accounts are matched by name. Only empty fields are filled in, and contacts already on an account (same email or name) are skipped.</p>
       <div class="grid-3">
         ${field('New accounts are', `<select name="type">${opt('prospect', 'Prospects', 'prospect')}${opt('partner', 'Partners', '')}</select>`)}
-        ${field('Lead source', `<select name="source"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, '')).join('')}</select>`)}
+        ${field(col.leadSource !== undefined ? 'Lead source (rows without one)' : 'Lead source', `<select name="source"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, '')).join('')}</select>`)}
         ${field('Tag new accounts', `<input name="tag" value="${fromZoomInfo ? 'zoominfo' : 'import'}-${today().slice(5)}">`)}
       </div>`, (data) => {
       const st2 = applyImport(records, { type: data.type, tag: data.tag.trim(), source: data.source }, true);
-      toast(`Imported: ${st2.newAccounts} new accounts, ${st2.newContacts} contacts`);
+      toast(`Imported: ${st2.newAccounts - st2.newPartners} new accounts${st2.newPartners ? `, ${st2.newPartners} partners` : ''}, ${st2.newContacts} contacts`);
       ui.typeFilter = 'all'; ui.stageFilter = 'all'; ui.vendorFilter = 'all'; ui.search = '';
       go('accounts');
     }, 'Import', { wide: true });
@@ -2134,8 +2224,87 @@
   $('#csv-import').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
-    if (file) importCsvForm(await file.text(), file.name);
+    if (!file) return;
+    if (/\.xls$/i.test(file.name)) { alert('Old .xls files can\'t be read. In Excel or Numbers, save it as .xlsx or CSV and import that.'); return; }
+    if (/\.xlsx$/i.test(file.name)) {
+      try { importRows(await readXlsx(await file.arrayBuffer()), file.name); }
+      catch (err) { alert(`Couldn't read that Excel file (${err.message}). Try saving it as CSV and importing that.`); }
+      return;
+    }
+    importCsvForm(await file.text(), file.name);
   });
+
+  // ----- Excel (.xlsx) reader: unzip with the browser's DecompressionStream, read the first sheet -----
+  const colIndex = (ref) => [...ref.replace(/\d+/g, '')].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+  const serialToISO = (n) => { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(n * 86400000)); return d.toISOString().slice(0, 10); };
+
+  async function readXlsx(buf) {
+    const u8 = new Uint8Array(buf);
+    const dv = new DataView(buf);
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 66000); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error('not an .xlsx file');
+    const files = {};
+    let p = dv.getUint32(eocd + 16, true);
+    for (let n = dv.getUint16(eocd + 10, true); n > 0; n--) {
+      const nameLen = dv.getUint16(p + 28, true);
+      const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nameLen));
+      files[name] = { method: dv.getUint16(p + 10, true), size: dv.getUint32(p + 20, true), local: dv.getUint32(p + 42, true) };
+      p += 46 + nameLen + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+    }
+    const read = async (name) => {
+      const f = files[name];
+      if (!f) return null;
+      const start = f.local + 30 + dv.getUint16(f.local + 26, true) + dv.getUint16(f.local + 28, true);
+      const data = u8.subarray(start, start + f.size);
+      if (f.method === 0) return new TextDecoder().decode(data);
+      if (f.method !== 8 || typeof DecompressionStream === 'undefined') throw new Error('unsupported compression');
+      const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
+      return new TextDecoder().decode(out);
+    };
+    const xml = (txt) => new DOMParser().parseFromString(txt, 'application/xml');
+    const tags = (el, n) => [...el.getElementsByTagNameNS('*', n)];
+    // First sheet, found through the workbook's relationships.
+    const wb = xml(await read('xl/workbook.xml'));
+    const sheetEl = tags(wb, 'sheet')[0];
+    const rid = sheetEl && [...sheetEl.attributes].find((at) => at.localName === 'id' && at.prefix)?.value;
+    const relsTxt = await read('xl/_rels/workbook.xml.rels');
+    let target = relsTxt && tags(xml(relsTxt), 'Relationship').find((r) => r.getAttribute('Id') === rid)?.getAttribute('Target');
+    target = !target ? 'xl/worksheets/sheet1.xml' : target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`;
+    const shared = [];
+    const ssTxt = await read('xl/sharedStrings.xml');
+    if (ssTxt) for (const si of tags(xml(ssTxt), 'si')) shared.push(tags(si, 't').filter((t) => t.parentNode.localName !== 'rPh').map((t) => t.textContent).join(''));
+    // Which cell styles are dates (built-in date formats, or custom formats with d/m/y).
+    const dateStyles = new Set();
+    const stTxt = await read('xl/styles.xml');
+    if (stTxt) {
+      const sd = xml(stTxt);
+      const custom = Object.fromEntries(tags(sd, 'numFmt').map((nf) => [nf.getAttribute('numFmtId'), nf.getAttribute('formatCode') || '']));
+      const xfs = tags(sd, 'cellXfs')[0];
+      if (xfs) [...xfs.children].forEach((xf, i) => {
+        const id = Number(xf.getAttribute('numFmtId'));
+        const code = (custom[id] || '').replace(/"[^"]*"|\[[^\]]*\]|\\./g, '');
+        if ((id >= 14 && id <= 22) || (id >= 45 && id <= 47) || /[dy]|m{1,4}(?![^;]*[#0])/i.test(code) && !/^[#0,.$%\s-]*$/.test(code)) dateStyles.add(i);
+      });
+    }
+    const sheet = xml(await read(target));
+    const rows = [];
+    for (const row of tags(sheet, 'row')) {
+      const out = [];
+      for (const c of tags(row, 'c')) {
+        const t = c.getAttribute('t');
+        const v = tags(c, 'v')[0]?.textContent ?? '';
+        let val = v;
+        if (t === 's') val = shared[Number(v)] ?? '';
+        else if (t === 'inlineStr') val = tags(c, 't').map((x) => x.textContent).join('');
+        else if (t === 'b') val = v === '1' ? 'TRUE' : 'FALSE';
+        else if ((!t || t === 'n') && v !== '' && dateStyles.has(Number(c.getAttribute('s') || 0))) val = serialToISO(Number(v));
+        out[c.getAttribute('r') ? colIndex(c.getAttribute('r')) : out.length] = val;
+      }
+      rows.push(Array.from(out, (x) => (x == null ? '' : String(x))));
+    }
+    return rows.filter((r) => r.some((x) => x.trim()));
+  }
 
   // ---------- map & route planner ----------
   // Leaflet (bundled in vendor/) draws the map; OpenStreetMap's Nominatim finds coordinates for
@@ -3299,6 +3468,7 @@
         ${field('Industry', `<input name="industry" value="${esc(a.industry)}">`)}
         ${field('Employees', `<input name="employees" type="number" min="0" value="${esc(a.employees)}">`)}
         ${field(a.type === 'partner' ? 'Annual value ($)' : 'Deal value ($)', `<input name="value" type="number" min="0" step="any" value="${esc(a.value)}">`)}
+        ${field('Admin fees ($)', `<input name="adminFees" type="number" min="0" step="any" value="${esc(a.adminFees)}">`)}
         ${field('Website', `<input name="website" value="${esc(a.website)}" autocapitalize="off" placeholder="company.com">`)}
         ${field('Company LinkedIn', `<input name="linkedin" value="${esc(a.linkedin)}" autocapitalize="off" placeholder="linkedin.com/company/…">`)}
         ${field('Street address', `<input name="address" value="${esc(a.address)}" placeholder="e.g. 1200 J St" autocomplete="street-address">`)}
@@ -3318,10 +3488,16 @@
         ${field('Vendor renewal date', `<input name="vendorRenewal" type="date" value="${esc(a.vendorRenewal)}">`)}
       </div></fieldset>
       <fieldset class="form-sec"><legend>Next steps</legend><div class="grid-3">
+        ${field('Expected close', `<input name="closeDate" type="date" value="${esc(a.closeDate)}">`)}
         ${field('Next follow-up', `<input name="nextFollowUp" type="date" value="${esc(a.nextFollowUp)}">`)}
         ${field('Next revisit date', `<input name="revisitDate" type="date" value="${esc(a.revisitDate)}">`)}
         ${field('Revisit purpose', `<input name="revisitNote" value="${esc(a.revisitNote)}" placeholder="e.g. Drop off comparison">`)}
       </div></fieldset>
+      ${a.type === 'partner' && existing ? '' : `
+      <fieldset class="form-sec"><legend>Channel partner</legend><div class="grid-2">
+        ${field('Referred by partner', `<select name="channelPartnerId" id="f-partner"><option value="">— none —</option>${state.accounts.filter((x) => x.type === 'partner' && x !== existing).sort((x, y) => x.name.localeCompare(y.name)).map((x) => opt(x.id, x.name, a.channelPartnerId)).join('')}</select>`)}
+        ${field('Partner contact', `<select name="channelContactId" id="f-pcontact"></select>`)}
+      </div></fieldset>`}
       <fieldset class="form-sec"><legend>Notes</legend><div class="grid-3">
         ${field('Tags (comma separated)', `<input name="tags" value="${esc(a.tags)}">`)}
         ${field('Notes', `<textarea name="notes" rows="3">${esc(a.notes)}</textarea>`, 'span-2')}
@@ -3349,6 +3525,15 @@
       $('#f-stage').innerHTML = STAGES[e.target.value].map((s) => opt(s, s, '')).join('');
     });
     bindVendorPicker();
+    const partnerSel = $('#f-partner');
+    if (partnerSel) {
+      const fillContacts = (keep) => {
+        const pa = getAccount(partnerSel.value);
+        $('#f-pcontact').innerHTML = `<option value="">—</option>${pa ? pa.contacts.map((c) => opt(c.id, c.name, keep)).join('') : ''}`;
+      };
+      fillContacts(a.channelContactId);
+      partnerSel.addEventListener('change', () => fillContacts(''));
+    }
   }
 
   /** Chips + dropdown for an account's current vendors; the chosen list lives in a hidden input. */
