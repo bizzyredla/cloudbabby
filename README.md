@@ -136,8 +136,28 @@ No install, no build step: open `index.html` in a browser.
 - Stage changes are logged to history whether they're made on the board, in Edit, or while
   logging an activity. You're warned before creating two accounts with the same name
 
+**Stay in touch** (recurring relationship reminders)
+- On any contact card: **Stay in touch: Monthly ▾**. Choose weekly, every 2 weeks, monthly, quarterly,
+  every 6 months or yearly
+- "Last contacted" fills in by itself from logged calls, emails, LinkedIn touches, visits, cadence
+  steps and checked planner rows with that person. Next due = last contacted + the interval
+- **Log touch** records the activity and restarts the clock; **↻ Reset** restarts it from today
+  without logging anything (for a text or a chance meeting)
+- Due contacts appear on the Overview's Stay in touch card and fill empty slots in the planner's
+  25 calls/emails/LinkedIn; checking one off logs the touch
+- Included in CSV export and import ("Stay in touch" column, primary contact)
+
+**Contacts**
+- Every contact across all accounts in one table: name, title, account, reach icons, stay-in-touch
+  frequency, last contacted and next due
+- Search; filter by stay in touch, due now, partners/prospects or no contact in 90+ days; sort by
+  next due, name, account or last contacted
+- Change the frequency inline, or select several people and set them all at once
+- Desktop: sidebar item with a due count. iPhone: the Accounts | Contacts switch on the Accounts page
+
 **Overview (dashboard)**
 - Greeting, today's focus count and a one-click jump into the planner
+- Stay in touch card: who's due, overdue first, then the next 7 days
 - Four tiles: total accounts, open pipeline, follow-ups & dates (overdue / due today), people in cadences
 - **Pipeline overview**: open prospect value by stage, with a tooltip per bar
 - **Your daily momentum**: activity-plan progress ring and a bar per section

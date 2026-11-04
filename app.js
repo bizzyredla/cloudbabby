@@ -149,7 +149,7 @@
 
   // ---------- state ----------
   let state = load();
-  const ui = { search: '', typeFilter: 'all', stageFilter: 'all', vendorFilter: 'all', sort: 'followup', sortDir: 1, plannerDate: today(), listId: null, navs: 0, cadFilter: 'active' };
+  const ui = { search: '', typeFilter: 'all', stageFilter: 'all', vendorFilter: 'all', sort: 'followup', sortDir: 1, plannerDate: today(), listId: null, navs: 0, cadFilter: 'active', contactSearch: '', contactFilter: 'all', contactType: 'all', contactSort: 'next', contactLimit: 200 };
   // Per-device view preferences (layout choice), not synced.
   const PREFS_KEY = 'minicrm.prefs';
   try { Object.assign(ui, JSON.parse(localStorage.getItem(PREFS_KEY)) || {}); } catch (e) { /* defaults */ }
@@ -197,6 +197,8 @@
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch (e) { toast('Could not save — browser storage is unavailable. Use Export to keep a copy.'); }
     if (track && syncCfg) { setSyncStatus('pending'); scheduleSync(); }
+    clearTimeout(save.countsTimer);
+    save.countsTimer = setTimeout(updateCounts, 60); // sidebar counts follow every change
   }
 
   // ---------- change tracking ----------
@@ -332,8 +334,276 @@
     return items.sort((x, y) => x.date.localeCompare(y.date));
   }
 
+  // ---------- stay in touch ----------
+  // A contact can carry a recurring "stay in touch" reminder. The last contact date is worked out
+  // from logged activities with that person (calls, emails, LinkedIn, visits, cadence steps, checked
+  // planner rows), or a manual reset; the next reminder is that date plus the interval.
+  const STAY = [
+    { key: 'weekly', label: 'Weekly', days: 7 },
+    { key: 'biweekly', label: 'Every 2 weeks', days: 14 },
+    { key: 'monthly', label: 'Monthly', months: 1 },
+    { key: 'quarterly', label: 'Quarterly', months: 3 },
+    { key: 'semiannual', label: 'Every 6 months', months: 6 },
+    { key: 'yearly', label: 'Yearly', months: 12 },
+  ];
+  const stayDef = (key) => STAY.find((x) => x.key === key);
+  /** "Monthly", "monthly" or "every 6 months" back to a key; '' when it isn't one. */
+  const parseStay = (v) => {
+    const s = String(v || '').trim().toLowerCase();
+    const hit = STAY.find((x) => x.key === s || x.label.toLowerCase() === s);
+    return hit ? hit.key : '';
+  };
+  function addMonths(iso, n) {
+    const d = fromISO(iso);
+    const day = d.getDate();
+    d.setDate(1); d.setMonth(d.getMonth() + n);
+    d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+    return toISO(d);
+  }
+  const stayStep = (iso, key) => { const s = stayDef(key); return s.days ? addDays(iso, s.days) : addMonths(iso, s.months); };
+
+  /** Latest real touch with this person up to today (notes don't count), or the last reset. */
+  function lastContacted(acct, c) {
+    const t = today();
+    let best = c.sitReset && c.sitReset <= t ? c.sitReset : '';
+    for (const h of acct.activities) if (h.contactId === c.id && h.kind !== 'Note' && h.date <= t && h.date > best) best = h.date;
+    return best;
+  }
+
+  function stayInfo(acct, c) {
+    const def = stayDef(c.stayInTouch);
+    if (!def || (c.status && c.status !== 'Active')) return null;
+    const last = lastContacted(acct, c);
+    const next = last ? stayStep(last, def.key) : (c.sitSince || today());
+    return { a: acct, c, key: def.key, label: def.label, last, next };
+  }
+
+  /** Everyone with a reminder, soonest first. */
+  const stayList = () => state.accounts
+    .flatMap((a) => a.contacts.map((c) => stayInfo(a, c)))
+    .filter(Boolean)
+    .sort((x, y) => x.next.localeCompare(y.next) || x.c.name.localeCompare(y.c.name));
+  const stayDue = (d = today()) => stayList().filter((s) => s.next <= d);
+
+  /** "3 days overdue", "Due today", "In 6 days", "In 3 weeks", "In 2 months". */
+  function stayWhen(next) {
+    const n = daysBetween(today(), next);
+    if (n < 0) return `${plural(-n, 'day')} overdue`;
+    if (n === 0) return 'Due today';
+    if (n === 1) return 'Tomorrow';
+    if (n < 14) return `In ${n} days`;
+    if (n < 60) return `In ${Math.round(n / 7)} weeks`;
+    return `In ${Math.round(n / 30.4)} months`;
+  }
+
+  /** Activity type to suggest for a contact, from their preferred channel. */
+  const channelKind = (c, allowed = ACTIVITY_KINDS) => {
+    const k = { Email: 'Email', LinkedIn: 'LinkedIn', 'In person': 'Visit' }[c.channel] || 'Call';
+    return allowed.includes(k) ? k : 'Call';
+  };
+
+  function setStay(acct, c, key) {
+    const was = c.stayInTouch || '';
+    c.stayInTouch = key;
+    if (key && !was) c.sitSince = today();
+    if (!key) { c.sitSince = ''; c.sitReset = ''; }
+    touch(acct);
+  }
+
+  const shortDate = (iso) => fmtDate(iso, { month: 'short', day: 'numeric' });
+  const CLOCK_IC = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+  const RESET_IC = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+
+  /** Interval dropdown. `bare` drops the "Stay in touch:" lead-in (tables). */
+  function staySelect(a, c, bare = false) {
+    const sel = `<select data-sit data-id="${a.id}" data-cid="${c.id}" aria-label="Stay in touch with ${esc(c.name)}">
+      <option value="">${bare ? 'Off' : 'Off'}</option>${STAY.map((x) => `<option value="${x.key}" ${c.stayInTouch === x.key ? 'selected' : ''}>${x.label}</option>`).join('')}</select>`;
+    return bare ? `<span class="sit-pick bare">${sel}</span>` : `<label class="sit-pick"><span>Stay in touch:</span>${sel}</label>`;
+  }
+
+  const stayActions = (a, c) => `
+    <button type="button" class="icon-btn sit-btn" data-act="sit-reset" data-id="${a.id}" data-cid="${c.id}" title="Reset: count today as contacted" aria-label="Reset reminder for ${esc(c.name)}">${RESET_IC}</button>
+    <button type="button" class="btn sm ghost" data-act="sit-log" data-id="${a.id}" data-cid="${c.id}" title="Log a call, email or LinkedIn touch">Log touch</button>`;
+
+  /** The reminder line on a contact card. */
+  function stayLine(a, c) {
+    if (c.status && c.status !== 'Active') return '';
+    const s = stayInfo(a, c);
+    const cls = s ? (s.next < today() ? 'overdue' : s.next === today() ? 'today' : '') : 'off';
+    return `
+      <div class="sit-line ${cls}">
+        <span class="sit-ic">${CLOCK_IC}</span>
+        <div class="grow">
+          ${staySelect(a, c)}
+          <div class="small muted">${s
+            ? `${s.last ? `Last contacted: ${esc(relDays(s.last))}` : 'Not contacted yet'} · <span class="sit-next">${s.next <= today() ? esc(stayWhen(s.next)) : `Next ${esc(shortDate(s.next))}`}</span>`
+            : 'Pick how often you want to reach out.'}</div>
+        </div>
+        ${s ? `<div class="row sit-acts">${stayActions(a, c)}</div>` : ''}
+      </div>`;
+  }
+
+  /** Rows for the Overview card: overdue, then the next 7 days. */
+  function stayRowsHtml(items) {
+    return `<ul class="list sit-list">${items.map((s) => `
+      <li>
+        <div class="sit-when ${s.next < today() ? 'overdue' : s.next === today() ? 'today' : ''}"><span>${esc(stayWhen(s.next))}</span><b>${esc(s.label)}</b></div>
+        <span class="avatar sm" aria-hidden="true">${esc(initials(s.c.name))}</span>
+        <div class="grow">
+          <button type="button" class="link-btn title" data-act="open-contact" data-id="${s.a.id}" data-cid="${s.c.id}">${esc(s.c.name)}</button>
+          <div class="small muted ellipsis">${s.c.title ? esc(s.c.title) + ' · ' : ''}<a href="#account/${s.a.id}">${esc(s.a.name)}</a></div>
+        </div>
+        <div class="row sit-acts">${stayActions(s.a, s.c)}</div>
+      </li>`).join('')}</ul>`;
+  }
+
+  /** Outreach rows as displayed: contacts due (today incl. overdue) fill empty slots until touched. */
+  function stayPlanRows(d, rows) {
+    const t = today();
+    const out = rows.map((r) => ({ ...r }));
+    if (d < t) return out;
+    const listed = new Set(rows.map((r) => r.contactId).filter(Boolean));
+    const kinds = PLAN_SECTIONS[0].kinds;
+    for (const s of stayList()) {
+      if (listed.has(s.c.id) || !(d === t ? s.next <= t : s.next === d)) continue;
+      const auto = { name: s.a.name, kind: channelKind(s.c, kinds), note: `Stay in touch: ${s.c.name}`, done: false, auto: s.next, contactId: s.c.id };
+      const slot = out.findIndex((r) => !r.name.trim() && !r.auto);
+      if (slot === -1) out.push(auto); else out[slot] = auto;
+    }
+    return out;
+  }
+
+  // ---------- contacts ----------
+  const peopleSwitch = (mode) => `<div class="seg" role="group" aria-label="Accounts or contacts">
+      <a class="${mode === 'accounts' ? 'active' : ''}" href="#accounts" role="button">Accounts</a>
+      <a class="${mode === 'contacts' ? 'active' : ''}" href="#contacts" role="button">Contacts</a>
+    </div>`;
+  const CONTACT_FILTERS = { all: 'All contacts', stay: 'Stay in touch', due: 'Due now', quiet: 'No contact in 90+ days' };
+  const CONTACT_SORTS = { next: 'Next due', name: 'Name', account: 'Account', last: 'Last contacted' };
+
+  function contactRows() {
+    const t = today();
+    const q = ui.contactSearch.trim().toLowerCase();
+    const rows = state.accounts.flatMap((a) => a.contacts.map((c) => ({ a, c, s: stayInfo(a, c), last: lastContacted(a, c) })))
+      .filter(({ a, c, s, last }) => {
+        if (ui.contactType !== 'all' && a.type !== ui.contactType) return false;
+        if (ui.contactFilter === 'stay' && !s) return false;
+        if (ui.contactFilter === 'due' && !(s && s.next <= t)) return false;
+        if (ui.contactFilter === 'quiet' && last && daysBetween(last, t) < 90) return false;
+        return !q || [c.name, c.title, c.role, c.email, c.phone, c.mobile, a.name].join(' ').toLowerCase().includes(q);
+      });
+    const byName = (x, y) => x.c.name.localeCompare(y.c.name);
+    const sorts = {
+      next: (x, y) => (x.s ? x.s.next : FAR).localeCompare(y.s ? y.s.next : FAR) || byName(x, y),
+      name: byName,
+      account: (x, y) => x.a.name.localeCompare(y.a.name) || byName(x, y),
+      last: (x, y) => (x.last || '').localeCompare(y.last || '') || byName(x, y),
+    };
+    return rows.sort(sorts[ui.contactSort] || sorts.next);
+  }
+
+  function renderContacts() {
+    const t = today();
+    const rows = contactRows();
+    const total = state.accounts.reduce((n, a) => n + a.contacts.length, 0);
+    const due = stayDue(t).length;
+    const shown = rows.slice(0, ui.contactLimit);
+    const reach = (c, a) => `<span class="ct-reach">
+        ${c.email ? `<a href="mailto:${esc(c.email)}" title="${esc(c.email)}" aria-label="Email ${esc(c.name)}">✉</a>` : ''}
+        ${c.phone || c.mobile ? `<a href="tel:${esc(c.phone || c.mobile)}" title="${esc(c.phone || c.mobile)}" aria-label="Call ${esc(c.name)}">☎</a>` : ''}
+        ${contactLinkIcons(c, a)}
+      </span>`;
+    $('#view').innerHTML = `
+      <div class="page-head">
+        <div class="row" style="gap:.85rem"><h1>Contacts <span class="muted small">(${rows.length})</span></h1>${peopleSwitch('contacts')}</div>
+        <div class="row">${due ? `<button class="btn ghost" data-act="ct-filter" data-f="due">${plural(due, 'reminder')} due</button>` : ''}</div>
+      </div>
+      <div class="filters">
+        <input type="search" id="ct-search" placeholder="Search name, title, email, account…" value="${esc(ui.contactSearch)}">
+        <select id="ct-filter" aria-label="Show">${Object.entries(CONTACT_FILTERS).map(([k, l]) => `<option value="${k}" ${ui.contactFilter === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <select id="ct-type" aria-label="Type">
+          <option value="all">Partners & prospects</option>
+          <option value="partner" ${ui.contactType === 'partner' ? 'selected' : ''}>Partners</option>
+          <option value="prospect" ${ui.contactType === 'prospect' ? 'selected' : ''}>Prospects</option>
+        </select>
+        <select id="ct-sort" aria-label="Sort">${Object.entries(CONTACT_SORTS).map(([k, l]) => `<option value="${k}" ${ui.contactSort === k ? 'selected' : ''}>Sort: ${l}</option>`).join('')}</select>
+      </div>
+      <div class="bulk-bar card" id="ct-bulk" hidden>
+        <strong id="ct-bulk-n"></strong>
+        <label class="row small">Stay in touch <select id="ct-bulk-sit"><option value="">Off</option>${STAY.map((x) => `<option value="${x.key}">${x.label}</option>`).join('')}</select></label>
+        <button type="button" class="btn sm" id="ct-bulk-apply">Apply</button>
+        <button type="button" class="btn sm ghost" id="ct-bulk-clear">Clear</button>
+      </div>
+      ${rows.length ? `
+      <div class="card ct-table">
+        <div class="ct-row ct-headrow">
+          <input type="checkbox" id="ct-all" aria-label="Select all shown">
+          <span>Name</span><span>Account</span><span>Reach</span><span>Stay in touch</span><span>Last contacted</span><span>Next due</span><span></span>
+        </div>
+        ${shown.map(({ a, c, s, last }) => `
+        <div class="ct-row ${c.status && c.status !== 'Active' ? 'inactive' : ''}">
+          <input type="checkbox" class="ct-pick" data-id="${a.id}" data-cid="${c.id}" aria-label="Select ${esc(c.name)}">
+          <div class="ct-name">
+            <span class="avatar sm" aria-hidden="true">${esc(initials(c.name))}</span>
+            <div class="grow">
+              <button type="button" class="link-btn title" data-act="open-contact" data-id="${a.id}" data-cid="${c.id}">${esc(c.name)}</button>${c.primary ? ' <span class="pill primary">Primary</span>' : ''}
+              <div class="small muted ellipsis">${esc([c.title, c.role].filter(Boolean).join(' · ')) || '&nbsp;'}</div>
+            </div>
+          </div>
+          <div class="ct-acct small"><a href="#account/${a.id}">${esc(a.name)}</a> <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span></div>
+          ${reach(c, a)}
+          <div class="ct-sit">${c.status && c.status !== 'Active' ? `<span class="pill overdue">${esc(c.status)}</span>` : staySelect(a, c, true)}</div>
+          <div class="ct-last small"><span class="ct-lbl">Last contacted </span>${last ? esc(relDays(last)) : '<span class="muted">Never</span>'}</div>
+          <div class="ct-next small"><span class="ct-lbl">Next </span>${s ? `<span class="pill ${dueClass(s.next)}">${esc(s.next <= t ? stayWhen(s.next) : shortDate(s.next))}</span>` : '<span class="muted">—</span>'}</div>
+          <div class="ct-act row">${s ? stayActions(a, c) : ''}</div>
+        </div>`).join('')}
+      </div>
+      ${rows.length > shown.length ? `<button class="btn ghost" data-act="ct-more" style="width:100%;margin-top:.75rem">Show more (${rows.length - shown.length} more)</button>` : ''}`
+      : `<div class="card empty-soft">${total ? 'No contacts match these filters.' : 'No contacts yet. Add people from an account page, or import a spreadsheet.'}</div>`}`;
+
+    const redraw = () => renderContacts();
+    $('#ct-search').addEventListener('input', (e) => {
+      ui.contactSearch = e.target.value;
+      clearTimeout(ui.searchTimer);
+      ui.searchTimer = setTimeout(() => {
+        if (!$('#ct-search')) return;
+        const pos = $('#ct-search').selectionStart;
+        ui.contactLimit = 200; redraw();
+        const el = $('#ct-search'); el.focus(); el.setSelectionRange(pos, pos);
+      }, 160);
+    });
+    $('#ct-filter').addEventListener('change', (e) => { ui.contactFilter = e.target.value; ui.contactLimit = 200; redraw(); });
+    $('#ct-type').addEventListener('change', (e) => { ui.contactType = e.target.value; ui.contactLimit = 200; redraw(); });
+    $('#ct-sort').addEventListener('change', (e) => { ui.contactSort = e.target.value; redraw(); });
+
+    const picks = () => $$('.ct-pick:checked');
+    const syncBulk = () => {
+      const n = picks().length;
+      $('#ct-bulk').hidden = !n;
+      $('#ct-bulk-n').textContent = `${n} selected`;
+      const all = $('#ct-all');
+      if (all) { const boxes = $$('.ct-pick'); all.checked = n > 0 && n === boxes.length; all.indeterminate = n > 0 && n < boxes.length; }
+    };
+    $$('.ct-pick').forEach((cb) => cb.addEventListener('change', syncBulk));
+    const all = $('#ct-all');
+    if (all) all.addEventListener('change', (e) => { $$('.ct-pick').forEach((cb) => { cb.checked = e.target.checked; }); syncBulk(); });
+    $('#ct-bulk-clear').addEventListener('click', () => { $$('.ct-pick').forEach((cb) => { cb.checked = false; }); syncBulk(); });
+    $('#ct-bulk-apply').addEventListener('click', () => {
+      const key = $('#ct-bulk-sit').value;
+      let n = 0;
+      for (const cb of picks()) {
+        const a = getAccount(cb.dataset.id);
+        const c = a && a.contacts.find((x) => x.id === cb.dataset.cid);
+        if (!c || (c.status && c.status !== 'Active')) continue;
+        setStay(a, c, key); n++;
+      }
+      save(); redraw();
+      toast(key ? `${plural(n, 'contact')} set to ${stayDef(key).label.toLowerCase()}` : `Stay in touch off for ${plural(n, 'contact')}`);
+    });
+  }
+
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts };
   const TAB_FOR = { account: 'accounts', report: 'dashboard' };
 
   function route() {
@@ -344,6 +614,7 @@
     if (view === 'planner' && arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)) ui.plannerDate = arg;
     if (view === 'lists' && arg) ui.listId = decodeURIComponent(arg);
     if (view === 'cadences' && arg) ui.cadenceId = arg;
+    if (view === 'contacts' && arg && CONTACT_FILTERS[arg]) { ui.contactFilter = arg; ui.contactLimit = 200; }
     if (view === 'research' && arg && getAccount(arg)) {
       Object.assign(research, { target: getAccount(arg).name, hint: '', list: '' }); saveResearch();
     }
@@ -355,18 +626,33 @@
     } else if (mapState.map) unmountMap(false);
     if (ui.lastView !== view) ui.showAll = false;
     ui.lastView = view;
-    $$('#tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === (TAB_FOR[view] || view)));
+    $$('#tabs a').forEach((a) => {
+      a.classList.toggle('active', a.dataset.view === (TAB_FOR[view] || view));
+      a.classList.toggle('alt-active', view === 'contacts' && a.dataset.view === 'accounts'); // phone tab bar has no Contacts tab
+    });
     updateChrome(view);
     views[view]();
+    if (ui.focusContact) { // jump to a contact card after opening its account
+      const cid = ui.focusContact; ui.focusContact = null;
+      setTimeout(() => {
+        const el = $(`[data-contact="${cid}"]`);
+        if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('flash'); }
+      }, 0);
+    }
   }
   const rerender = () => route();
-  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude' };
+  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude' };
   /** Breadcrumb and sidebar counts. */
   function updateChrome(view) {
     $('#crumb-page').textContent = CRUMBS[view] || 'Overview';
+    updateCounts();
+  }
+  function updateCounts() {
     $('#nc-accounts').textContent = state.accounts.length || '';
     const due = dueSteps(today()).length;
     $('#nc-cadences').textContent = due ? `${due} due` : '';
+    const sit = stayDue().length;
+    $('#nc-contacts').textContent = sit ? `${sit} due` : '';
   }
   const go = (hash) => { if (location.hash === '#' + hash) rerender(); else location.hash = hash; };
   window.addEventListener('hashchange', () => { ui.navs++; route(); window.scrollTo(0, 0); });
@@ -398,7 +684,10 @@
     const cadencePeople = liveEnrollments().filter((p) => p.e.status === 'active').length;
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-    const focusCount = overdue.length + dueToday.length + stepsDue.length;
+    const sitAll = stayList();
+    const sitDue = sitAll.filter((x) => x.next <= t);
+    const sitSoon = sitAll.filter((x) => daysBetween(t, x.next) <= 7).slice(0, 6);
+    const focusCount = overdue.length + dueToday.length + stepsDue.length + sitDue.length;
     const pct = planTotal ? Math.round((planDone / planTotal) * 100) : 0;
     const PLAN_SHORT = { outreach: 'Calls, emails & LinkedIn', visits: 'In-person visits', channel: 'Channel accounts', revisits: 'Revisits' };
     const icon = (path) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${path}</svg>`;
@@ -532,6 +821,13 @@
         </div>
 
         <div class="card">
+          <div class="section-head"><div><h2 style="margin:0">Stay in touch ${sitDue.length ? `<span class="count-badge">${sitDue.length}</span>` : ''}</h2><div class="small muted">The people you want to hear from regularly.</div></div><a class="small link-arrow" href="#contacts/stay">All →</a></div>
+          ${sitSoon.length ? stayRowsHtml(sitSoon)
+            : sitAll.length ? `<div class="empty-soft">No one is due this week.<br>Next up: ${esc(sitAll[0].c.name)}, ${esc(stayWhen(sitAll[0].next).toLowerCase())}.</div>`
+            : '<div class="empty-soft">Set a stay-in-touch reminder on your key contacts<br>(weekly, monthly, quarterly…) and they show up here when it\'s time.<br><a href="#contacts">Go to contacts →</a></div>'}
+        </div>
+
+        <div class="card">
           <div class="section-head"><h2 style="margin:0">Recent activity</h2><span class="kpi-icon sage">${icon(ICONS.pulse)}</span></div>
           ${recent.length ? `<ul class="feed">${recent.map((r) => `
             <li>
@@ -549,7 +845,7 @@
           ${itemList(upcoming, 'Nothing scheduled in the next two weeks.')}
         </div>
 
-        <div class="card">
+        <div class="card ov-wide">
           <div class="section-head"><div><h2 style="margin:0">Keep the conversation going</h2><div class="small muted">Active accounts without a follow-up.</div></div><span class="kpi-icon lavender">${icon(ICONS.send)}</span></div>
           ${quiet.length ? `<ul class="list">${quiet.map((a) => `
             <li>
@@ -775,7 +1071,7 @@
 
     $('#view').innerHTML = `
       <div class="page-head">
-        <h1>Accounts <span class="muted small">(${list.length})</span></h1>
+        <div class="row" style="gap:.85rem"><h1>Accounts <span class="muted small">(${list.length})</span></h1>${peopleSwitch('accounts')}</div>
         <div class="row">${viewSwitcher()}<button class="btn ghost" data-act="import-csv" title="Import accounts and contacts from a ZoomInfo or spreadsheet CSV">Import</button><button class="btn ghost" data-act="accounts-csv" title="Export the accounts shown">Export CSV</button><button class="btn" data-act="new-account">+ New account</button></div>
       </div>
       <div class="filters">
@@ -881,7 +1177,7 @@
         <div>
           <div class="section-head"><h2 style="margin:0">Contacts <span class="muted small">(${a.contacts.length})</span></h2><button class="btn sm ghost" data-act="new-contact" data-id="${a.id}">+ Add contact</button></div>
           ${a.contacts.length ? `<div class="contact-grid">${[...a.contacts].sort((x, y) => (y.primary ? 1 : 0) - (x.primary ? 1 : 0)).map((c) => `
-            <div class="contact-card">
+            <div class="contact-card" data-contact="${c.id}">
               <div class="row spread">
                 <div><strong>${esc(c.name)}</strong> ${c.primary ? '<span class="pill primary">Primary</span>' : ''}</div>
                 <div class="row" style="gap:0">
@@ -895,6 +1191,7 @@
               ${c.title || c.role ? `<div class="small muted">${esc([c.title, c.role].filter(Boolean).join(' · '))}</div>` : ''}
               ${c.status && c.status !== 'Active' ? `<span class="pill overdue">${esc(c.status)}</span>` : ''}
               ${contactLinks(c, a)}
+              ${stayLine(a, c)}
               ${enrollmentsFor(c.id).map((p) => `<button type="button" class="cad-badge" style="--c:${p.cad.color}" data-act="enr-open" data-eid="${p.e.id}">${esc(p.cad.name)} · ${p.e.step + 1}/${p.cad.steps.length}${p.e.status === 'paused' ? ' · paused' : ` · next ${esc(fmtDate(p.e.dueDate, { month: 'short', day: 'numeric' }))}`}</button>`).join('')}
               ${c.notes ? `<div class="small muted" style="white-space:pre-wrap;margin-top:.25rem">${esc(c.notes)}</div>` : ''}
             </div>`).join('')}</div>` : '<div class="empty">No contacts yet. Add the decision maker, champion, HR lead…</div>'}
@@ -1117,6 +1414,7 @@
   function planSection(d) {
     const plan = getPlan(d);
     plan.revisits = revisitRows(d, plan);
+    plan.outreach = stayPlanRows(d, plan.outreach);
     const total = PLAN_SECTIONS.reduce((n, sec) => n + planStats(plan, sec.key).target, 0);
     const done = PLAN_SECTIONS.reduce((n, sec) => n + planStats(plan, sec.key).done, 0);
     const pending = PLAN_SECTIONS.some((sec) => plan[sec.key].some((r) => r.name.trim() && !r.done));
@@ -1161,7 +1459,7 @@
   function planRow(sec, r, i) {
     const acct = findAccountByName(r.name);
     return `
-      <div class="plan-row ${r.done ? 'done' : ''} ${r.auto ? 'auto' : ''}" data-sec="${sec.key}" data-i="${i}" ${r.auto ? `data-auto="${esc(JSON.stringify({ name: r.name, kind: r.kind, note: r.note }))}"` : ''}>
+      <div class="plan-row ${r.done ? 'done' : ''} ${r.auto ? 'auto' : ''}" data-sec="${sec.key}" data-i="${i}" ${r.auto ? `data-auto="${esc(JSON.stringify({ name: r.name, kind: r.kind, note: r.note, ...(r.contactId ? { contactId: r.contactId } : {}) }))}"` : ''}>
         <span class="plan-num">${i + 1}</span>
         <input type="checkbox" data-plan="done" ${r.done ? 'checked' : ''} aria-label="Done">
         <input data-plan="name" list="${sec.partners ? 'dl-partners' : 'dl-accounts'}" placeholder="Account / contact" value="${esc(r.name)}">
@@ -1170,7 +1468,8 @@
           : '<span class="plan-kind"></span>'}
         <input data-plan="note" placeholder="Note / outcome" value="${esc(r.note)}">
         <span class="plan-link">${acct ? `<a href="#account/${acct.id}" title="Open ${esc(acct.name)}">↗</a>` : ''}</span>
-        ${r.auto ? `<span class="plan-due ${dueClass(r.auto)}">Revisit due ${esc(relDays(r.auto))}</span>` : ''}
+        ${r.contactId ? `<span class="plan-due sit ${r.auto ? dueClass(r.auto) : ''}">${CLOCK_IC} Stay in touch${r.auto ? ` · due ${esc(relDays(r.auto))}` : ''}</span>`
+          : r.auto ? `<span class="plan-due ${dueClass(r.auto)}">Revisit due ${esc(relDays(r.auto))}</span>` : ''}
       </div>`;
   }
 
@@ -1208,6 +1507,7 @@
           row[field] = el.value;
           if (field === 'name') {
             const acct = findAccountByName(row.name);
+            if (row.contactId && !(acct && acct.contacts.some((c) => c.id === row.contactId))) delete row.contactId;
             $('.plan-link', rowEl).innerHTML = acct ? `<a href="#account/${acct.id}" title="Open ${esc(acct.name)}">↗</a>` : '';
           }
         }
@@ -1263,7 +1563,7 @@
     if (row.done && acct) {
       row.activityId = uid();
       acct.activities.push({
-        id: row.activityId, date: d, kind: row.kind,
+        id: row.activityId, date: d, kind: row.kind, contactId: row.contactId || '',
         summary: `${sec.short}${row.note ? ': ' + row.note : ''}`, notes: '', createdAt: new Date().toISOString(),
       });
       touch(acct);
@@ -1472,13 +1772,14 @@
 
   function accountsCsv(title, accounts) {
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Account', 'Website', 'Company LinkedIn', 'Type', 'Stage', 'Industry', 'Employees', 'Street address', 'Location', 'Main phone', 'Value', 'Admin fees', 'Expected close', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Lead source', 'Channel partner', 'Channel contact', 'Tags']];
+    const rows = [['Account', 'Website', 'Company LinkedIn', 'Type', 'Stage', 'Industry', 'Employees', 'Street address', 'Location', 'Main phone', 'Value', 'Admin fees', 'Expected close', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Lead source', 'Channel partner', 'Channel contact', 'Tags', 'Stay in touch']];
     for (const a of accounts) {
       const p = primaryContact(a) || {};
       rows.push([a.name, a.website, a.linkedin, a.type, a.stage, a.industry, a.employees, a.address, a.location, a.mainPhone, a.value, a.adminFees, a.closeDate, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
         a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.leadSource,
         (getAccount(a.channelPartnerId) || {}).name || '',
-        ((getAccount(a.channelPartnerId) || { contacts: [] }).contacts.find((c) => c.id === a.channelContactId) || {}).name || '', a.tags]);
+        ((getAccount(a.channelPartnerId) || { contacts: [] }).contacts.find((c) => c.id === a.channelContactId) || {}).name || '', a.tags,
+        (stayDef(p.stayInTouch) || {}).label || '']);
     }
     downloadFile(`${title.replace(/[^\w-]+/g, '-')}-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
   }
@@ -2166,6 +2467,7 @@
     closeDate: ['closedate', 'expectedclose', 'expectedclosedate', 'closingdate', 'targetclosedate'],
     channelPartner: ['channelpartner', 'referralpartner', 'broker', 'partner', 'channel'],
     channelContact: ['channelcontact', 'partnercontact', 'brokercontact', 'channelpartnercontact'],
+    stayInTouch: ['stayintouch', 'stayintouchreminder', 'keepintouch', 'touchfrequency'],
   };
   const parseMoney = (v) => { const n = Number(String(v).replace(/[$,\s]/g, '')); return v !== '' && Number.isFinite(n) ? n : ''; };
   /** Spreadsheet dates in, YYYY-MM-DD out: 2027-01-15, 2027-01-15 00:00:00, 1/15/2027 or 1/15/27. */
@@ -2207,7 +2509,7 @@
         location: get(r, 'location') || [get(r, 'city'), [get(r, 'state'), get(r, 'zip')].filter(Boolean).join(' ')].filter(Boolean).join(', '),
         address: get(r, 'address'), mainPhone: get(r, 'companyPhone'),
         companyLinkedin: get(r, 'companyLinkedin'),
-        contact: name ? { name, title: get(r, 'title'), email: get(r, 'email'), phone: get(r, 'phone'), mobile: get(r, 'mobile'), linkedin: get(r, 'linkedin') } : null,
+        contact: name ? { name, title: get(r, 'title'), email: get(r, 'email'), phone: get(r, 'phone'), mobile: get(r, 'mobile'), linkedin: get(r, 'linkedin'), ...(parseStay(get(r, 'stayInTouch')) ? { stayInTouch: parseStay(get(r, 'stayInTouch')), sitSince: today() } : {}) } : null,
         value: parseMoney(get(r, 'value')), adminFees: parseMoney(get(r, 'adminFees')), vendors: parseVendors(get(r, 'vendors')),
         leadSource: LEAD_SOURCES.find((x) => x.toLowerCase() === get(r, 'leadSource').toLowerCase()) || get(r, 'leadSource'),
         stage: get(r, 'stage'), closeDate: normDate(get(r, 'closeDate')),
@@ -3716,8 +4018,8 @@
     }, 'Save', { wide: true });
   }
 
-  function activityForm(acct, existing) {
-    const h = existing || { date: today(), kind: 'Call' };
+  function activityForm(acct, existing, preset = null) {
+    const h = existing || { date: today(), kind: 'Call', ...(preset || {}) };
     openModal(`${existing ? 'Edit' : 'Log'} activity — ${acct.name}`, `
       <div class="grid-2">
         ${field('Date', `<input name="date" type="date" required value="${esc(h.date)}">`)}
@@ -3726,7 +4028,7 @@
         ${field('Summary *', `<input name="summary" required placeholder="e.g. Discovery call with VP Sales" value="${esc(h.summary)}">`, 'span-2')}
         ${field('Notes', `<textarea name="notes" rows="5" placeholder="What was discussed, decisions, objections, next steps…">${esc(h.notes)}</textarea>`, 'span-2')}
         ${existing ? '' : `
-        ${field('Set next follow-up', `<input name="nextFollowUp" type="date" value="${esc(acct.nextFollowUp && acct.nextFollowUp > today() ? acct.nextFollowUp : addDays(today(), 7))}">`)}
+        ${field('Set next follow-up', `<input name="nextFollowUp" type="date" value="${esc(preset ? acct.nextFollowUp || '' : acct.nextFollowUp && acct.nextFollowUp > today() ? acct.nextFollowUp : addDays(today(), 7))}">`)}
         ${field('Update stage', `<select name="stage">${STAGES[acct.type].map((s) => opt(s, s, acct.stage)).join('')}</select>`)}
         <label class="row span-2 small"><input type="checkbox" name="addTask" style="width:auto"> Also add the follow-up to my daily planner</label>`}
       </div>`, (data) => {
@@ -3787,6 +4089,18 @@
   }
 
   // ---------- actions ----------
+  // Stay-in-touch interval dropdowns (contact cards and the Contacts page).
+  document.addEventListener('change', (e) => {
+    const sel = e.target.closest('select[data-sit]');
+    if (!sel) return;
+    const a = getAccount(sel.dataset.id);
+    const c = a && a.contacts.find((x) => x.id === sel.dataset.cid);
+    if (!c) return;
+    setStay(a, c, sel.value); save(); rerender();
+    const s = stayInfo(a, c);
+    toast(s ? `Stay in touch with ${c.name}: ${s.label.toLowerCase()} · ${s.next <= today() ? 'due today' : 'next ' + shortDate(s.next)}` : `Stay in touch off for ${c.name}`);
+  });
+
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (!el || el.closest('#modal-form')) return;
@@ -3862,6 +4176,19 @@
       }
       case 'new-contact': return contactForm(acct);
       case 'edit-contact': return contactForm(acct, acct.contacts.find((c) => c.id === cid));
+      case 'open-contact': ui.focusContact = cid; return go(`account/${id}`);
+      case 'sit-log': {
+        const c = acct.contacts.find((x) => x.id === cid);
+        return activityForm(acct, null, { kind: channelKind(c), contactId: c.id, summary: `Stay in touch: ${c.name}` });
+      }
+      case 'sit-reset': {
+        const c = acct.contacts.find((x) => x.id === cid);
+        c.sitReset = today(); touch(acct); save(); rerender();
+        const s = stayInfo(acct, c);
+        return toast(`Reset · next ${s ? shortDate(s.next) : ''}`.trim());
+      }
+      case 'ct-filter': ui.contactFilter = el.dataset.f; ui.contactLimit = 200; return rerender();
+      case 'ct-more': ui.contactLimit += 200; return rerender();
       case 'primary-contact':
         acct.contacts.forEach((c) => { c.primary = c.id === cid; }); touch(acct); save(); rerender(); return;
       case 'del-contact': {
