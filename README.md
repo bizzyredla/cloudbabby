@@ -136,12 +136,21 @@ No install, no build step: open `index.html` in a browser.
 - Stage changes are logged to history whether they're made on the board, in Edit, or while
   logging an activity. You're warned before creating two accounts with the same name
 
-**Dashboard**
-- **Today**: activity-plan progress per section (calls/emails/LinkedIn, visits, channel, revisits),
-  cadence steps due, follow-ups due, overdue
-- **Book**: prospects, partners, open pipeline, people in cadences
-- Needs attention (overdue and today), next 14 days, recent activity, and active accounts with
-  no next step (no follow-up and nobody in a cadence)
+**Overview (dashboard)**
+- Greeting, today's focus count and a one-click jump into the planner
+- Four tiles: total accounts, open pipeline, follow-ups & dates (overdue / due today), people in cadences
+- **Pipeline overview**: open prospect value by stage, with a tooltip per bar
+- **Your daily momentum**: activity-plan progress ring and a bar per section
+  (calls/emails/LinkedIn, visits, channel, revisits)
+- Needs a little attention (overdue and today), coming up next (14 days), recent activity, and
+  active accounts with no next step (no follow-up and nobody in a cadence)
+
+**Look and feel**
+- Forest-green theme with warm neutrals, in light and dark mode (follows the device setting)
+- Desktop: a sidebar with page counts (accounts, cadence steps due), sync status and settings.
+  iPhone: a bottom tab bar
+- Uses the device's built-in system font (San Francisco on iPhone/Mac, Segoe UI on Windows), so
+  nothing is downloaded and text works offline
 
 **Daily planner**
 - Hour-by-hour schedule (7 AM–7 PM); click an hour to add a task

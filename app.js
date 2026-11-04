@@ -356,9 +356,18 @@
     if (ui.lastView !== view) ui.showAll = false;
     ui.lastView = view;
     $$('#tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === (TAB_FOR[view] || view)));
+    updateChrome(view);
     views[view]();
   }
   const rerender = () => route();
+  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude' };
+  /** Breadcrumb and sidebar counts. */
+  function updateChrome(view) {
+    $('#crumb-page').textContent = CRUMBS[view] || 'Overview';
+    $('#nc-accounts').textContent = state.accounts.length || '';
+    const due = dueSteps(today()).length;
+    $('#nc-cadences').textContent = due ? `${due} due` : '';
+  }
   const go = (hash) => { if (location.hash === '#' + hash) rerender(); else location.hash = hash; };
   window.addEventListener('hashchange', () => { ui.navs++; route(); window.scrollTo(0, 0); });
 
@@ -369,102 +378,190 @@
     const overdue = items.filter((i) => i.date < t);
     const dueToday = items.filter((i) => i.date === t);
     const upcoming = items.filter((i) => i.date > t && daysBetween(t, i.date) <= 14);
-    const todaysTasks = state.tasks.filter((x) => x.date === t);
     const todaysPlan = getPlan(t);
     const planDone = PLAN_SECTIONS.reduce((n, sec) => n + planStats(todaysPlan, sec.key).done, 0);
     const planTotal = PLAN_SECTIONS.reduce((n, sec) => n + planStats(todaysPlan, sec.key).target, 0);
     const partners = state.accounts.filter((a) => a.type === 'partner');
     const prospects = state.accounts.filter((a) => a.type === 'prospect');
-    const openPipeline = prospects
-      .filter((a) => !['Won', 'Lost'].includes(a.stage))
-      .reduce((s, a) => s + (Number(a.value) || 0), 0);
+    const openProspects = prospects.filter((a) => !['Won', 'Lost'].includes(a.stage));
+    const openPipeline = openProspects.reduce((s, a) => s + (Number(a.value) || 0), 0);
     const recent = state.accounts
       .flatMap((a) => a.activities.map((act) => ({ ...act, account: a })))
       .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || ''))
-      .slice(0, 8);
+      .slice(0, 6);
     // Accounts with a contact in a running cadence already have a next touch.
     const inCadence = new Set(liveEnrollments().filter((p) => p.e.status !== 'finished').map((p) => p.acct.id));
     const quiet = state.accounts
       .filter((a) => !['Lost', 'Inactive', 'Won'].includes(a.stage) && !a.nextFollowUp && !inCadence.has(a.id))
       .slice(0, 6);
     const stepsDue = dueSteps(t);
-    const PLAN_SHORT = { outreach: 'Calls / Email / LI', visits: 'Visits', channel: 'Channel', revisits: 'Revisits' };
+    const cadencePeople = liveEnrollments().filter((p) => p.e.status === 'active').length;
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    const focusCount = overdue.length + dueToday.length + stepsDue.length;
+    const pct = planTotal ? Math.round((planDone / planTotal) * 100) : 0;
+    const PLAN_SHORT = { outreach: 'Calls, emails & LinkedIn', visits: 'In-person visits', channel: 'Channel accounts', revisits: 'Revisits' };
+    const icon = (path) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${path}</svg>`;
+    const ICONS = {
+      accounts: '<path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M8 8h3M8 12h3M8 16h3M3 21h18"/>',
+      pipeline: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M8 6V4h8v2"/>',
+      clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+      send: '<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
+      arrow: '<path d="M7 17L17 7M8 7h9v9"/>',
+      calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
+      pulse: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+      spark: '<path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/>',
+    };
+    const kpi = (href, tone, iconKey, label, value, sub) => `
+      <a class="card kpi-card" href="${href}">
+        <div class="row spread"><span class="kpi-label">${label}</span><span class="kpi-icon ${tone}">${icon(ICONS[iconKey])}</span></div>
+        <div class="row spread" style="align-items:flex-end"><div class="kpi-value">${value}</div><span class="kpi-go">${icon(ICONS.arrow)}</span></div>
+        <div class="kpi-sub">${sub}</div>
+      </a>`;
+
+    // Pipeline by stage (open prospect stages), shaded light → dark as deals progress.
+    const pipeStages = STAGES.prospect.filter((s) => s !== 'Lost');
+    const byStage = pipeStages.map((s) => {
+      const list = prospects.filter((a) => a.stage === s);
+      return { s, n: list.length, v: list.reduce((n, a) => n + (Number(a.value) || 0), 0) };
+    });
+    const maxN = Math.max(1, ...byStage.map((x) => x.n));
+    const ramp = ['#b9d6c4', '#9cc5ab', '#7fb293', '#5f9a77', '#477f60', '#2f6b52'];
 
     $('#view').innerHTML = `
-      <div class="row spread" style="margin-bottom:1rem">
+      <div class="ov-head">
         <div>
-          <h1>${esc(fmtLongDate(t))}</h1>
-          <div class="muted">${todaysTasks.filter((x) => !x.done).length} open planner tasks today · ${dueToday.length} account items due</div>
+          <div class="eyebrow">Your workspace, at a glance</div>
+          <h1 class="greeting">${greeting}<span class="brand-dot">.</span></h1>
+          <div class="muted">A fresh perspective on your relationships and what comes next.</div>
         </div>
-        <div class="row">
+        <div class="row ov-actions">
           ${dashSwitch('today')}
-          <button class="btn ghost" data-act="new-account">+ Account</button>
-          <a class="btn" href="#planner/${t}">Open today's planner</a>
+          <span class="date-pill">${icon(ICONS.calendar)} ${esc(fmtDate(t, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }))}</span>
+          <button class="btn" data-act="new-account">+ Add account</button>
         </div>
       </div>
 
       ${state.accounts.length === 0 ? `
         <div class="card stack" style="margin-bottom:1rem">
           <h2>Welcome</h2>
-          <p class="muted">Add your first partner or prospect account, or load sample data to explore.</p>
+          <p class="muted">Add your first partner or prospect account, import a spreadsheet, or load sample data to explore.</p>
           <div class="row">
             <button class="btn" data-act="new-account">+ Add account</button>
+            <button class="btn ghost" data-act="import-csv">Import a spreadsheet</button>
             <button class="btn ghost" data-act="load-sample">Load sample data</button>
           </div>
         </div>` : ''}
 
-      <div class="dash-label">Today</div>
-      <div class="stats today-stats">
-        <a class="card stat plan-stat" href="#planner/${t}">
-          <div class="row spread"><div><div class="num">${planDone}<span class="muted">/${planTotal}</span></div><div class="label">Activity plan</div></div></div>
-          <div class="mini-bars">${PLAN_SECTIONS.map((sec) => {
-            const st = planStats(todaysPlan, sec.key);
-            return `<div class="mini-bar"><span>${PLAN_SHORT[sec.key]}</span><div class="progress"><div style="width:${Math.round((st.done / st.target) * 100)}%"></div></div><b>${st.done}/${st.target}</b></div>`;
-          }).join('')}</div>
-        </a>
-        <a class="card stat ${stepsDue.length ? 'warn' : ''}" href="#cadences"><div class="num">${stepsDue.length}</div><div class="label">Cadence steps due</div></a>
-        <div class="card stat ${dueToday.length ? 'warn' : ''}"><div class="num">${dueToday.length}</div><div class="label">Follow-ups & dates due</div></div>
-        <div class="card stat ${overdue.length ? 'alert' : ''}"><div class="num">${overdue.length}</div><div class="label">Overdue</div></div>
-      </div>
-      <div class="dash-label">Book</div>
-      <div class="stats">
-        <a class="card stat" href="#accounts"><div class="num">${prospects.length}</div><div class="label">Prospects</div></a>
-        <a class="card stat" href="#accounts"><div class="num">${partners.length}</div><div class="label">Partners</div></a>
-        <div class="card stat"><div class="num">${money(openPipeline)}</div><div class="label">Open prospect pipeline</div></div>
-        <a class="card stat" href="#cadences"><div class="num">${liveEnrollments().filter((p) => p.e.status === 'active').length}</div><div class="label">People in cadences</div></a>
+      <section class="hero">
+        <div class="hero-text">
+          <div class="eyebrow"><i class="dot"></i>A little focus. A lot of forward.</div>
+          <h2>Great relationships.<br>One small step at a time.</h2>
+          <p>${focusCount ? `You have <strong>${plural(focusCount, 'item')}</strong> to follow up on today. Let's keep the momentum going.` : 'Nothing is overdue. A great day to start new conversations.'}</p>
+          <a class="btn hero-btn" href="#planner/${t}">Let's plan your day →</a>
+        </div>
+        <svg class="hero-art" viewBox="0 0 220 150" aria-hidden="true">
+          <ellipse cx="120" cy="138" rx="96" ry="7" fill="currentColor" opacity=".12"/>
+          <path d="M55 138V86a40 40 0 0 1 80 0v52" fill="none" stroke="currentColor" stroke-width="16" opacity=".18"/>
+          <rect x="86" y="96" width="24" height="42" rx="3" fill="#5f9a77"/>
+          <rect x="116" y="78" width="24" height="60" rx="3" fill="#477f60"/>
+          <rect x="146" y="52" width="24" height="86" rx="3" fill="#2f6b52"/>
+          <path d="M80 82l34-26 22 12 40-38" fill="none" stroke="#2f6b52" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M168 28l10 2-2 10" fill="none" stroke="#2f6b52" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="62" cy="48" r="11" fill="#fff"/><path d="M57 48l4 4 7-8" fill="none" stroke="#2f6b52" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M70 128c-6-10-2-20 6-24 2 9-1 18-6 24zm2 0c4-8 12-11 18-9-4 7-11 10-18 9z" fill="#477f60"/>
+          <path d="M196 64l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#2f6b52"/>
+          <circle cx="200" cy="110" r="3" fill="#2f6b52" opacity=".5"/><circle cx="102" cy="20" r="3" fill="#2f6b52" opacity=".5"/>
+        </svg>
+      </section>
+
+      <div class="kpi-grid4">
+        ${kpi('#accounts', 'sage', 'accounts', 'Total accounts', state.accounts.length, `<span class="pill prospect">${plural(prospects.length, 'prospect')}</span> ${plural(partners.length, 'partner')}`)}
+        ${kpi('#accounts', 'blue', 'pipeline', 'Open pipeline', money(openPipeline), `<i class="dot"></i>Across ${plural(openProspects.length, 'open opportunity', 'open opportunities')}`)}
+        ${kpi(`#planner/${t}`, 'peach', 'clock', 'Follow-ups & dates', overdue.length + dueToday.length, `${overdue.length ? `<span class="pill overdue">${overdue.length} overdue</span>` : ''} ${dueToday.length} due today`)}
+        ${kpi('#cadences', 'lavender', 'send', 'People in cadences', cadencePeople, `<i class="dot"></i>${plural(stepsDue.length, 'step')} ready for your next move`)}
       </div>
 
-      <div class="dash-grid">
+      <div class="ov-grid">
         <div class="card">
-          <h2>Needs attention</h2>
-          ${itemList([...overdue, ...dueToday], 'Nothing overdue or due today.')}
-        </div>
-        <div class="card">
-          <h2>Next 14 days</h2>
-          ${itemList(upcoming, 'No upcoming dates in the next two weeks.')}
-        </div>
-        <div class="card">
-          <h2>Recent activity</h2>
-          ${recent.length ? `<ul class="list">${recent.map((r) => `
-            <li>
-              <div class="date-chip"><b>${fromISO(r.date).getDate()}</b>${fmtDate(r.date, { month: 'short' })}</div>
-              <div class="grow">
-                <div class="title">${esc(r.kind)}: ${esc(r.summary)}</div>
-                <div class="small muted"><a href="#account/${r.account.id}">${esc(r.account.name)}</a></div>
+          <div class="section-head"><div><h2 style="margin:0">Pipeline overview</h2><div class="small muted">A clear view of your next opportunities.</div></div><a class="small link-arrow" href="#accounts">View accounts →</a></div>
+          <div class="pipe-total">${money(openPipeline)} <span class="small muted"><i class="dot"></i>Open prospect pipeline</span></div>
+          <div class="viz-root pipe-chart">
+            <div class="viz-plot" role="img" aria-label="Prospects by stage">
+              <div class="viz-cols" style="grid-template-columns:repeat(${byStage.length},1fr);inset:0">
+                ${byStage.map((x, i) => `
+                  <div class="viz-col" tabindex="0" data-tip="${esc(`${x.s}|${plural(x.n, 'account')}|${money(x.v)}`)}">
+                    <div class="viz-stack" style="height:${Math.max(3, (x.n / maxN) * 100)}%">
+                      <span class="viz-total">${x.n}</span>
+                      <div class="viz-seg" style="flex:1;background:${x.n ? ramp[i] : 'var(--border)'};border-radius:4px 4px 0 0"></div>
+                    </div>
+                    <div class="viz-x">${esc(x.s)}</div>
+                  </div>`).join('')}
               </div>
+            </div>
+            <div class="viz-tip" hidden></div>
+          </div>
+          <div class="row spread small muted pipe-foot"><span><i class="dot"></i>${plural(openProspects.length, 'prospect')} in your pipeline</span><span>Every conversation counts.</span></div>
+        </div>
+
+        <div class="card">
+          <div class="section-head"><div><h2 style="margin:0">Your daily momentum</h2><div class="small muted">Small actions add up to big things.</div></div><span class="kpi-icon sage">${icon(ICONS.spark)}</span></div>
+          <div class="momentum">
+            <svg class="ring" viewBox="0 0 80 80" aria-hidden="true">
+              <circle cx="40" cy="40" r="34" fill="none" stroke="var(--surface-2)" stroke-width="7"/>
+              <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round"
+                stroke-dasharray="${(2 * Math.PI * 34 * pct) / 100} 999" transform="rotate(-90 40 40)"/>
+              <text x="40" y="40" text-anchor="middle" dominant-baseline="central" class="ring-text">${pct}%</text>
+            </svg>
+            <div>
+              <div class="kpi-value" style="font-size:1.4rem">${planDone} <span class="muted" style="font-size:1rem">/ ${planTotal}</span></div>
+              <div class="small muted">activities completed</div>
+              <div class="small" style="color:var(--accent);margin-top:.2rem">${planDone ? 'Keep it going ✦' : 'A good day starts with a plan ✦'}</div>
+            </div>
+          </div>
+          <div class="mom-bars">${PLAN_SECTIONS.map((sec) => {
+            const st = planStats(todaysPlan, sec.key);
+            return `<div class="mom-bar"><div class="row spread small"><span class="muted">${PLAN_SHORT[sec.key]}</span><b>${st.done} / ${st.target}</b></div><div class="progress"><div style="width:${Math.round((st.done / st.target) * 100)}%"></div></div></div>`;
+          }).join('')}</div>
+          <a class="row spread link-arrow mom-link" href="#planner/${t}"><span>Open daily planner</span><span>→</span></a>
+        </div>
+
+        <div class="card">
+          <div class="section-head"><h2 style="margin:0">Needs a little attention ${overdue.length + dueToday.length ? `<span class="count-badge">${overdue.length + dueToday.length}</span>` : ''}</h2><span class="eyebrow" style="margin:0">Your next moves</span></div>
+          ${itemList([...overdue, ...dueToday], 'Nothing overdue or due today. Nicely done.')}
+        </div>
+
+        <div class="card">
+          <div class="section-head"><h2 style="margin:0">Recent activity</h2><span class="kpi-icon sage">${icon(ICONS.pulse)}</span></div>
+          ${recent.length ? `<ul class="feed">${recent.map((r) => `
+            <li>
+              <span class="feed-ic">${icon(r.kind === 'Call' ? ICONS.pulse : r.kind === 'Visit' ? ICONS.accounts : ICONS.send)}</span>
+              <div class="grow">
+                <div class="title">${esc(r.summary)}</div>
+                <div class="small muted"><a href="#account/${r.account.id}">${esc(r.account.name)}</a> · ${esc(r.kind)}</div>
+              </div>
+              <span class="small muted nowrap">${esc(relDays(r.date))}</span>
             </li>`).join('')}</ul>` : '<div class="empty">No activity logged yet.</div>'}
         </div>
+
         <div class="card">
-          <h2>No follow-up scheduled</h2>
+          <div class="section-head"><div><h2 style="margin:0">Coming up next</h2><div class="small muted">On the horizon in the next 14 days.</div></div><span class="kpi-icon sage">${icon(ICONS.calendar)}</span></div>
+          ${itemList(upcoming, 'Nothing scheduled in the next two weeks.')}
+        </div>
+
+        <div class="card">
+          <div class="section-head"><div><h2 style="margin:0">Keep the conversation going</h2><div class="small muted">Active accounts without a follow-up.</div></div><span class="kpi-icon lavender">${icon(ICONS.send)}</span></div>
           ${quiet.length ? `<ul class="list">${quiet.map((a) => `
             <li>
               <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span>
               <div class="grow"><a class="title" href="#account/${a.id}">${esc(a.name)}</a>
                 <div class="small muted">${esc(a.stage)} · last touch ${lastActivity(a) ? relDays(lastActivity(a).date) : 'never'}</div></div>
               <button class="btn sm ghost" data-act="log" data-id="${a.id}">Log / schedule</button>
-            </li>`).join('')}</ul>` : '<div class="empty">Every active account has a next step.</div>'}
+            </li>`).join('')}</ul>` : '<div class="empty-soft">Every active account has a next step.<br>That\'s a good place to be.</div>'}
         </div>
-      </div>`;
+      </div>
+      <footer class="ov-foot small muted"><span>Made for meaningful connections.</span><span>mini crm ✦ A little more organized.</span></footer>`;
+    bindChartTips();
   }
 
   /** Remove every record. Tombstones carry the erase to other synced devices. */
@@ -2538,7 +2635,7 @@
       const { map, restored } = mountMap();
       wirePopups(map);
       mapped.forEach(addAccountMarker);
-      if (mapState.me) L.circleMarker(mapState.me, { radius: 7, color: '#fff', weight: 3, fillColor: '#2f6fed', fillOpacity: 1 }).bindTooltip('You are here').addTo(mapState.layer);
+      if (mapState.me) L.circleMarker(mapState.me, { radius: 7, color: '#fff', weight: 3, fillColor: '#2f6b52', fillOpacity: 1 }).bindTooltip('You are here').addTo(mapState.layer);
       if (!restored && mapped.length) map.fitBounds(L.latLngBounds(mapped.map(ll)).pad(0.15), { maxZoom: 12, animate: false });
       updateLocateStatus();
       locateAccounts();
@@ -2827,7 +2924,7 @@
       const legPts = [...(start ? [start] : []), ...pts, ...(start && r.roundTrip ? [start] : [])];
       const { legs, line, estimated } = legPts.length > 1 ? await routeLegs(legPts) : { legs: [], line: [], estimated: true };
       if (run !== mapState.runId || !$('#map')) return;
-      if (line.length > 1) L.polyline(line, { color: '#2f6fed', weight: 4, opacity: 0.8, dashArray: estimated ? '6 8' : null }).addTo(mapState.layer);
+      if (line.length > 1) L.polyline(line, { color: '#2f6b52', weight: 4, opacity: 0.8, dashArray: estimated ? '6 8' : null }).addTo(mapState.layer);
       // Arrival times: drive legs plus time spent at each stop.
       let t = 0; let driveSec = 0; let mi = 0;
       const legOffset = start ? 0 : -1;
@@ -3962,6 +4059,7 @@
   }
 
   $('#btn-settings').addEventListener('click', openSettings);
+  $('#btn-settings-side').addEventListener('click', openSettings);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.matches && e.target.matches('.acard[role=link]')) e.target.click();
   });
@@ -4217,6 +4315,9 @@
     const [icon, ...words] = SYNC_LABELS[status].split(' ');
     btn.innerHTML = `<span class="sync-ic">${icon}</span><span class="sync-tx">${words.join(' ')}</span>`;
     btn.className = `btn ghost sync-${status}`;
+    const side = $('#side-status');
+    side.className = `side-status sync-${status}`;
+    side.querySelector('span').textContent = { off: 'Saved on this device', pending: 'Saving…', syncing: 'Syncing…', idle: 'Synced across devices', offline: 'Offline: saved on this device', error: 'Sync stopped' }[status];
     const banner = $('#sync-banner');
     banner.hidden = status !== 'error';
     if (status === 'error') {
