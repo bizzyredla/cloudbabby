@@ -6,9 +6,18 @@ No install, no build step: open `index.html` in a browser.
 ## Features
 
 **Accounts**
-- Partner vs. prospect accounts with their own stages
-  - Prospect: New → Contacted → Qualified → Proposal → Negotiation → Won / Lost
-  - Partner: Onboarding → Active → Strategic → At Risk → Inactive
+- Two account types, each with its own stages. The Type field decides which list the Stage picker
+  offers, and a one-line definition shows under it
+  - **Prospect (deal) stages:** S1 – Discovery Scheduled → S2 – Qualified Opportunity →
+    S3 – Solution & Quote Development → S4 – Proposal Presented → S5 – Decision / Negotiation →
+    Closed Won / Closed Lost, plus Nurture and Revisit for deals that are parked
+  - **Partner (channel) stages:** Target (fits, no two-way conversation yet) → Engaged (replied or
+    talked with us) → Met (meeting held, partnership discussed) → Committed (agreed to refer, no
+    referral yet) → Producing (referral in the last 6 months) → Dormant (open or signed, no referral
+    in 6+ months) → Closed (declined, or exclusive elsewhere)
+  - Open pipeline counts prospects in S1–S5 only. Older stage names convert automatically
+    (e.g. Proposal → S4, Won → Closed Won, Active → Producing, At Risk → Dormant)
+  - Spreadsheet imports accept the full name, just "S3", the words after the dash, or an old name
 - **Multiple contacts** per account: name, title, email, phone, role in the deal (decision maker,
   champion, HR…), notes, and one marked primary. Activities can be logged against a contact
 - **Current vendors**: pick from a dropdown of the top 20 TriNet competitors (ADP TotalSource,

@@ -6,9 +6,61 @@
   const STORAGE_KEY = 'minicrm.v1';
 
   const STAGES = {
-    prospect: ['New', 'Contacted', 'Qualified', 'Proposal', 'Negotiation', 'Won', 'Lost'],
-    partner: ['Onboarding', 'Active', 'Strategic', 'At Risk', 'Inactive'],
+    prospect: ['S1 – Discovery Scheduled', 'S2 – Qualified Opportunity', 'S3 – Solution & Quote Development', 'S4 – Proposal Presented', 'S5 – Decision / Negotiation', 'Closed Won', 'Closed Lost', 'Nurture', 'Revisit'],
+    partner: ['Target', 'Engaged', 'Met', 'Committed', 'Producing', 'Dormant', 'Closed'],
   };
+  // What each stage means (shown under the stage picker and as tooltips).
+  const STAGE_HINTS = {
+    'S1 – Discovery Scheduled': 'Discovery meeting is on the calendar',
+    'S2 – Qualified Opportunity': 'Fit, need and decision maker confirmed',
+    'S3 – Solution & Quote Development': 'Building the solution and pricing',
+    'S4 – Proposal Presented': 'Proposal is in front of them',
+    'S5 – Decision / Negotiation': 'Final terms and decision',
+    'Closed Won': 'Signed',
+    'Closed Lost': 'Chose someone else or not moving forward',
+    Nurture: 'Not ready now; stay in touch',
+    Revisit: 'Come back at a set date (use Next revisit)',
+    Target: 'Fits, no two-way conversation yet',
+    Engaged: 'Replied or talked with us',
+    Met: 'Meeting held, partnership discussed',
+    Committed: 'Agreed to refer, no referral yet',
+    Producing: 'Referral in the last 6 months',
+    Dormant: 'Open or signed, no referral in 6+ months',
+    Closed: 'Declined, or exclusive elsewhere',
+  };
+  // Short names where space is tight (pipeline chart, board columns on phones).
+  const STAGE_SHORT = {
+    'S1 – Discovery Scheduled': 'S1 Discovery', 'S2 – Qualified Opportunity': 'S2 Qualified', 'S3 – Solution & Quote Development': 'S3 Quote',
+    'S4 – Proposal Presented': 'S4 Proposal', 'S5 – Decision / Negotiation': 'S5 Decision', 'Closed Won': 'Won', 'Closed Lost': 'Lost',
+  };
+  const stageShort = (st) => STAGE_SHORT[st] || st;
+  // Old stage names (before the S1–S5 / channel stages) and what they become.
+  const STAGE_RENAMES = {
+    prospect: { New: 'S1 – Discovery Scheduled', Contacted: 'S1 – Discovery Scheduled', Qualified: 'S2 – Qualified Opportunity', Proposal: 'S4 – Proposal Presented', Negotiation: 'S5 – Decision / Negotiation', Won: 'Closed Won', Lost: 'Closed Lost' },
+    partner: { Onboarding: 'Committed', Active: 'Producing', Strategic: 'Producing', 'At Risk': 'Dormant', Inactive: 'Closed' },
+  };
+  const ALL_RENAMES = { ...STAGE_RENAMES.prospect, ...STAGE_RENAMES.partner };
+  const OPEN_DEAL_STAGES = STAGES.prospect.slice(0, 5); // S1–S5: the active pipeline
+  const isOpenDeal = (a) => a.type === 'prospect' && OPEN_DEAL_STAGES.includes(a.stage);
+  const isClosedStage = (st) => ['Closed Won', 'Closed Lost', 'Closed'].includes(st);
+  /**
+   * A stage from free text (spreadsheets, old data): exact name, "S2", the words after the dash,
+   * or an old stage name. '' when nothing fits.
+   */
+  function stageFromText(type, v) {
+    const t = String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!t) return '';
+    const list = STAGES[type];
+    const plain = (x) => x.toLowerCase().replace(/[–-]/g, '-').replace(/\s+/g, ' ');
+    const tt = plain(t);
+    const hit = list.find((x) => plain(x) === tt)
+      || (type === 'prospect' && /^s[1-5]\b/.test(tt) && list.find((x) => x.toLowerCase().startsWith(tt.slice(0, 2))))
+      || list.find((x) => { const rest = plain(x).split(' - ')[1]; return rest && rest === tt; })
+      || list.find((x) => x.toLowerCase() === 'closed ' + tt);
+    if (hit) return hit;
+    const old = Object.entries(STAGE_RENAMES[type]).find(([k]) => k.toLowerCase() === t);
+    return old ? old[1] : '';
+  }
   const ACTIVITY_KINDS = ['Call', 'Email', 'LinkedIn', 'Visit', 'Text', 'Meeting', 'Demo', 'Note', 'Other'];
   // Daily activity plan targets shown on the planner.
   const PLAN_SECTIONS = [
@@ -174,12 +226,20 @@
         : [];
       delete a.contact; delete a.title; delete a.email; delete a.phone;
     }
+    if (a.type && STAGES[a.type] && !STAGES[a.type].includes(a.stage)) {
+      a.stage = STAGE_RENAMES[a.type][a.stage] || stageFromText(a.type, a.stage) || STAGES[a.type][0];
+    }
     return a;
   }
 
   function normalize(data) {
     const st = { ...emptyState(), ...data };
     st.accounts.forEach(migrateAccount);
+    for (const l of st.lists || []) {
+      if (l.criteria && Array.isArray(l.criteria.stages) && l.criteria.stages.some((x) => ALL_RENAMES[x])) {
+        l.criteria = { ...l.criteria, stages: [...new Set(l.criteria.stages.map((x) => ALL_RENAMES[x] || x))] };
+      }
+    }
     return st;
   }
 
@@ -334,7 +394,7 @@
     for (const a of state.accounts) {
       if (a.nextFollowUp) items.push({ kind: 'followup', date: a.nextFollowUp, label: 'Follow up', account: a });
       if (a.revisitDate) items.push({ kind: 'revisit', date: a.revisitDate, label: 'Revisit', account: a });
-      if (a.closeDate && !['Won', 'Lost'].includes(a.stage)) items.push({ kind: 'close', date: a.closeDate, label: 'Expected close', account: a });
+      if (a.closeDate && !isClosedStage(a.stage)) items.push({ kind: 'close', date: a.closeDate, label: 'Expected close', account: a });
       for (const k of a.keyDates) if (!k.done) items.push({ kind: 'keydate', date: k.date, label: k.label, account: a, keyDate: k });
     }
     return items.sort((x, y) => x.date.localeCompare(y.date));
@@ -675,7 +735,7 @@
     const planTotal = PLAN_SECTIONS.reduce((n, sec) => n + planStats(todaysPlan, sec.key).target, 0);
     const partners = state.accounts.filter((a) => a.type === 'partner');
     const prospects = state.accounts.filter((a) => a.type === 'prospect');
-    const openProspects = prospects.filter((a) => !['Won', 'Lost'].includes(a.stage));
+    const openProspects = prospects.filter(isOpenDeal);
     const openPipeline = openProspects.reduce((s, a) => s + (Number(a.value) || 0), 0);
     const recent = state.accounts
       .flatMap((a) => a.activities.map((act) => ({ ...act, account: a })))
@@ -684,7 +744,7 @@
     // Accounts with a contact in a running cadence already have a next touch.
     const inCadence = new Set(liveEnrollments().filter((p) => p.e.status !== 'finished').map((p) => p.acct.id));
     const quiet = state.accounts
-      .filter((a) => !['Lost', 'Inactive', 'Won'].includes(a.stage) && !a.nextFollowUp && !inCadence.has(a.id))
+      .filter((a) => !isClosedStage(a.stage) && !a.nextFollowUp && !inCadence.has(a.id))
       .slice(0, 6);
     const stepsDue = dueSteps(t);
     const cadencePeople = liveEnrollments().filter((p) => p.e.status === 'active').length;
@@ -715,7 +775,7 @@
       </a>`;
 
     // Pipeline by stage (open prospect stages), shaded light → dark as deals progress.
-    const pipeStages = STAGES.prospect.filter((s) => s !== 'Lost');
+    const pipeStages = [...OPEN_DEAL_STAGES, 'Closed Won'];
     const byStage = pipeStages.map((s) => {
       const list = prospects.filter((a) => a.stage === s);
       return { s, n: list.length, v: list.reduce((n, a) => n + (Number(a.value) || 0), 0) };
@@ -790,7 +850,7 @@
                       <span class="viz-total">${x.n}</span>
                       <div class="viz-seg" style="flex:1;background:${x.n ? ramp[i] : 'var(--border)'};border-radius:4px 4px 0 0"></div>
                     </div>
-                    <div class="viz-x">${esc(x.s)}</div>
+                    <div class="viz-x" title="${esc(x.s)}">${esc(stageShort(x.s))}</div>
                   </div>`).join('')}
               </div>
             </div>
@@ -1073,7 +1133,6 @@
 
   function renderAccounts() {
     const list = filteredAccounts();
-    const stages = ui.typeFilter === 'all' ? [...STAGES.prospect, ...STAGES.partner] : STAGES[ui.typeFilter];
 
     $('#view').innerHTML = `
       <div class="page-head">
@@ -1089,7 +1148,7 @@
         </select>
         <select id="acct-stage" aria-label="Stage">
           <option value="all">All stages</option>
-          ${stages.map((x) => `<option ${ui.stageFilter === x ? 'selected' : ''}>${x}</option>`).join('')}
+          ${(ui.typeFilter === 'all' ? ['prospect', 'partner'] : [ui.typeFilter]).map((t) => `<optgroup label="${t === 'partner' ? 'Partner (channel) stages' : 'Prospect (deal) stages'}">${STAGES[t].map((x) => `<option value="${esc(x)}" ${ui.stageFilter === x ? 'selected' : ''} title="${esc(STAGE_HINTS[x] || '')}">${esc(x)}</option>`).join('')}</optgroup>`).join('')}
         </select>
         <select id="acct-vendor" aria-label="Current vendor">
           <option value="all">All vendors</option>
@@ -1158,7 +1217,7 @@
           <div><span>Main phone</span>${a.mainPhone ? `<a href="tel:${esc(a.mainPhone)}">${esc(a.mainPhone)}</a>` : '—'}</div>
           <div><span>${a.type === 'partner' ? 'Annual value' : 'Deal value'}</span>${money(a.value)}</div>
           <div><span>Admin fees</span>${a.adminFees ? money(a.adminFees) : '—'}</div>
-          <div><span>Expected close</span>${a.closeDate ? `<span class="pill ${['Won', 'Lost'].includes(a.stage) ? '' : dueClass(a.closeDate)}">${fmtDate(a.closeDate)}</span> <span class="small muted">${relDays(a.closeDate)}</span>` : '—'}</div>
+          <div><span>Expected close</span>${a.closeDate ? `<span class="pill ${isClosedStage(a.stage) ? '' : dueClass(a.closeDate)}">${fmtDate(a.closeDate)}</span> <span class="small muted">${relDays(a.closeDate)}</span>` : '—'}</div>
           ${(() => {
             const pa = a.channelPartnerId && getAccount(a.channelPartnerId);
             if (!pa) return '';
@@ -1206,7 +1265,7 @@
         ${(() => {
           const referred = state.accounts.filter((x) => x.channelPartnerId === a.id);
           if (!referred.length) return '';
-          const total = referred.filter((x) => !['Won', 'Lost'].includes(x.stage)).reduce((n, x) => n + (Number(x.value) || 0), 0);
+          const total = referred.filter(isOpenDeal).reduce((n, x) => n + (Number(x.value) || 0), 0);
           return `<div>
             <div class="section-head"><h2 style="margin:0">Referred accounts <span class="muted small">(${referred.length}${total ? ` · ${money(total)} open` : ''})</span></h2></div>
             <ul class="list">${referred.sort((x, y) => (x.closeDate || '9').localeCompare(y.closeDate || '9')).map((x) => {
@@ -1765,7 +1824,8 @@
       ${field('Account type', `<select name="type">${opt('all', 'Partners & prospects', c.type)}${opt('prospect', 'Prospects only', c.type)}${opt('partner', 'Partners only', c.type)}</select>`)}
       <div class="field"><span>Current vendor is any of</span>${checks('vendors', allVendors(), c.vendors)}</div>
       <div class="field"><span>Tagged with any of</span>${checks('tags', allTags(), c.tags, (t) => '#' + t)}</div>
-      <div class="field"><span>Stage is any of</span>${checks('stages', [...STAGES.prospect, ...STAGES.partner], c.stages)}</div>
+      <div class="field"><span>Prospect (deal) stage is any of</span>${checks('stages', STAGES.prospect, c.stages)}</div>
+      <div class="field"><span>Partner (channel) stage is any of</span>${checks('stages', STAGES.partner, c.stages)}</div>
       <div class="grid-2">
         ${field('Name, contacts or notes contain', `<input name="text" value="${esc(c.text)}">`)}
         ${field('Vendor renewal within (days)', `<input name="renewalDays" type="number" min="0" step="15" value="${c.renewalDays || ''}" placeholder="e.g. 120">`)}
@@ -2570,7 +2630,7 @@
       return { a, created: true };
     };
     for (const r of records) {
-      const stage = STAGES[opts.type].find((x) => x.toLowerCase() === (r.stage || '').toLowerCase()) || STAGES[opts.type][0];
+      const stage = stageFromText(opts.type, r.stage) || STAGES[opts.type][0];
       const { a, created } = findOrCreate(r.company, opts.type, stage, r.leadSource || opts.source);
       if (created) stats.newAccounts++;
       else if (!made.has(r.company.toLowerCase())) stats.updatedAccounts.add(a.id); // already in the CRM
@@ -2585,7 +2645,7 @@
       if (r.contact) addContact(a, r.contact);
       // Channel partner (broker): its own partner account, with its contact, linked from this account.
       if (r.channelPartner) {
-        const pr = findOrCreate(r.channelPartner, 'partner', 'Active', 'Partner / broker');
+        const pr = findOrCreate(r.channelPartner, 'partner', 'Producing', 'Partner / broker'); // they referred this deal
         if (pr.created) stats.newPartners++;
         const pc = r.channelContact ? addContact(pr.a, { name: r.channelContact }) : null;
         if (commit) {
@@ -3364,12 +3424,13 @@
 
     // Pipeline movement from logged stage changes.
     const moves = acts.filter((h) => h.kind === 'Note' && STAGE_RE.test(h.summary)).map((h) => {
-      const [, from, to] = h.summary.match(STAGE_RE);
-      const list = STAGES[h.account.type] || [];
-      return { h, a: h.account, from, to, forward: list.indexOf(to) > list.indexOf(from) && !['Lost', 'Inactive', 'At Risk'].includes(to) };
+      const [, rawFrom, rawTo] = h.summary.match(STAGE_RE);
+      const from = ALL_RENAMES[rawFrom] || rawFrom; const to = ALL_RENAMES[rawTo] || rawTo; // older history uses the old names
+      const list = h.account.type === 'prospect' ? [...OPEN_DEAL_STAGES, 'Closed Won'] : STAGES.partner.slice(0, 5);
+      return { h, a: h.account, from, to, forward: list.indexOf(to) > list.indexOf(from) && list.indexOf(to) >= 0 };
     }).sort((x, y) => y.h.date.localeCompare(x.h.date));
     const newAccounts = state.accounts.filter((a) => inWeek(a.createdAt));
-    const won = moves.filter((m) => m.to === 'Won');
+    const won = moves.filter((m) => m.to === 'Closed Won');
 
     const byAccount = new Map();
     for (const h of touches) byAccount.set(h.account.id, { a: h.account, n: (byAccount.get(h.account.id)?.n || 0) + 1 });
@@ -3542,7 +3603,7 @@
             ${st.moves.map((m) => `<li>
               <span class="move ${m.forward ? 'fwd' : 'back'}" aria-label="${m.forward ? 'Advanced' : 'Moved back'}">${m.forward ? '▲' : '▼'}</span>
               <div class="grow"><a class="title" href="#account/${m.a.id}">${esc(m.a.name)}</a><div class="small muted">${esc(m.from)} → <strong>${esc(m.to)}</strong> · ${esc(fmtDate(m.h.date, { weekday: 'short' }))}</div></div>
-              ${m.to === 'Won' ? '<span class="pill won">Won</span>' : ''}
+              ${m.to === 'Closed Won' ? '<span class="pill won">Won</span>' : ''}
             </li>`).join('')}
             ${st.newAccounts.map((a) => `<li><span class="move new">+</span><div class="grow"><a class="title" href="#account/${a.id}">${esc(a.name)}</a><div class="small muted">New ${a.type} account</div></div></li>`).join('')}
           </ul>` : '<div class="empty">No stage changes or new accounts this week.</div>'}
@@ -3816,7 +3877,7 @@
       if (!a) {
         const create = q('[data-create]');
         if (!create || !create.checked) return;
-        a = migrateAccount({ id: uid(), name: c.name, type: 'prospect', stage: 'New', tags: 'claude-research', notes: '', vendors: [], contacts: [], activities: [], keyDates: [], createdAt: now, updatedAt: now });
+        a = migrateAccount({ id: uid(), name: c.name, type: 'prospect', stage: STAGES.prospect[0], tags: 'claude-research', notes: '', vendors: [], contacts: [], activities: [], keyDates: [], createdAt: now, updatedAt: now });
         state.accounts.push(a);
       }
       for (const [k] of R_FIELDS) { const cb = q(`[data-field="${k}"]`); if (cb && cb.checked) a[k] = c[k]; }
@@ -3883,12 +3944,12 @@
     [...state.accounts].sort((a, b) => a.name.localeCompare(b.name)).map((a) => opt(a.id, a.name, cur)).join('');
 
   function accountForm(existing) {
-    const a = existing || { type: 'prospect', stage: 'New' };
+    const a = existing || { type: 'prospect', stage: STAGES.prospect[0] };
     openModal(existing ? 'Edit account' : 'New account', `
       <fieldset class="form-sec"><legend>Company</legend><div class="grid-3">
         ${field('Account name *', `<input name="name" required value="${esc(a.name)}">`)}
-        ${field('Type', `<select name="type" id="f-type">${opt('prospect', 'Prospect', a.type)}${opt('partner', 'Partner', a.type)}</select>`)}
-        ${field('Stage / status', `<select name="stage" id="f-stage">${STAGES[a.type].map((s) => opt(s, s, a.stage)).join('')}</select>`)}
+        ${field('Type', `<select name="type" id="f-type">${opt('prospect', 'Prospect (deal pipeline)', a.type)}${opt('partner', 'Partner (channel / referral)', a.type)}</select>`)}
+        ${field(`<span id="f-stage-label">${a.type === 'partner' ? 'Channel stage' : 'Deal stage'}</span>`, `<select name="stage" id="f-stage">${STAGES[a.type].map((s) => opt(s, s, a.stage)).join('')}</select><span class="small muted" id="f-stage-hint">${esc(STAGE_HINTS[a.stage] || STAGE_HINTS[STAGES[a.type][0]])}</span>`)}
         ${field('Industry', `<input name="industry" value="${esc(a.industry)}">`)}
         ${field('Employees', `<input name="employees" type="number" min="0" value="${esc(a.employees)}">`)}
         ${field(a.type === 'partner' ? 'Annual value ($)' : 'Deal value ($)', `<input name="value" type="number" min="0" step="any" value="${esc(a.value)}">`)}
@@ -3945,9 +4006,13 @@
         toast('Account created');
       }
     }, 'Save', { wide: true });
+    const stageHint = () => { $('#f-stage-hint').textContent = STAGE_HINTS[$('#f-stage').value] || ''; };
     $('#f-type').addEventListener('change', (e) => {
       $('#f-stage').innerHTML = STAGES[e.target.value].map((s) => opt(s, s, '')).join('');
+      $('#f-stage-label').textContent = e.target.value === 'partner' ? 'Channel stage' : 'Deal stage';
+      stageHint();
     });
+    $('#f-stage').addEventListener('change', stageHint);
     bindVendorPicker();
     const partnerSel = $('#f-partner');
     if (partnerSel) {
@@ -4448,33 +4513,33 @@
     const mk = (o) => ({ id: uid(), createdAt: addDays(t, -60) + 'T09:00:00.000Z', updatedAt: now, tags: '', notes: '', website: '', ...o });
 
     const northwind = mk({
-      name: 'Northwind Logistics', type: 'prospect', stage: 'Proposal', contact: 'Dana Ortiz', title: 'VP Operations',
+      name: 'Northwind Logistics', type: 'prospect', stage: 'S4 – Proposal Presented', contact: 'Dana Ortiz', title: 'VP Operations',
       email: 'dana@northwind.example', phone: '555-0142', industry: 'Logistics', value: 48000, tags: 'enterprise, q4',
       nextFollowUp: t, notes: 'Evaluating 3 vendors. Budget approved for Q1. Champion is Dana; CFO signs off.',
       activities: [act(-21, 'Call', 'Intro call', 'Pain: manual dispatch scheduling.'), act(-12, 'Demo', 'Product demo to ops team', 'Strong interest in routing module.'), act(-3, 'Email', 'Sent proposal v1')],
       keyDates: [kd(9, 'Decision date', 'CFO review'), kd(20, 'Proposal expires')],
     });
     const brightpath = mk({
-      name: 'BrightPath Consulting', type: 'partner', stage: 'Active', contact: 'Sam Lee', title: 'Partner Manager',
+      name: 'BrightPath Consulting', type: 'partner', stage: 'Producing', contact: 'Sam Lee', title: 'Partner Manager',
       email: 'sam@brightpath.example', phone: '555-0188', industry: 'Consulting', value: 120000, tags: 'referral, reseller',
       nextFollowUp: addDays(t, 2), notes: 'Referral partner — sends ~2 qualified leads/month. 15% rev share.',
       activities: [act(-90, 'Meeting', 'Partnership kickoff'), act(-30, 'Meeting', 'Quarterly business review', 'Agreed on co-marketing webinar.'), act(-5, 'Email', 'Shared new pitch deck')],
       keyDates: [kd(5, 'Co-marketing webinar'), kd(45, 'QBR'), kd(150, 'Partner agreement renewal')],
     });
     const helix = mk({
-      name: 'Helix Health', type: 'prospect', stage: 'Contacted', contact: 'Priya Natarajan', title: 'Director of IT',
+      name: 'Helix Health', type: 'prospect', stage: 'S1 – Discovery Scheduled', contact: 'Priya Natarajan', title: 'Director of IT',
       email: 'priya@helix.example', industry: 'Healthcare', value: 30000, tags: 'mid-market',
       nextFollowUp: addDays(t, -2), notes: 'Inbound from webinar. Needs HIPAA details.',
       activities: [act(-8, 'Email', 'Replied to inbound inquiry')], keyDates: [],
     });
     const summit = mk({
-      name: 'Summit Tech Alliance', type: 'partner', stage: 'Onboarding', contact: 'Jordan Blake', title: 'Alliances Lead',
+      name: 'Summit Tech Alliance', type: 'partner', stage: 'Committed', contact: 'Jordan Blake', title: 'Alliances Lead',
       email: 'jordan@summit.example', phone: '555-0110', industry: 'Software', value: 60000, tags: 'integration',
       nextFollowUp: addDays(t, 6), activities: [act(-14, 'Meeting', 'Signed partner agreement')],
       keyDates: [kd(1, 'Technical onboarding session'), kd(30, 'Onboarding complete')],
     });
     const oak = mk({
-      name: 'Oak & Iron Manufacturing', type: 'prospect', stage: 'New', contact: 'Chris Mendez', industry: 'Manufacturing',
+      name: 'Oak & Iron Manufacturing', type: 'prospect', stage: 'S2 – Qualified Opportunity', contact: 'Chris Mendez', industry: 'Manufacturing',
       value: 22000, nextFollowUp: '', activities: [], keyDates: [],
     });
 
