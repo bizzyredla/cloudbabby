@@ -854,89 +854,89 @@
         ${kpi('#cadences', 'lavender', 'send', 'People in cadences', cadencePeople, `<i class="dot"></i>${plural(stepsDue.length, 'step')} ready for your next move`)}
       </div>
 
+      <!-- Two independent columns on desktop so cards stack without row gaps; phones show one column in reading order. -->
       <div class="ov-grid">
-        <div class="card">
-          <div class="section-head"><div><h2 style="margin:0">Pipeline overview</h2><div class="small muted">A clear view of your next opportunities.</div></div><a class="small link-arrow" href="#accounts">View accounts →</a></div>
-          <div class="pipe-total">${money(openPipeline)} <span class="small muted"><i class="dot"></i>Open prospect pipeline</span></div>
-          <div class="viz-root pipe-chart">
-            <div class="viz-plot" role="img" aria-label="Prospects by stage">
-              <div class="viz-cols" style="grid-template-columns:repeat(${byStage.length},1fr);inset:0">
-                ${byStage.map((x, i) => `
-                  <div class="viz-col" tabindex="0" data-tip="${esc(`${x.s}|${plural(x.n, 'account')}|${money(x.v)}`)}">
-                    <div class="viz-stack" style="height:${Math.max(3, (x.n / maxN) * 100)}%">
-                      <span class="viz-total">${x.n}</span>
-                      <div class="viz-seg" style="flex:1;background:${x.n ? ramp[i] : 'var(--border)'};border-radius:4px 4px 0 0"></div>
-                    </div>
-                    <div class="viz-x" title="${esc(x.s)}">${esc(stageShort(x.s))}</div>
-                  </div>`).join('')}
+        <div class="ov-col">
+          <div class="card ov-o1" data-ov="pipeline">
+            <div class="section-head"><div><h2 style="margin:0">Pipeline overview</h2><div class="small muted">A clear view of your next opportunities.</div></div><a class="small link-arrow" href="#accounts">View accounts →</a></div>
+            <div class="pipe-total">${money(openPipeline)} <span class="small muted"><i class="dot"></i>Open prospect pipeline</span></div>
+            <div class="viz-root pipe-chart">
+              <div class="viz-plot" role="img" aria-label="Prospects by stage">
+                <div class="viz-cols" style="grid-template-columns:repeat(${byStage.length},1fr);inset:0">
+                  ${byStage.map((x, i) => `
+                    <div class="viz-col" tabindex="0" data-tip="${esc(`${x.s}|${plural(x.n, 'account')}|${money(x.v)}`)}">
+                      <div class="viz-stack" style="height:${Math.max(3, (x.n / maxN) * 100)}%">
+                        <span class="viz-total">${x.n}</span>
+                        <div class="viz-seg" style="flex:1;background:${x.n ? ramp[i] : 'var(--border)'};border-radius:4px 4px 0 0"></div>
+                      </div>
+                      <div class="viz-x" title="${esc(x.s)}">${esc(stageShort(x.s))}</div>
+                    </div>`).join('')}
+                </div>
+              </div>
+              <div class="viz-tip" hidden></div>
+            </div>
+            <div class="row spread small muted pipe-foot"><span><i class="dot"></i>${plural(openProspects.length, 'prospect')} in your pipeline</span><span>Every conversation counts.</span></div>
+          </div>
+          <div class="card ov-o3" data-ov="attention">
+            <div class="section-head"><h2 style="margin:0">Needs a little attention ${overdue.length + dueToday.length ? `<span class="count-badge">${overdue.length + dueToday.length}</span>` : ''}</h2><span class="eyebrow" style="margin:0">Your next moves</span></div>
+            ${itemList([...overdue, ...dueToday], 'Nothing overdue or due today. Nicely done.')}
+          </div>
+          <div class="card ov-o6" data-ov="coming">
+            <div class="section-head"><div><h2 style="margin:0">Coming up next</h2><div class="small muted">On the horizon in the next 14 days.</div></div><span class="kpi-icon sage">${icon(ICONS.calendar)}</span></div>
+            ${itemList(upcoming, 'Nothing scheduled in the next two weeks.')}
+          </div>
+        </div>
+        <div class="ov-col">
+          <div class="card ov-o2" data-ov="momentum">
+            <div class="section-head"><div><h2 style="margin:0">Your daily momentum</h2><div class="small muted">Small actions add up to big things.</div></div><span class="kpi-icon sage">${icon(ICONS.spark)}</span></div>
+            <div class="momentum">
+              <svg class="ring" viewBox="0 0 80 80" aria-hidden="true">
+                <circle cx="40" cy="40" r="34" fill="none" stroke="var(--surface-2)" stroke-width="7"/>
+                <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round"
+                  stroke-dasharray="${(2 * Math.PI * 34 * pct) / 100} 999" transform="rotate(-90 40 40)"/>
+                <text x="40" y="40" text-anchor="middle" dominant-baseline="central" class="ring-text">${pct}%</text>
+              </svg>
+              <div>
+                <div class="kpi-value" style="font-size:1.4rem">${planDone} <span class="muted" style="font-size:1rem">/ ${planTotal}</span></div>
+                <div class="small muted">activities completed</div>
+                <div class="small" style="color:var(--accent);margin-top:.2rem">${planDone ? 'Keep it going ✦' : 'A good day starts with a plan ✦'}</div>
               </div>
             </div>
-            <div class="viz-tip" hidden></div>
+            <div class="mom-bars">${PLAN_SECTIONS.map((sec) => {
+              const st = planStats(todaysPlan, sec.key);
+              return `<div class="mom-bar"><div class="row spread small"><span class="muted">${PLAN_SHORT[sec.key]}</span><b>${st.done} / ${st.target}</b></div><div class="progress"><div style="width:${Math.round((st.done / st.target) * 100)}%"></div></div></div>`;
+            }).join('')}</div>
+            <a class="row spread link-arrow mom-link" href="#planner/${t}"><span>Open daily planner</span><span>→</span></a>
           </div>
-          <div class="row spread small muted pipe-foot"><span><i class="dot"></i>${plural(openProspects.length, 'prospect')} in your pipeline</span><span>Every conversation counts.</span></div>
-        </div>
-
-        <div class="card">
-          <div class="section-head"><div><h2 style="margin:0">Your daily momentum</h2><div class="small muted">Small actions add up to big things.</div></div><span class="kpi-icon sage">${icon(ICONS.spark)}</span></div>
-          <div class="momentum">
-            <svg class="ring" viewBox="0 0 80 80" aria-hidden="true">
-              <circle cx="40" cy="40" r="34" fill="none" stroke="var(--surface-2)" stroke-width="7"/>
-              <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round"
-                stroke-dasharray="${(2 * Math.PI * 34 * pct) / 100} 999" transform="rotate(-90 40 40)"/>
-              <text x="40" y="40" text-anchor="middle" dominant-baseline="central" class="ring-text">${pct}%</text>
-            </svg>
-            <div>
-              <div class="kpi-value" style="font-size:1.4rem">${planDone} <span class="muted" style="font-size:1rem">/ ${planTotal}</span></div>
-              <div class="small muted">activities completed</div>
-              <div class="small" style="color:var(--accent);margin-top:.2rem">${planDone ? 'Keep it going ✦' : 'A good day starts with a plan ✦'}</div>
-            </div>
+          <div class="card ov-o4" data-ov="stay">
+            <div class="section-head"><div><h2 style="margin:0">Stay in touch ${sitDue.length ? `<span class="count-badge">${sitDue.length}</span>` : ''}</h2><div class="small muted">The people you want to hear from regularly.</div></div><a class="small link-arrow" href="#contacts/stay">All →</a></div>
+            ${sitSoon.length ? stayRowsHtml(sitSoon)
+              : sitAll.length ? `<div class="empty-soft">No one is due this week.<br>Next up: ${esc(sitAll[0].c.name)}, ${esc(stayWhen(sitAll[0].next).toLowerCase())}.</div>`
+              : '<div class="empty-soft">Set a stay-in-touch reminder on your key contacts<br>(weekly, monthly, quarterly…) and they show up here when it\'s time.<br><a href="#contacts">Go to contacts →</a></div>'}
           </div>
-          <div class="mom-bars">${PLAN_SECTIONS.map((sec) => {
-            const st = planStats(todaysPlan, sec.key);
-            return `<div class="mom-bar"><div class="row spread small"><span class="muted">${PLAN_SHORT[sec.key]}</span><b>${st.done} / ${st.target}</b></div><div class="progress"><div style="width:${Math.round((st.done / st.target) * 100)}%"></div></div></div>`;
-          }).join('')}</div>
-          <a class="row spread link-arrow mom-link" href="#planner/${t}"><span>Open daily planner</span><span>→</span></a>
-        </div>
-
-        <div class="card">
-          <div class="section-head"><h2 style="margin:0">Needs a little attention ${overdue.length + dueToday.length ? `<span class="count-badge">${overdue.length + dueToday.length}</span>` : ''}</h2><span class="eyebrow" style="margin:0">Your next moves</span></div>
-          ${itemList([...overdue, ...dueToday], 'Nothing overdue or due today. Nicely done.')}
-        </div>
-
-        <div class="card">
-          <div class="section-head"><div><h2 style="margin:0">Stay in touch ${sitDue.length ? `<span class="count-badge">${sitDue.length}</span>` : ''}</h2><div class="small muted">The people you want to hear from regularly.</div></div><a class="small link-arrow" href="#contacts/stay">All →</a></div>
-          ${sitSoon.length ? stayRowsHtml(sitSoon)
-            : sitAll.length ? `<div class="empty-soft">No one is due this week.<br>Next up: ${esc(sitAll[0].c.name)}, ${esc(stayWhen(sitAll[0].next).toLowerCase())}.</div>`
-            : '<div class="empty-soft">Set a stay-in-touch reminder on your key contacts<br>(weekly, monthly, quarterly…) and they show up here when it\'s time.<br><a href="#contacts">Go to contacts →</a></div>'}
-        </div>
-
-        <div class="card">
-          <div class="section-head"><h2 style="margin:0">Recent activity</h2><span class="kpi-icon sage">${icon(ICONS.pulse)}</span></div>
-          ${recent.length ? `<ul class="feed">${recent.map((r) => `
-            <li>
-              <span class="feed-ic">${icon(r.kind === 'Call' ? ICONS.pulse : r.kind === 'Visit' ? ICONS.accounts : ICONS.send)}</span>
-              <div class="grow">
-                <div class="title">${esc(r.summary)}</div>
-                <div class="small muted"><a href="#account/${r.account.id}">${esc(r.account.name)}</a> · ${esc(r.kind)}</div>
-              </div>
-              <span class="small muted nowrap">${esc(relDays(r.date))}</span>
-            </li>`).join('')}</ul>` : '<div class="empty">No activity logged yet.</div>'}
-        </div>
-
-        <div class="card">
-          <div class="section-head"><div><h2 style="margin:0">Coming up next</h2><div class="small muted">On the horizon in the next 14 days.</div></div><span class="kpi-icon sage">${icon(ICONS.calendar)}</span></div>
-          ${itemList(upcoming, 'Nothing scheduled in the next two weeks.')}
-        </div>
-
-        <div class="card ov-wide">
-          <div class="section-head"><div><h2 style="margin:0">Keep the conversation going</h2><div class="small muted">Active accounts without a follow-up.</div></div><span class="kpi-icon lavender">${icon(ICONS.send)}</span></div>
-          ${quiet.length ? `<ul class="list">${quiet.map((a) => `
-            <li>
-              <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span>
-              <div class="grow"><a class="title" href="#account/${a.id}">${esc(a.name)}</a>
-                <div class="small muted">${esc(a.stage)} · last touch ${lastTouchDate(a) ? relDays(lastTouchDate(a)) : 'never'}</div></div>
-              <button class="btn sm ghost" data-act="log" data-id="${a.id}">Log / schedule</button>
-            </li>`).join('')}</ul>` : '<div class="empty-soft">Every active account has a next step.<br>That\'s a good place to be.</div>'}
+          <div class="card ov-o5" data-ov="recent">
+            <div class="section-head"><h2 style="margin:0">Recent activity</h2><span class="kpi-icon sage">${icon(ICONS.pulse)}</span></div>
+            ${recent.length ? `<ul class="feed">${recent.map((r) => `
+              <li>
+                <span class="feed-ic">${icon(r.kind === 'Call' ? ICONS.pulse : r.kind === 'Visit' ? ICONS.accounts : ICONS.send)}</span>
+                <div class="grow">
+                  <div class="title">${esc(r.summary)}</div>
+                  <div class="small muted"><a href="#account/${r.account.id}">${esc(r.account.name)}</a> · ${esc(r.kind)}</div>
+                </div>
+                <span class="small muted nowrap">${esc(relDays(r.date))}</span>
+              </li>`).join('')}</ul>` : '<div class="empty">No activity logged yet.</div>'}
+          </div>
+          <div class="card ov-o7" data-ov="keep">
+            <div class="section-head"><div><h2 style="margin:0">Keep the conversation going</h2><div class="small muted">Active accounts without a follow-up.</div></div><span class="kpi-icon lavender">${icon(ICONS.send)}</span></div>
+            ${quiet.length ? `<ul class="list">${quiet.map((a) => `
+              <li>
+                <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span>
+                <div class="grow"><a class="title" href="#account/${a.id}">${esc(a.name)}</a>
+                  <div class="small muted">${esc(a.stage)} · last touch ${lastTouchDate(a) ? relDays(lastTouchDate(a)) : 'never'}</div></div>
+                <button class="btn sm ghost" data-act="log" data-id="${a.id}">Log / schedule</button>
+              </li>`).join('')}</ul>` : '<div class="empty-soft">Every active account has a next step.<br>That\'s a good place to be.</div>'}
+          </div>
+      
         </div>
       </div>
       <footer class="ov-foot small muted"><span>Made for meaningful connections.</span><span>mini crm ✦ A little more organized.</span></footer>`;

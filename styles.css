@@ -1268,3 +1268,15 @@ input, select, textarea { border-radius: 10px; }
 .tag-chip::before { content: "+ "; }
 .tag-chip.on { border-style: solid; border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .tag-chip.on::before { content: "✓ "; }
+
+/* ----- Overview: two stacked columns (desktop), one ordered column (phones) ----- */
+.ov-col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.ov-col > .card { padding: 1.15rem 1.25rem; margin: 0; }
+@media (max-width: 1100px) {
+  .ov-grid { display: flex; flex-direction: column; gap: 1rem; }
+  .ov-col { display: contents; }
+  .ov-o1 { order: 1; } .ov-o2 { order: 2; } .ov-o3 { order: 3; } .ov-o4 { order: 4; }
+  .ov-o5 { order: 5; } .ov-o6 { order: 6; } .ov-o7 { order: 7; }
+}
+.ov-col .empty-soft { padding: 1.1rem 1rem; }
+@media (min-width: 701px) { .sit-when { width: 112px; } }
