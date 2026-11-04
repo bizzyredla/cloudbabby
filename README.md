@@ -18,6 +18,16 @@ No install, no build step: open `index.html` in a browser.
   - Open pipeline counts prospects in S1–S5 only. Older stage names convert automatically
     (e.g. Proposal → S4, Won → Closed Won, Active → Producing, At Risk → Dormant)
   - Spreadsheet imports accept the full name, just "S3", the words after the dash, or an old name
+- **Partner details** (shown when Type is Partner):
+  - **Partner type:** Benefits Broker, P&C Broker, CPA / Accountant, Attorney, Banker / Lender,
+    HR Consultant, Payroll / HR Technology, Business Consultant, Private Equity, Association / Franchise.
+    Shown on the table, cards and account page; filter Accounts by it
+  - **Last touch date:** the latest logged activity, or a date you type for touches made outside the app
+  - **Last referral date:** type it, or it updates when you link an account to the partner
+    ("Referred by partner"). A Producing partner with no referral in 6+ months is flagged "Dormant?"
+  - **Ready-made tags:** tap to add EB-Small-Target / -Engaged / -Active, EB-Large-Target / -Engaged /
+    -Active, AgcyProd-EB-Cold / -Warm / -Active. Lists can filter on them before they're in use
+  - All three are in CSV export and import ("Partner type", "Last touch", "Last referral")
 - **Multiple contacts** per account: name, title, email, phone, role in the deal (decision maker,
   champion, HR…), notes, and one marked primary. Activities can be logged against a contact
 - **Current vendors**: pick from a dropdown of the top 20 TriNet competitors (ADP TotalSource,

@@ -1257,3 +1257,14 @@ input, select, textarea { border-radius: 10px; }
 .cad-more[open] summary { margin-bottom: .35rem; }
 .cad-more[open] summary::after { content: " ▴"; }
 .cad-more:not([open]) summary::after { content: " ▾"; }
+
+/* ----- Partner tags (account form) ----- */
+.tag-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem; }
+.tag-chips[hidden] { display: none; }
+.tag-chip {
+  border: 1px dashed var(--border); background: var(--surface); color: var(--muted); font: inherit; font-size: .74rem;
+  padding: .15rem .5rem; border-radius: 999px; cursor: pointer;
+}
+.tag-chip::before { content: "+ "; }
+.tag-chip.on { border-style: solid; border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.tag-chip.on::before { content: "✓ "; }
