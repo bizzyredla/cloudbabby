@@ -58,6 +58,16 @@ No install, no build step: open `index.html` in a browser.
   follow-up, name, last update or value
 
 **Cadences** (sequences)
+- **Sessions (power-dialer style, no telephony needed):** ▶ Start session on the Cadences page, a
+  cadence ("Work this cadence") or the planner. Choose Calls, Emails, LinkedIn or all step types,
+  one cadence or all, and a step number; it shows how many are due. The queue runs account by
+  account (everyone at a company back to back, most overdue first). Each card has the contact,
+  tap-to-call buttons (direct, mobile, main line), the talk track with merge fields filled in, the
+  account's notes, vendors, last touch and recent activity, and who's up next. Tap an outcome (or
+  press 1–5) to log it, advance the cadence, count it on the daily plan and load the next person.
+  Replied finishes as replied, Wrong number as bad data; ★ Meeting booked finishes the cadence.
+  Skip for now (S) leaves it due; Snooze (N) moves it to the next workday. A progress bar shows
+  "7 of 22", the place is kept if the app reloads after a call, and a summary shows at the end
 - Multiple cadences, e.g. Insperity Renewal, ADP TotalSource Nurture, New Prospect Intro. Starter
   templates are included and every step is editable
 - Steps have a day, type (Email, Call, LinkedIn, Visit, Text, Task), name, email subject and

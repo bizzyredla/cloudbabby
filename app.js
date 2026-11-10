@@ -686,8 +686,8 @@
   }
 
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts };
-  const TAB_FOR = { account: 'accounts', report: 'dashboard' };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession };
+  const TAB_FOR = { account: 'accounts', report: 'dashboard', session: 'cadences' };
 
   function route() {
     let [name, arg] = location.hash.replace('#', '').split('/');
@@ -724,7 +724,7 @@
     }
   }
   const rerender = () => route();
-  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude' };
+  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', session: 'Session', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude' };
   /** Breadcrumb and sidebar counts. */
   function updateChrome(view) {
     $('#crumb-page').textContent = CRUMBS[view] || 'Overview';
@@ -952,6 +952,7 @@
     state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = []; state.flows = [];
     ui.listId = null;
     research = { target: '', hint: '', list: '', flows: ['hq', 'dm', 'hr'], custom: '', pasted: '' }; saveResearch();
+    session = null; saveSession();
     save(); toast('All data erased'); go('dashboard');
   }
 
@@ -1467,7 +1468,7 @@
           </div>
 
           <div class="card">
-            <div class="row spread"><h3 style="margin:0">Cadence steps due ${dueSteps(d).length ? `<span class="count-badge">${dueSteps(d).length}</span>` : ''}</h3><a class="small" href="#cadences">Cadences →</a></div>
+            <div class="row spread"><h3 style="margin:0">Cadence steps due ${dueSteps(d).length ? `<span class="count-badge">${dueSteps(d).length}</span>` : ''}</h3>${d === today() && dueSteps(d).length ? '<button class="btn sm" data-act="session-setup">▶ Start session</button>' : '<a class="small" href="#cadences">Cadences →</a>'}</div>
             ${(() => {
               // Grouped by cadence: a count per cadence, the first few people, the rest one click away.
               const steps = dueSteps(d);
@@ -2089,7 +2090,10 @@
     $('#view').innerHTML = `
       <div class="page-head">
         <h1>Cadences</h1>
-        <button class="btn ghost" data-act="cad-new">+ New cadence</button>
+        <div class="row">
+          ${session && session.idx < session.queue.length ? `<a class="btn" href="#session">▶ Resume session · ${Math.min(session.idx + 1, session.queue.length)} of ${session.queue.length}</a>` : `<button class="btn" data-act="session-setup">▶ Start session${dueSteps(today()).length ? ` · ${dueSteps(today()).length} due` : ''}</button>`}
+          <button class="btn ghost" data-act="cad-new">+ New cadence</button>
+        </div>
       </div>
       <div class="cad-switch">
         ${state.cadences.map((c) => {
@@ -2110,7 +2114,8 @@
             <div class="small muted" style="margin-top:.35rem">${plural(cad.steps.length, 'step')} · ${plural(cadenceDays(cad), 'day')}${cad.skipWeekends ? ' · skips weekends' : ''}</div>
           </div>
           <div class="row">
-            <button class="btn" data-act="cad-add-people">+ Add people</button>
+            ${due.length ? `<button class="btn" data-act="session-setup" data-cad="${cad.id}">▶ Work this cadence</button>` : ''}
+            <button class="btn ${due.length ? 'ghost' : ''}" data-act="cad-add-people">+ Add people</button>
             <button class="btn ghost" data-act="cad-edit">Edit steps</button>
             <button class="btn danger sm" data-act="cad-delete">Delete</button>
           </div>
@@ -2299,17 +2304,6 @@
     const type = stepType(step);
     const subject = fillTemplate(step.subject, p);
     const body = fillTemplate(step.body, p);
-    const liUrl = contact.linkedin
-      ? (/^https?:/.test(contact.linkedin) ? contact.linkedin : 'https://' + contact.linkedin)
-      : `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${contact.name} ${acct.name}`)}`;
-    const actions = {
-      email: contact.email ? `<a class="btn" href="mailto:${esc(contact.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}">✉ Open in Mail</a>` : '<span class="small muted">No email on file for this contact.</span>',
-      call: [contact.phone && `<a class="btn" href="tel:${esc(contact.phone)}">☎ Call ${esc(contact.phone)}</a>`, contact.mobile && `<a class="btn ghost" href="tel:${esc(contact.mobile)}">📱 Mobile</a>`].filter(Boolean).join(' ') || '<span class="small muted">No phone on file.</span>',
-      linkedin: `<a class="btn" href="${esc(liUrl)}" target="_blank" rel="noopener">in Open LinkedIn</a>`,
-      visit: `<a class="btn" href="https://maps.apple.com/?q=${encodeURIComponent([acct.name, acct.location].filter(Boolean).join(' '))}" target="_blank" rel="noopener">⌂ Directions</a>`,
-      text: contact.mobile ? `<a class="btn" href="sms:${esc(contact.mobile)}&body=${encodeURIComponent(body)}">✆ Text ${esc(contact.mobile)}</a>` : '<span class="small muted">No mobile number on file.</span>',
-      task: '',
-    };
     openModal(`${type.label}: ${step.title || type.label}`, `
       <div class="enr-head">
         ${stepIcon(step, 'lg')}
@@ -2318,7 +2312,7 @@
           <div class="small muted">${esc(cad.name)} · Step ${e.step + 1} of ${cad.steps.length} · Day ${step.day}${e.dueDate < today() ? ` · <span class="pill overdue">due ${esc(relDays(e.dueDate))}</span>` : ''}</div>
         </div>
       </div>
-      <div class="row">${actions[step.type] || ''}</div>
+      <div class="row">${stepActions(p, subject, body)}</div>
       ${subject || body ? `
         <div class="script">
           ${subject ? `<div class="small"><span class="muted">Subject:</span> <strong>${esc(subject)}</strong></div>` : ''}
@@ -2331,15 +2325,7 @@
         ${field('Date', `<input name="date" type="date" value="${today()}">`)}
         ${field('Notes', '<textarea name="note" rows="2" placeholder="What happened, next steps…"></textarea>', 'span-3')}
       </div>`, (data) => {
-      const actId = uid();
-      acct.activities.push({
-        id: actId, date: data.date, kind: type.kind, contactId: contact.id, createdAt: new Date().toISOString(),
-        summary: `${cad.name} · ${step.title || type.label}: ${data.outcome}`, notes: data.note,
-      });
-      e.history.push({ stepId: step.id, date: data.date, outcome: data.outcome, note: data.note, activityId: actId });
-      if (type.plan) addPlanTouch(data.date, type.plan, { name: acct.name, kind: type.kind, note: `${cad.name}: ${step.title || type.label}`, done: true, activityId: actId });
-      if (data.then === 'continue') advance(p, data.date); else finishEnrollment(e, data.then, data.date);
-      touch(acct);
+      completeStep(p, { outcome: data.outcome, then: data.then, date: data.date, note: data.note });
       toast(e.status === 'finished' ? `${contact.name}: ${FINISH_LABELS[e.outcome]}` : `Logged · next: ${fmtDate(e.dueDate, { month: 'short', day: 'numeric' })}`);
     }, 'Complete step', { wide: true });
     const copy = $('#copy-script');
@@ -2524,6 +2510,252 @@
   /** Cadence steps due on day d (on today's page, overdue ones too), across all cadences. */
   const dueSteps = (d) => liveEnrollments().filter((p) => p.e.status === 'active' && (p.e.dueDate === d || (d === today() && p.e.dueDate < d)))
     .sort((a, b) => a.e.dueDate.localeCompare(b.e.dueDate));
+
+  // ---------- step sessions (power dialer style) ----------
+  // A session is a queue of due cadence steps worked one after another: call, pick an outcome,
+  // and the next person loads. It survives an app reload (iPhone can reload the app after a call).
+  const SESSION_KEY = 'minicrm.session';
+  const SESSION_TYPES = { call: 'Calls', email: 'Emails', linkedin: 'LinkedIn', all: 'All step types' };
+  let session = null;
+  try { session = JSON.parse(localStorage.getItem(SESSION_KEY)) || null; } catch (e) { session = null; }
+  const saveSession = () => {
+    try { if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session)); else localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
+  };
+
+  /** Due steps (today and overdue) matching a session filter, grouped account by account. */
+  function sessionCandidates(f) {
+    const t = today();
+    const list = dueSteps(t).filter((p) => (f.type === 'all' || p.step.type === f.type)
+      && (f.cadenceId === 'all' || p.cad.id === f.cadenceId)
+      && (!f.stepNo || p.e.step + 1 === Number(f.stepNo)));
+    // Accounts with the most overdue step first; everyone at that account back to back.
+    const firstDue = new Map();
+    for (const p of list) if (!firstDue.has(p.acct.id) || p.e.dueDate < firstDue.get(p.acct.id)) firstDue.set(p.acct.id, p.e.dueDate);
+    return list.sort((a, b) => firstDue.get(a.acct.id).localeCompare(firstDue.get(b.acct.id)) || a.acct.name.localeCompare(b.acct.name)
+      || a.e.dueDate.localeCompare(b.e.dueDate) || (b.contact.primary ? 1 : 0) - (a.contact.primary ? 1 : 0));
+  }
+
+  /** Pick what to work: step type, cadence and step number, with a live count. */
+  function sessionSetupForm(preset = {}) {
+    const f = { type: 'call', cadenceId: 'all', stepNo: '', ...preset };
+    const maxSteps = Math.max(1, ...state.cadences.map((c) => c.steps.length));
+    openModal('Start a session', `
+      <p class="small muted" style="margin:0">Work through due cadence steps one after another, account by account. Pick an outcome and the next person loads.</p>
+      <div class="grid-3">
+        ${field('Steps', `<select name="type" id="ss-type">${Object.entries(SESSION_TYPES).map(([k, l]) => opt(k, l, f.type)).join('')}</select>`)}
+        ${field('Cadence', `<select name="cadenceId" id="ss-cad"><option value="all">All cadences</option>${state.cadences.map((c) => opt(c.id, c.name, f.cadenceId)).join('')}</select>`)}
+        ${field('Step number', `<select name="stepNo" id="ss-step"><option value="">Any step</option>${Array.from({ length: maxSteps }, (_, i) => opt(String(i + 1), `Step ${i + 1}`, String(f.stepNo))).join('')}</select>`)}
+      </div>
+      <div class="ss-count" id="ss-count"></div>`, (data) => {
+      const filt = { type: data.type, cadenceId: data.cadenceId, stepNo: data.stepNo };
+      const list = sessionCandidates(filt);
+      if (!list.length) { toast('Nothing due for that choice'); return false; }
+      session = { filter: filt, queue: list.map((p) => p.e.id), idx: 0, results: [], startedAt: new Date().toISOString() };
+      saveSession();
+      setTimeout(() => go('session'), 0);
+    }, 'Start');
+    const count = () => {
+      const filt = { type: $('#ss-type').value, cadenceId: $('#ss-cad').value, stepNo: $('#ss-step').value };
+      const list = sessionCandidates(filt);
+      const accts = new Set(list.map((p) => p.acct.id)).size;
+      const late = list.filter((p) => p.e.dueDate < today()).length;
+      $('#ss-count').innerHTML = list.length
+        ? `<b>${plural(list.length, 'step')}</b> due across ${plural(accts, 'account')}${late ? ` · <span class="pill overdue">${late} overdue</span>` : ''}`
+        : '<span class="muted">Nothing due for this choice.</span>';
+      $('.modal-actions [type=submit]', modalForm).disabled = !list.length;
+    };
+    ['#ss-type', '#ss-cad', '#ss-step'].forEach((s) => $(s).addEventListener('change', count));
+    count();
+  }
+
+  /** Buttons that start the touch itself: call, email, LinkedIn, text, directions. */
+  function stepActions(p, subject, body) {
+    const { acct, contact, step } = p;
+    const liUrl = contact.linkedin ? extUrl(contact.linkedin)
+      : `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${contact.name} ${acct.name}`)}`;
+    const phones = [[contact.phone, 'Direct'], [contact.mobile, 'Mobile'], [acct.mainPhone, 'Main line']].filter(([n]) => n);
+    return {
+      call: phones.length ? phones.map(([n, l], i) => `<a class="btn ${i ? 'ghost' : ''} call-btn" href="tel:${esc(n)}">☎ ${esc(l)} · ${esc(n)}</a>`).join(' ') : '<span class="small muted">No phone on file. Add one on the contact.</span>',
+      email: contact.email ? `<a class="btn" href="mailto:${esc(contact.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}">✉ Open in Mail</a>` : '<span class="small muted">No email on file for this contact.</span>',
+      linkedin: `<a class="btn" href="${esc(liUrl)}" target="_blank" rel="noopener">in Open LinkedIn</a>`,
+      visit: `<a class="btn" href="https://maps.apple.com/?q=${encodeURIComponent([acct.name, acct.address, acct.location].filter(Boolean).join(' '))}" target="_blank" rel="noopener">⌂ Directions</a>`,
+      text: contact.mobile ? `<a class="btn" href="sms:${esc(contact.mobile)}&body=${encodeURIComponent(body)}">✆ Text ${esc(contact.mobile)}</a>` : '<span class="small muted">No mobile number on file.</span>',
+      task: '',
+    }[step.type] || '';
+  }
+
+  /** Record a completed step: account history, cadence history, planner count, then advance or finish. */
+  function completeStep(p, { outcome, then = 'continue', date = today(), note = '' }) {
+    const { e, cad, acct, contact, step } = p;
+    const type = stepType(step);
+    const actId = uid();
+    acct.activities.push({
+      id: actId, date, kind: type.kind, contactId: contact.id, createdAt: new Date().toISOString(),
+      summary: `${cad.name} · ${step.title || type.label}: ${outcome}`, notes: note,
+    });
+    e.history.push({ stepId: step.id, date, outcome, note, activityId: actId });
+    if (type.plan) addPlanTouch(date, type.plan, { name: acct.name, kind: type.kind, note: `${cad.name}: ${step.title || type.label}`, done: true, activityId: actId });
+    if (then === 'continue') advance(p, date); else finishEnrollment(e, then, date);
+    touch(acct);
+  }
+
+  /** What an outcome usually means for the cadence (the person can change it before tapping). */
+  const outcomeThen = (o) => (/replied/i.test(o) ? 'replied' : /wrong number|bounced/i.test(o) ? 'bad' : 'continue');
+
+  function renderSession() {
+    if (!session) {
+      $('#view').innerHTML = `
+        <div class="page-head"><h1>Sessions</h1></div>
+        <div class="card empty-soft">No session running.<br><button class="btn" data-act="session-setup" style="margin-top:.75rem">▶ Start a session</button></div>`;
+      return;
+    }
+    const t = today();
+    // Skip queue entries that were done or changed elsewhere.
+    const current = () => {
+      while (session.idx < session.queue.length) {
+        const p = enrollmentParts(state.enrollments.find((x) => x.id === session.queue[session.idx]) || {});
+        if (p && p.e.status === 'active' && p.e.dueDate <= t && !session.results.some((r) => r.eid === p.e.id)) return p;
+        session.idx++;
+      }
+      return null;
+    };
+    const p = current();
+    saveSession();
+    const total = session.queue.length;
+    const doneN = session.results.length;
+    const label = SESSION_TYPES[session.filter.type] === 'All step types' ? 'Step' : SESSION_TYPES[session.filter.type].replace(/s$/, '');
+    const cadName = session.filter.cadenceId === 'all' ? 'All cadences' : (cadenceById(session.filter.cadenceId) || {}).name || 'Cadence';
+    const head = `
+      <div class="ss-head">
+        <div>
+          <div class="eyebrow" style="margin:0">${esc(label)} session · ${esc(cadName)}${session.filter.stepNo ? ` · Step ${esc(session.filter.stepNo)}` : ''}</div>
+          <h1 style="margin:.15rem 0 0">${p ? `${Math.min(session.idx + 1, total)} of ${total}` : 'Session complete'}</h1>
+        </div>
+        <div class="row">
+          ${p ? '<button class="btn ghost" data-act="session-end">End session</button>' : ''}
+        </div>
+      </div>
+      <div class="progress ss-progress"><div style="width:${total ? Math.round(((p ? session.idx : total) / total) * 100) : 0}%"></div></div>`;
+
+    if (!p) {
+      const by = (k) => session.results.filter((r) => r.kind === k).length;
+      const outcomes = {};
+      session.results.filter((r) => r.kind === 'done').forEach((r) => { outcomes[r.outcome] = (outcomes[r.outcome] || 0) + 1; });
+      $('#view').innerHTML = `${head}
+        <div class="card ss-summary">
+          <h2 style="margin-top:0">Nice work.</h2>
+          <div class="cad-stats">
+            <div class="good"><b>${by('done')}</b><span>Logged</span></div>
+            <div><b>${by('skip')}</b><span>Skipped</span></div>
+            <div><b>${by('snooze')}</b><span>Snoozed</span></div>
+          </div>
+          ${Object.keys(outcomes).length ? `<div class="row" style="margin-top:.75rem">${Object.entries(outcomes).map(([o, n]) => `<span class="pill">${esc(o)} · ${n}</span>`).join('')}</div>` : ''}
+          <div class="row" style="margin-top:1rem">
+            <button class="btn" data-act="session-setup">▶ Start another session</button>
+            <button class="btn ghost" data-act="session-close">Back to cadences</button>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const { e, cad, acct, contact, step } = p;
+    const type = stepType(step);
+    const subject = fillTemplate(step.subject, p);
+    const body = fillTemplate(step.body, p);
+    const last = lastTouch(p);
+    const others = session.queue.slice(session.idx + 1).map((id) => enrollmentParts(state.enrollments.find((x) => x.id === id) || {}))
+      .filter((x) => x && x.acct.id === acct.id);
+    const recent = [...acct.activities].filter((h) => h.kind !== 'Note').sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
+    const upNext = session.queue.slice(session.idx + 1).map((id) => enrollmentParts(state.enrollments.find((x) => x.id === id) || {})).filter(Boolean).slice(0, 4);
+
+    $('#view').innerHTML = `${head}
+      <div class="ss-grid">
+        <div class="card ss-main" style="--c:${cad.color}">
+          <div class="ss-person">
+            <span class="avatar lg" style="--c:${cad.color}">${esc(initials(contact.name))}</span>
+            <div class="grow">
+              <h2 style="margin:0">${esc(contact.name)}</h2>
+              <div class="muted">${esc([contact.title, contact.role].filter(Boolean).join(' · '))}${contact.title || contact.role ? ' · ' : ''}<a href="#account/${acct.id}">${esc(acct.name)}</a></div>
+              <div class="small muted" style="margin-top:.2rem">${stepIcon(step)} ${esc(cad.name)} · Step ${e.step + 1} of ${cad.steps.length}: ${esc(step.title || type.label)}${e.dueDate < t ? ` · <span class="pill overdue">due ${esc(relDays(e.dueDate))}</span>` : ''}</div>
+            </div>
+          </div>
+          <div class="row ss-actions">${stepActions(p, subject, body)}</div>
+          ${contact.email && step.type !== 'email' ? `<div class="small muted">✉ <a href="mailto:${esc(contact.email)}">${esc(contact.email)}</a>${contact.timezone ? ` · 🕑 ${esc(contact.timezone)}` : ''}</div>` : contact.timezone ? `<div class="small muted">🕑 ${esc(contact.timezone)}</div>` : ''}
+          ${subject || body ? `
+            <details class="script ss-script" ${body ? 'open' : ''}>
+              <summary class="small"><strong>${step.type === 'call' ? 'Talk track' : 'Script'}</strong>${subject ? ` <span class="muted">· ${esc(subject)}</span>` : ''}</summary>
+              ${body ? `<div class="script-body">${esc(body)}</div>` : ''}
+            </details>` : ''}
+          <div class="ss-log">
+            <label class="field"><span>Notes (optional)</span><textarea id="ss-note" rows="2" placeholder="What happened, next steps…"></textarea></label>
+            <label class="field ss-then"><span>Then</span><select id="ss-then">${Object.entries(EXIT_OUTCOMES).map(([k, l]) => opt(k, l, 'continue')).join('')}</select></label>
+          </div>
+          <div class="ss-outcomes">
+            ${type.outcomes.map((o, i) => `<button type="button" class="btn ss-outcome" data-act="session-log" data-outcome="${esc(o)}"><kbd>${i + 1}</kbd>${esc(o)}</button>`).join('')}
+          </div>
+          <div class="row ss-secondary">
+            <button type="button" class="btn ghost sm" data-act="session-meeting">★ Meeting booked</button>
+            <button type="button" class="btn ghost sm" data-act="session-skip" title="Leave it due and move on (S)">Skip for now</button>
+            <button type="button" class="btn ghost sm" data-act="session-snooze" title="Move this step to the next workday (N)">Snooze to ${esc(fmtDate(cad.skipWeekends ? nextWorkday(addDays(t, 1)) : addDays(t, 1), { weekday: 'short' }))}</button>
+            <a class="btn ghost sm" href="#account/${acct.id}">Open account</a>
+          </div>
+        </div>
+
+        <div class="stack ss-side">
+          <div class="card">
+            <div class="row spread"><h3 style="margin:0">${esc(acct.name)}</h3><span class="pill ${acct.type}">${acct.type === 'partner' ? 'Partner' : 'Prospect'}</span></div>
+            <div class="small muted">${esc(acct.stage)}${acct.location ? ' · ' + esc(acct.location) : ''}${acct.employees ? ' · ' + esc(acct.employees) + ' employees' : ''}</div>
+            ${acct.vendors.length ? `<div style="margin-top:.4rem">${vendorPills(acct)}${acct.vendorRenewal ? ` <span class="small muted">renews ${esc(fmtDate(acct.vendorRenewal, { month: 'short', day: 'numeric', year: 'numeric' }))}</span>` : ''}</div>` : ''}
+            <div class="small" style="margin-top:.5rem"><span class="muted">Last touch with ${esc(contact.name.split(' ')[0])}:</span> ${last ? `${esc(last.label)}${last.outcome ? ' · ' + esc(last.outcome) : ''} · ${esc(relDays(last.date))}` : 'none yet'}</div>
+            ${acct.notes ? `<div class="notes-box small" style="margin-top:.5rem;max-height:9rem;overflow:auto">${esc(acct.notes)}</div>` : ''}
+            ${recent.length ? `<div class="small" style="margin-top:.5rem"><div class="muted">Recent activity</div>${recent.map((h) => `<div>${esc(relDays(h.date))} · ${esc(h.kind)} · ${esc(h.summary)}</div>`).join('')}</div>` : ''}
+            ${others.length ? `<div class="small" style="margin-top:.5rem"><span class="muted">Also at this account in this session:</span> ${others.map((x) => esc(x.contact.name)).join(', ')}</div>` : ''}
+          </div>
+          ${upNext.length ? `<div class="card">
+            <h3 style="margin:0 0 .4rem">Up next</h3>
+            ${upNext.map((x) => `<div class="ss-next">${stepIcon(x.step)}<span class="grow"><strong>${esc(x.contact.name)}</strong> <span class="muted small">· ${esc(x.acct.name)}</span></span></div>`).join('')}
+          </div>` : ''}
+          <div class="small muted ss-keys">Keys: <kbd>1</kbd>–<kbd>${type.outcomes.length}</kbd> outcome · <kbd>S</kbd> skip · <kbd>N</kbd> snooze</div>
+        </div>
+      </div>`;
+  }
+
+  /** Session buttons and keys. */
+  function sessionAct(action, outcome) {
+    if (!session) return;
+    const p = enrollmentParts(state.enrollments.find((x) => x.id === session.queue[session.idx]) || {});
+    if (!p) { rerender(); return; }
+    const note = ($('#ss-note') || {}).value || '';
+    if (action === 'log' || action === 'meeting') {
+      const out = action === 'meeting' ? (stepType(p.step).outcomes.find((o) => /connected|met|replied/i.test(o)) || stepType(p.step).outcomes[0]) : outcome;
+      const thenSel = ($('#ss-then') || {}).value || 'continue';
+      const then = action === 'meeting' ? 'meeting' : thenSel !== 'continue' ? thenSel : outcomeThen(out);
+      completeStep(p, { outcome: out, then, note });
+      session.results.push({ eid: p.e.id, kind: 'done', outcome: action === 'meeting' ? 'Meeting booked' : out });
+      toast(p.e.status === 'finished' ? `${p.contact.name}: ${FINISH_LABELS[p.e.outcome]}` : `${out} · next step ${fmtDate(p.e.dueDate, { month: 'short', day: 'numeric' })}`);
+    } else if (action === 'skip') {
+      session.results.push({ eid: p.e.id, kind: 'skip' });
+    } else if (action === 'snooze') {
+      const t = today();
+      p.e.dueDate = p.cad.skipWeekends ? nextWorkday(addDays(t, 1)) : addDays(t, 1);
+      if (note) p.acct.activities.push({ id: uid(), date: t, kind: 'Note', summary: `${p.cad.name}: snoozed`, notes: note, contactId: p.contact.id, createdAt: new Date().toISOString() });
+      touch(p.acct);
+      session.results.push({ eid: p.e.id, kind: 'snooze' });
+      toast(`Snoozed to ${fmtDate(p.e.dueDate, { weekday: 'short', month: 'short', day: 'numeric' })}`);
+    }
+    session.idx++;
+    saveSession(); save(); rerender(); window.scrollTo(0, 0);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (ui.lastView !== 'session' || !session || modal.open) return;
+    if (e.target.closest && e.target.closest('input, textarea, select')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const btns = $$('.ss-outcome');
+    if (/^[1-9]$/.test(e.key) && btns[Number(e.key) - 1]) { e.preventDefault(); btns[Number(e.key) - 1].click(); }
+    else if (e.key.toLowerCase() === 's' && btns.length) { e.preventDefault(); sessionAct('skip'); }
+    else if (e.key.toLowerCase() === 'n' && btns.length) { e.preventDefault(); sessionAct('snooze'); }
+  });
 
   // ---------- web links & research (LinkedIn, Sales Navigator, ZoomInfo) ----------
   const extUrl = (u) => (u ? (/^https?:\/\//i.test(u.trim()) ? u.trim() : 'https://' + u.trim().replace(/^\/+/, '')) : '');
@@ -4485,6 +4717,13 @@
       case 'cad-open': ui.cadenceId = el.dataset.cad; return go(`cadences/${el.dataset.cad}`);
       case 'cad-edit': return cadenceForm(cadenceById(ui.cadenceId));
       case 'cad-add-people': return addPeopleForm(cadenceById(ui.cadenceId));
+      case 'session-setup': return sessionSetupForm(el.dataset.cad ? { cadenceId: el.dataset.cad, type: 'all' } : {});
+      case 'session-log': return sessionAct('log', el.dataset.outcome);
+      case 'session-meeting': return sessionAct('meeting');
+      case 'session-skip': return sessionAct('skip');
+      case 'session-snooze': return sessionAct('snooze');
+      case 'session-end': if (session) { session.idx = session.queue.length; saveSession(); } return rerender();
+      case 'session-close': session = null; saveSession(); return go('cadences');
       case 'cad-filter': ui.cadFilter = el.dataset.f; return rerender();
       case 'cad-delete': {
         const cad = cadenceById(ui.cadenceId);
