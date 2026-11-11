@@ -240,6 +240,16 @@
   function normalize(data) {
     const st = { ...emptyState(), ...data };
     st.accounts.forEach(migrateAccount);
+    // Planner rows used to store only the account name; link each to its account where the name is unique.
+    const byName = new Map();
+    for (const a of st.accounts) { const k = (a.name || '').trim().toLowerCase(); byName.set(k, byName.has(k) ? null : a.id); }
+    for (const day of Object.values(st.days || {})) {
+      for (const rows of Object.values((day && day.plan) || {})) {
+        for (const r of rows || []) {
+          if (r && !r.accountId && r.name && r.name.trim()) { const id = byName.get(r.name.trim().toLowerCase()); if (id) r.accountId = id; }
+        }
+      }
+    }
     for (const l of st.lists || []) {
       if (l.criteria && Array.isArray(l.criteria.stages) && l.criteria.stages.some((x) => ALL_RENAMES[x])) {
         l.criteria = { ...l.criteria, stages: [...new Set(l.criteria.stages.map((x) => ALL_RENAMES[x] || x))] };
@@ -354,11 +364,39 @@
   const haystack = (a) => [a.name, a.industry, a.tags, a.notes, a.partnerType, a.stage, ...a.vendors,
     a.location, a.address, a.mainPhone, ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone, c.mobile])].join(' ').toLowerCase();
   const vendorPills = (a) => a.vendors.map((v) => `<span class="pill vendor">${esc(v)}</span>`).join(' ');
-  const getDay = (iso) => state.days[iso] || { priorities: ['', '', ''], notes: '' };
+  const getDay = (iso) => { const d = state.days[iso] || {}; return { ...d, priorities: Array.isArray(d.priorities) ? d.priorities : ['', '', ''], notes: d.notes || '' }; };
   const findAccountByName = (name) => {
     const n = (name || '').trim().toLowerCase();
     return n ? state.accounts.find((a) => a.name.trim().toLowerCase() === n) : null;
   };
+  const nameKey = (a) => a.name.trim().toLowerCase();
+  /** How an account is shown in planner suggestions: its name, plus the city (or type, then #n) when names repeat. */
+  function accountLabel(a, twins = state.accounts.filter((x) => nameKey(x) === nameKey(a))) {
+    if (twins.length < 2) return a.name;
+    const tag = (x) => x.location || (x.type === 'partner' ? 'Partner' : 'Prospect');
+    const same = twins.filter((x) => tag(x) === tag(a));
+    return `${a.name} · ${tag(a)}${same.length > 1 ? ` #${same.indexOf(a) + 1}` : ''}`;
+  }
+  /** Suggestion labels for a set of accounts, computed in one pass. */
+  function accountLabels(list) {
+    const groups = new Map();
+    for (const a of state.accounts) { const k = nameKey(a); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(a); }
+    return list.map((a) => accountLabel(a, groups.get(nameKey(a))));
+  }
+  /** The account typed text refers to: a suggestion label, or a name that only one account has. */
+  function findAccountByText(text) {
+    const n = (text || '').trim().toLowerCase();
+    if (!n) return null;
+    const exact = state.accounts.filter((a) => nameKey(a) === n);
+    if (exact.length === 1) return exact[0];
+    if (exact.length > 1) return null; // same name twice: pick the labelled suggestion instead
+    const base = n.split(' · ')[0];
+    const twins = state.accounts.filter((a) => nameKey(a) === base);
+    if (twins.length === 1) return twins[0]; // an older "Name · City" suggestion for a name that's now unique
+    return twins.find((a) => accountLabel(a, twins).toLowerCase() === n) || null;
+  }
+  /** A planner row's account: by its saved id; older rows without one fall back to the typed text. */
+  const rowAccount = (row) => (row.accountId ? getAccount(row.accountId) || null : findAccountByText(row.name));
 
   const blankPlanRow = (sec) => ({ name: '', kind: sec.kinds[0], note: '', done: false });
 
@@ -549,7 +587,7 @@
     const kinds = PLAN_SECTIONS[0].kinds;
     for (const s of stayList()) {
       if (listed.has(s.c.id) || !(d === t ? s.next <= t : s.next === d)) continue;
-      const auto = { name: s.a.name, kind: channelKind(s.c, kinds), note: `Stay in touch: ${s.c.name}`, done: false, auto: s.next, contactId: s.c.id };
+      const auto = { name: accountLabel(s.a), accountId: s.a.id, kind: channelKind(s.c, kinds), note: `Stay in touch: ${s.c.name}`, done: false, auto: s.next, contactId: s.c.id };
       const slot = out.findIndex((r) => !r.name.trim() && !r.auto);
       if (slot === -1) out.push(auto); else out[slot] = auto;
     }
@@ -699,7 +737,7 @@
     if (view === 'cadences' && arg) ui.cadenceId = arg;
     if (view === 'contacts' && arg && CONTACT_FILTERS[arg]) { ui.contactFilter = arg; ui.contactLimit = 200; }
     if (view === 'research' && arg && getAccount(arg)) {
-      Object.assign(research, { target: getAccount(arg).name, hint: '', list: '' }); saveResearch();
+      Object.assign(research, { target: getAccount(arg).name, targetId: arg, hint: '', list: '' }); saveResearch();
     }
     if (view === 'report') ui.reportWeek = weekStart(/^\d{4}-\d{2}-\d{2}$/.test(arg || '') ? arg : today());
     if (view === 'map') {
@@ -1552,9 +1590,9 @@
   // ---------- daily activity plan ----------
   /** Accounts whose revisit falls on day d (or is overdue, on today's page) and aren't already listed. */
   function dueRevisits(d, rows) {
-    const listed = new Set(rows.map((r) => r.name.trim().toLowerCase()).filter(Boolean));
+    const listed = new Set(rows.map((r) => (rowAccount(r) || {}).id).filter(Boolean));
     return state.accounts
-      .filter((a) => a.revisitDate && (a.revisitDate === d || (d === today() && a.revisitDate < d)) && !listed.has(a.name.trim().toLowerCase()))
+      .filter((a) => a.revisitDate && (a.revisitDate === d || (d === today() && a.revisitDate < d)) && !listed.has(a.id))
       .sort((x, y) => x.revisitDate.localeCompare(y.revisitDate));
   }
 
@@ -1562,7 +1600,7 @@
   function revisitRows(d, plan) {
     const rows = plan.revisits.map((r) => ({ ...r }));
     for (const a of dueRevisits(d, plan.revisits)) {
-      const auto = { name: a.name, kind: 'Visit', note: a.revisitNote || '', done: false, auto: a.revisitDate };
+      const auto = { name: accountLabel(a), accountId: a.id, kind: 'Visit', note: a.revisitNote || '', done: false, auto: a.revisitDate };
       const slot = rows.findIndex((r) => !r.name.trim() && !r.auto);
       if (slot === -1) rows.push(auto); else rows[slot] = auto;
     }
@@ -1605,8 +1643,8 @@
             ${pending ? `<button class="btn sm ghost" data-act="plan-carry">Copy unfinished to ${esc(fmtDate(addDays(d, 1), { weekday: 'short', month: 'short', day: 'numeric' }))}</button>` : ''}
           </div>
         </div>
-        <datalist id="dl-accounts">${state.accounts.map((a) => `<option value="${esc(a.name)}">`).join('')}</datalist>
-        <datalist id="dl-partners">${state.accounts.filter((a) => a.type === 'partner').map((a) => `<option value="${esc(a.name)}">`).join('')}</datalist>
+        <datalist id="dl-accounts">${accountLabels(state.accounts).map((l) => `<option value="${esc(l)}">`).join('')}</datalist>
+        <datalist id="dl-partners">${(() => { const ps = state.accounts.filter((a) => a.type === 'partner'); return accountLabels(ps).map((l) => `<option value="${esc(l)}">`).join(''); })()}</datalist>
         <div class="plan-grid">
           <div>${block(outreach)}</div>
           <div class="stack">${rest.map(block).join('')}</div>
@@ -1615,12 +1653,12 @@
   }
 
   function planRow(sec, r, i) {
-    const acct = findAccountByName(r.name);
+    const acct = rowAccount(r);
     return `
-      <div class="plan-row ${r.done ? 'done' : ''} ${r.auto ? 'auto' : ''}" data-sec="${sec.key}" data-i="${i}" ${r.auto ? `data-auto="${esc(JSON.stringify({ name: r.name, kind: r.kind, note: r.note, ...(r.contactId ? { contactId: r.contactId } : {}) }))}"` : ''}>
+      <div class="plan-row ${r.done ? 'done' : ''} ${r.auto ? 'auto' : ''}" data-sec="${sec.key}" data-i="${i}" ${r.auto ? `data-auto="${esc(JSON.stringify({ name: r.name, accountId: r.accountId || '', kind: r.kind, note: r.note, ...(r.contactId ? { contactId: r.contactId } : {}) }))}"` : ''}>
         <span class="plan-num">${i + 1}</span>
         <input type="checkbox" data-plan="done" ${r.done ? 'checked' : ''} aria-label="Done">
-        <input data-plan="name" list="${sec.partners ? 'dl-partners' : 'dl-accounts'}" placeholder="Account / contact" value="${esc(r.name)}">
+        <input data-plan="name" list="${sec.partners ? 'dl-partners' : 'dl-accounts'}" placeholder="Account / contact" value="${esc(acct && r.accountId ? accountLabel(acct) : r.name)}">
         ${sec.kinds.length > 1
           ? `<select data-plan="kind">${sec.kinds.map((k) => `<option ${k === r.kind ? 'selected' : ''}>${k}</option>`).join('')}</select>`
           : '<span class="plan-kind"></span>'}
@@ -1664,7 +1702,8 @@
         } else {
           row[field] = el.value;
           if (field === 'name') {
-            const acct = findAccountByName(row.name);
+            const acct = findAccountByText(row.name);
+            row.accountId = acct ? acct.id : '';
             if (row.contactId && !(acct && acct.contacts.some((c) => c.id === row.contactId))) delete row.contactId;
             $('.plan-link', rowEl).innerHTML = acct ? `<a href="#account/${acct.id}" title="Open ${esc(acct.name)}">↗</a>` : '';
           }
@@ -1676,7 +1715,7 @@
 
   /** Completing a revisit clears the account's due revisit date; un-checking puts it back. */
   function settleRevisit(d, row) {
-    const acct = findAccountByName(row.name);
+    const acct = rowAccount(row);
     if (!acct) return null;
     if (row.done && acct.revisitDate && acct.revisitDate <= d) {
       row.clearedRevisit = acct.revisitDate;
@@ -1713,7 +1752,7 @@
 
   /** Mirror a checked plan row into the matching account's history (and remove it on uncheck). */
   function syncPlanActivity(d, sec, row) {
-    const acct = findAccountByName(row.name);
+    const acct = rowAccount(row);
     if (row.activityId) {
       for (const a of state.accounts) a.activities = a.activities.filter((h) => h.id !== row.activityId);
       delete row.activityId;
@@ -1747,11 +1786,12 @@
     let copied = 0;
     for (const sec of PLAN_SECTIONS) {
       const target = to[sec.key];
-      const existing = new Set(target.map((r) => r.name.trim().toLowerCase()).filter(Boolean));
+      const keyOf = (r) => r.accountId || r.name.trim().toLowerCase();
+      const existing = new Set(target.filter((r) => r.name.trim()).map(keyOf));
       for (const r of from[sec.key]) {
-        const key = r.name.trim().toLowerCase();
+        const key = r.name.trim() ? keyOf(r) : '';
         if (!key || r.done || existing.has(key)) continue;
-        const copy = { name: r.name, kind: r.kind, note: r.note, done: false };
+        const copy = { name: r.name, kind: r.kind, note: r.note, done: false, ...(r.accountId ? { accountId: r.accountId } : {}), ...(r.contactId ? { contactId: r.contactId } : {}) };
         const slot = target.findIndex((x) => !x.name.trim());
         if (slot === -1) target.push(copy); else target[slot] = copy;
         existing.add(key); copied++;
@@ -2594,7 +2634,7 @@
       summary: `${cad.name} · ${step.title || type.label}: ${outcome}`, notes: note,
     });
     e.history.push({ stepId: step.id, date, outcome, note, activityId: actId });
-    if (type.plan) addPlanTouch(date, type.plan, { name: acct.name, kind: type.kind, note: `${cad.name}: ${step.title || type.label}`, done: true, activityId: actId });
+    if (type.plan) addPlanTouch(date, type.plan, { name: acct.name, accountId: acct.id, contactId: contact.id, kind: type.kind, note: `${cad.name}: ${step.title || type.label}`, done: true, activityId: actId });
     if (then === 'continue') advance(p, date); else finishEnrollment(e, then, date);
     touch(acct);
   }
@@ -3374,8 +3414,8 @@
     const plan = getPlan(d);
     const stops = new Map();
     const add = (a, why) => { if (a && !r.removed.includes(a.id) && !stops.has(a.id)) stops.set(a.id, { a, why }); };
-    for (const row of plan.visits) add(findAccountByName(row.name), 'Planned visit');
-    for (const row of plan.revisits) add(findAccountByName(row.name), 'Revisit');
+    for (const row of plan.visits) add(rowAccount(row), 'Planned visit');
+    for (const row of plan.revisits) add(rowAccount(row), 'Revisit');
     for (const a of dueRevisits(d, plan.revisits)) add(a, 'Revisit due');
     for (const p of dueSteps(d)) if (p.step.type === 'visit') add(p.acct, `${p.cad.name}: visit`);
     for (const id of r.extra) add(getAccount(id), 'Added');
@@ -3386,22 +3426,21 @@
 
   const visitedRow = (d, a) => {
     const plan = getPlan(d);
-    const n = a.name.trim().toLowerCase();
-    return [...plan.visits, ...plan.revisits].find((r) => r.done && r.name.trim().toLowerCase() === n);
+    return [...plan.visits, ...plan.revisits].find((r) => r.done && (rowAccount(r) || {}).id === a.id);
   };
 
   /** Mark a stop visited: tick (or add) its planner row, which logs the visit to the account history. */
   function markVisited(d, a) {
     const plan = getPlan(d, true);
-    const n = a.name.trim().toLowerCase();
-    const isRevisit = plan.revisits.some((r) => r.name.trim().toLowerCase() === n) || (a.revisitDate && a.revisitDate <= d);
+    const isMine = (r) => (rowAccount(r) || {}).id === a.id;
+    const isRevisit = plan.revisits.some(isMine) || (a.revisitDate && a.revisitDate <= d);
     const secKey = isRevisit ? 'revisits' : 'visits';
     const sec = PLAN_SECTIONS.find((x) => x.key === secKey);
     const rows = plan[secKey];
-    let row = rows.find((r) => r.name.trim().toLowerCase() === n);
+    let row = rows.find(isMine);
     if (!row) {
       const slot = rows.findIndex((r) => !r.name.trim());
-      row = { name: a.name, kind: 'Visit', note: isRevisit ? (a.revisitNote || '') : 'Route visit', done: false };
+      row = { name: accountLabel(a), accountId: a.id, kind: 'Visit', note: isRevisit ? (a.revisitNote || '') : 'Route visit', done: false };
       if (slot === -1) rows.push(row); else rows[slot] = row;
     }
     row.done = true;
@@ -3977,6 +4016,13 @@
   const allFlows = () => [...RESEARCH_FLOWS, ...state.flows.map((f) => ({ ...f, custom: true }))];
 
   /** The companies a request is about: a saved list (max 10), or one company typed or picked. */
+  /** The account being researched: the one it was opened from (by id) while its name is still in the box. */
+  function researchAccount() {
+    const t = research.target.trim();
+    const byId = research.targetId && getAccount(research.targetId);
+    return byId && byId.name.trim().toLowerCase() === t.toLowerCase() ? byId : findAccountByText(t);
+  }
+
   function researchTargets() {
     if (research.list) {
       const l = resolveList(research.list);
@@ -3984,7 +4030,7 @@
     }
     const name = research.target.trim();
     if (!name) return [];
-    const a = findAccountByName(name);
+    const a = researchAccount();
     return [{ name: a ? a.name : name, a, hint: research.hint.trim() }];
   }
 
@@ -4062,7 +4108,7 @@
   function renderResearch() {
     const targets = researchTargets();
     const prompt = buildPrompt();
-    const matched = !research.list && research.target.trim() && findAccountByName(research.target);
+    const matched = !research.list && research.target.trim() && researchAccount();
     $('#view').innerHTML = `
       <div class="page-head">
         <div>
@@ -4146,7 +4192,7 @@
       box.innerHTML = '<div class="sync-error">Couldn\'t find the data block in that reply. Make sure you copied Claude\'s whole answer, including the JSON at the end. If it\'s missing, ask Claude: "Please add the JSON block in the format I asked for."</div>';
       return;
     }
-    const forced = !research.list && research.target.trim() && findAccountByName(research.target);
+    const forced = !research.list && research.target.trim() && researchAccount();
     box.innerHTML = companies.map((c, ci) => {
       const existing = (companies.length === 1 && forced) || findAccountByName(c.name);
       const rows = R_FIELDS.filter(([k]) => c[k]).map(([k, label]) => {
@@ -4316,7 +4362,7 @@
       if (fields.channelPartnerId && fields.channelPartnerId !== (existing || {}).channelPartnerId) fields.referredAt = today();
       if (!fields.channelPartnerId && existing && existing.channelPartnerId) fields.referredAt = '';
       const dup = state.accounts.find((x) => x !== existing && x.name.trim().toLowerCase() === data.name.trim().toLowerCase());
-      if (dup && !confirm(`An account named "${dup.name}" already exists. The planner and cadences match accounts by name, so duplicates can get mixed up. Save anyway?`)) return false;
+      if (dup && !confirm(`An account named "${dup.name}" already exists. Save a second account with the same name? (The planner tells them apart by city.)`)) return false;
       if (existing) {
         logStageChange(existing, existing.stage, fields.stage);
         Object.assign(existing, fields); touch(existing);

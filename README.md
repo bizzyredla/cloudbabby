@@ -230,6 +230,9 @@ No install, no build step: open `index.html` in a browser.
 
   Each row has an account, a type, a note, and a checkbox. Account names autocomplete from your
   accounts, and checking off a row for an existing account logs it to that account's history.
+  Rows are linked to the account itself (by its ID), so renaming an account keeps the link, and
+  two accounts with the same name stay separate: the suggestions add the city ("Acme Dental ·
+  Fresno, CA"). A name typed that matches two accounts isn't linked until you pick one.
   Unchecking removes the entry. Use "+ Add row" to go past a target, and copy unfinished rows to
   the next day in one click. The dashboard shows today's plan progress.
 
