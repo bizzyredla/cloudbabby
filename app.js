@@ -205,7 +205,9 @@
   }
 
   // ---------- state ----------
-  let state = load();
+  let state = emptyState(); // filled in by bootStorage() at startup
+  let sb = null; let cloudUser = null; let cloudCfg = null; // Supabase client, signed-in user, saved connection
+  const cloudOn = () => !!(sb && cloudUser);
   const ui = { search: '', typeFilter: 'all', stageFilter: 'all', vendorFilter: 'all', sort: 'followup', sortDir: 1, plannerDate: today(), listId: null, navs: 0, cadFilter: 'active', contactSearch: '', contactFilter: 'all', contactType: 'all', contactSort: 'next', contactLimit: 200 };
   // Per-device view preferences (layout choice), not synced.
   const PREFS_KEY = 'minicrm.prefs';
@@ -258,7 +260,20 @@
     return st;
   }
 
-  function load() {
+  // ---------- storage (IndexedDB) ----------
+  // Each account, task, list, cadence, enrollment, flow and planner day is its own row in the
+  // device's IndexedDB database, so a save writes only what changed and there is no 5 MB cap.
+  // The first launch after the upgrade copies the old localStorage data across and leaves the
+  // original untouched. If IndexedDB is not available the app keeps using localStorage.
+  const META_KEY = 'minicrm.meta';
+  const IDB_FLAG = 'minicrm.idb';
+  const idb = { db: null };
+  let booted = false;
+  // Device-only sync bookkeeping: records waiting to upload, and how far we have read the cloud.
+  const local = { dirty: new Set(), cursor: 0, user: '', seen: {} };
+  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:']];
+
+  function loadLegacy() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) return normalize(JSON.parse(raw));
@@ -266,92 +281,202 @@
     return emptyState();
   }
 
-  /** Persist locally. `track` stamps what changed so sync can merge it with other devices. */
+  const idbReq = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error); });
+
+  function idbOpen() {
+    return new Promise((res, rej) => {
+      const req = indexedDB.open('minicrm', 1);
+      req.onupgradeneeded = () => { req.result.createObjectStore('recs'); req.result.createObjectStore('meta'); };
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+      req.onblocked = () => rej(new Error('Database is open in another tab'));
+    });
+  }
+
+  /** Every top-level record by its storage key (accounts carry their contacts, history and dates). */
+  function topIndex(st = state) {
+    const m = new Map();
+    for (const [name, prefix] of COLLECTIONS) for (const x of st[name]) m.set(prefix + x.id, x);
+    for (const [d, day] of Object.entries(st.days)) m.set('d:' + d, day);
+    return m;
+  }
+
+  const metaPayload = () => ({
+    migrated: true, deleted: state.deleted, dirty: [...local.dirty], cursor: local.cursor, user: local.user, seen: local.seen,
+    order: Object.fromEntries(COLLECTIONS.map(([name]) => [name, state[name].map((x) => x.id)])),
+  });
+
+  function applyMeta(meta) {
+    local.dirty = new Set(meta.dirty || []);
+    local.cursor = meta.cursor || 0;
+    local.user = meta.user || '';
+    local.seen = meta.seen || {};
+  }
+
+  /** Write records to the device. `keys` limits the write to those rows; omit it to rewrite everything. */
+  function persist(keys) {
+    if (!booted) return;
+    if (!idb.db) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        localStorage.setItem(META_KEY, JSON.stringify({ dirty: [...local.dirty], cursor: local.cursor, user: local.user, seen: local.seen }));
+      } catch (e) { toast('Could not save. Browser storage is full or unavailable. Use Export to keep a copy.'); }
+      return;
+    }
+    try {
+      const tops = topIndex();
+      const tx = idb.db.transaction(['recs', 'meta'], 'readwrite');
+      const recs = tx.objectStore('recs');
+      if (!keys) { recs.clear(); for (const [k, o] of tops) recs.put(o, k); }
+      else for (const k of keys) { if (tops.has(k)) recs.put(tops.get(k), k); else recs.delete(k); }
+      tx.objectStore('meta').put(metaPayload(), 'meta');
+      tx.onabort = () => toast('Could not save to this device. Use Export to keep a copy.');
+    } catch (e) {
+      console.warn('Save failed', e);
+      toast('Could not save to this device. Use Export to keep a copy.');
+    }
+  }
+
+  /** Read everything from the device. Returns false when the database cannot be trusted. */
+  async function bootStorage() {
+    let migratedBefore = false;
+    try { migratedBefore = localStorage.getItem(IDB_FLAG) === '1'; } catch (e) { /* no localStorage */ }
+    try {
+      if (!window.indexedDB) throw new Error('IndexedDB is not available');
+      idb.db = await idbOpen();
+      const tx = idb.db.transaction(['recs', 'meta'], 'readonly');
+      const [keys, values, meta] = await Promise.all([
+        idbReq(tx.objectStore('recs').getAllKeys()), idbReq(tx.objectStore('recs').getAll()), idbReq(tx.objectStore('meta').get('meta')),
+      ]);
+      if (meta && meta.migrated) {
+        const st = emptyState();
+        const byPrefix = new Map(COLLECTIONS.map(([name, prefix]) => [prefix, name]));
+        keys.forEach((k, i) => {
+          const cut = k.indexOf(':') + 1;
+          if (k.startsWith('d:')) st.days[k.slice(2)] = values[i];
+          else if (byPrefix.has(k.slice(0, cut))) st[byPrefix.get(k.slice(0, cut))].push(values[i]);
+        });
+        for (const [name] of COLLECTIONS) {
+          const pos = new Map(((meta.order || {})[name] || []).map((id, i) => [id, i]));
+          st[name].sort((x, y) => (pos.has(x.id) ? pos.get(x.id) : 1e9) - (pos.has(y.id) ? pos.get(y.id) : 1e9));
+        }
+        st.deleted = meta.deleted || {};
+        state = normalize(st);
+        applyMeta(meta);
+        booted = true;
+      } else {
+        // First launch on IndexedDB: bring the localStorage copy across (it stays as a fallback copy).
+        state = loadLegacy();
+        booted = true;
+        persist();
+        try { localStorage.setItem(IDB_FLAG, '1'); } catch (e) { /* ignore */ }
+      }
+    } catch (e) {
+      console.warn('IndexedDB unavailable', e);
+      idb.db = null;
+      // Data already moved to IndexedDB: the localStorage copy is out of date, so do not load it.
+      if (migratedBefore) return false;
+      state = loadLegacy();
+      try { applyMeta(JSON.parse(localStorage.getItem(META_KEY)) || {}); } catch (e2) { /* none */ }
+      booted = true;
+    }
+    snapshot = fingerprints(state);
+    return true;
+  }
+
+  /** Save what changed. `track` stamps the edits so sync can merge them with other devices. */
   function save({ track = true } = {}) {
-    if (track) stampChanges();
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-    catch (e) { toast('Could not save — browser storage is unavailable. Use Export to keep a copy.'); }
-    if (track && syncCfg) { setSyncStatus('pending'); scheduleSync(); }
+    if (track) persist(stampChanges()); else persist();
+    if (track && cloudOn()) { setSyncStatus('pending'); scheduleSync(); }
     clearTimeout(save.countsTimer);
     save.countsTimer = setTimeout(updateCounts, 60); // sidebar counts follow every change
   }
 
   // ---------- change tracking ----------
-  // Every record carries `_ts`, the time of its last local change. Removed records leave a
-  // tombstone in state.deleted so other devices drop them too. Changes are found by diffing
-  // each record against a snapshot taken at the previous save.
+  // Every record carries `_ts`, the time of its last local change, and once it has been edited,
+  // `_f`: the time each field last changed (fields not listed there date from `_b`). Sync merges
+  // two copies of a record field by field with these. `_s` is the cloud version last seen.
+  // Removed records leave a tombstone in state.deleted until the removal has been uploaded.
+  // Changes are found by diffing each record against a snapshot taken at the previous save.
+  const META_FIELDS = ['_ts', '_f', '_b', '_s'];
+  const NESTED = { activities: 'h:', keyDates: 'k:', contacts: 'c:' };
+  const bare = (x) => { const o = { ...x }; for (const f of META_FIELDS) delete o[f]; return o; };
+
+  /** Yields [key, record, comparable fields, storage key, parent account id]. */
   function* records(st) {
     for (const a of st.accounts) {
-      const { activities, keyDates, contacts, _ts, ...fields } = a;
-      yield ['a:' + a.id, a, fields];
-      for (const h of activities) yield ['h:' + h.id, h, { ...h, _ts: undefined }];
-      for (const k of keyDates) yield ['k:' + k.id, k, { ...k, _ts: undefined }];
-      for (const c of contacts) yield ['c:' + c.id, c, { ...c, _ts: undefined }];
+      const { activities, keyDates, contacts, ...rest } = a;
+      const top = 'a:' + a.id;
+      yield [top, a, bare(rest), top, null];
+      for (const h of activities) yield ['h:' + h.id, h, bare(h), top, a.id];
+      for (const k of keyDates) yield ['k:' + k.id, k, bare(k), top, a.id];
+      for (const c of contacts) yield ['c:' + c.id, c, bare(c), top, a.id];
     }
-    for (const l of st.lists) yield ['l:' + l.id, l, { ...l, _ts: undefined }];
-    for (const c of st.cadences) yield ['cad:' + c.id, c, { ...c, _ts: undefined }];
-    for (const e of st.enrollments) yield ['enr:' + e.id, e, { ...e, _ts: undefined }];
-    for (const f of st.flows) yield ['flw:' + f.id, f, { ...f, _ts: undefined }];
-    for (const t of st.tasks) yield ['t:' + t.id, t, { ...t, _ts: undefined }];
-    for (const [d, day] of Object.entries(st.days)) yield ['d:' + d, day, { ...day, _ts: undefined }];
+    for (const [name, prefix] of COLLECTIONS.slice(1)) for (const x of st[name]) yield [prefix + x.id, x, bare(x), prefix + x.id, null];
+    for (const [d, day] of Object.entries(st.days)) yield ['d:' + d, day, bare(day), 'd:' + d, null];
   }
 
+  /** key -> { fp: JSON of the fields, top: storage key }. */
   function fingerprints(st) {
     const m = new Map();
-    for (const [key, , fields] of records(st)) m.set(key, JSON.stringify(fields));
+    for (const [key, obj, fields, top] of records(st)) m.set(key, { fp: JSON.stringify(fields), top, s: obj._s });
     return m;
   }
 
   let snapshot = fingerprints(state);
 
+  /** Stamp edited records and fields. Returns the storage keys that need writing. */
   function stampChanges() {
     const now = Date.now();
     const next = new Map();
-    for (const [key, obj, fields] of records(state)) {
+    const changed = new Set();
+    for (const [key, obj, fields, top] of records(state)) {
       const fp = JSON.stringify(fields);
-      next.set(key, fp);
-      if (snapshot.get(key) !== fp) obj._ts = now;
+      next.set(key, { fp, top, s: obj._s });
+      const prev = snapshot.get(key);
+      if (prev && prev.fp === fp) continue;
+      if (prev) {
+        const before = JSON.parse(prev.fp);
+        if (!obj._f) { obj._f = {}; obj._b = obj._ts || 0; }
+        for (const f of new Set([...Object.keys(before), ...Object.keys(fields)])) {
+          if (JSON.stringify(before[f]) !== JSON.stringify(fields[f])) obj._f[f] = now;
+        }
+      }
+      obj._ts = now;
+      local.dirty.add(key);
+      changed.add(top);
     }
-    for (const key of snapshot.keys()) if (!next.has(key)) state.deleted[key] = now;
+    for (const [key, prev] of snapshot) {
+      if (next.has(key)) continue;
+      state.deleted[key] = now;
+      if (prev.s) local.seen[key] = prev.s;
+      local.dirty.add(key);
+      changed.add(prev.top);
+    }
     snapshot = next;
+    return changed;
   }
 
-  /** Combine two copies record by record: newest edit wins, deletions win over older edits. */
-  function mergeStates(L, R) {
-    const deleted = { ...L.deleted };
-    for (const [k, v] of Object.entries(R.deleted)) deleted[k] = Math.max(deleted[k] || 0, v);
-    const alive = (key, x) => !(deleted[key] >= (x._ts || 0));
-    const newer = (x, y) => (!x ? y : !y ? x : (x._ts || 0) >= (y._ts || 0) ? x : y);
-    const mergeList = (a, b, prefix) => {
-      const m = new Map();
-      for (const x of [...a, ...b]) m.set(x.id, newer(m.get(x.id), x));
-      return [...m.values()].filter((x) => alive(prefix + x.id, x));
-    };
+  const fieldTime = (x, f) => (x._f ? (x._f[f] ?? x._b ?? 0) : (x._ts || 0));
 
-    const accounts = new Map();
-    for (const a of [...L.accounts, ...R.accounts]) {
-      const prev = accounts.get(a.id);
-      accounts.set(a.id, prev
-        ? { ...newer(prev, a), activities: [...prev.activities, ...a.activities], keyDates: [...prev.keyDates, ...a.keyDates], contacts: [...prev.contacts, ...a.contacts] }
-        : { ...a });
+  /** Combine two copies of one record field by field: the newest edit of each field wins. */
+  function mergeRecord(x, y) {
+    if (!x) return y;
+    if (!y) return x;
+    if (!x._f && !y._f) return (x._ts || 0) >= (y._ts || 0) ? x : y;
+    const out = { _f: {}, _b: 0, _ts: Math.max(x._ts || 0, y._ts || 0) };
+    if (x._s || y._s) out._s = Math.max(x._s || 0, y._s || 0);
+    const names = new Set([...Object.keys(x), ...Object.keys(y)]);
+    for (const f of names) {
+      if (META_FIELDS.includes(f) || f in NESTED) continue;
+      const tx = fieldTime(x, f); const ty = fieldTime(y, f);
+      let win = tx > ty ? x : ty > tx ? y : null;
+      if (!win) win = (f in x ? JSON.stringify(x[f]) : '') >= (f in y ? JSON.stringify(y[f]) : '') ? x : y; // same time: pick the same side on every device
+      if (f in win) out[f] = win[f];
+      out._f[f] = Math.max(tx, ty);
     }
-    const merged = [...accounts.values()].filter((a) => alive('a:' + a.id, a)).map((a) => ({
-      ...a, activities: mergeList(a.activities, [], 'h:'), keyDates: mergeList(a.keyDates, [], 'k:'), contacts: mergeList(a.contacts, [], 'c:'),
-    }));
-
-    const days = { ...L.days };
-    for (const [d, day] of Object.entries(R.days)) days[d] = newer(days[d], day);
-    for (const [d, day] of Object.entries(days)) if (!alive('d:' + d, day)) delete days[d];
-
-    return { ...emptyState(), accounts: merged, tasks: mergeList(L.tasks, R.tasks, 't:'), days, lists: mergeList(L.lists, R.lists, 'l:'),
-      cadences: mergeList(L.cadences, R.cadences, 'cad:'), enrollments: mergeList(L.enrollments, R.enrollments, 'enr:'),
-      flows: mergeList(L.flows, R.flows, 'flw:'), deleted };
+    return out;
   }
-
-  const toPayload = (st) => ({
-    version: 1, accounts: st.accounts, tasks: st.tasks, days: st.days, lists: st.lists,
-    cadences: st.cadences, enrollments: st.enrollments, flows: st.flows, deleted: st.deleted,
-  });
 
   const getAccount = (id) => state.accounts.find((a) => a.id === id);
   const primaryContact = (a) => a.contacts.find((c) => c.primary) || a.contacts[0] || null;
@@ -776,7 +901,7 @@
     $('#nc-contacts').textContent = sit ? `${sit} due` : '';
   }
   const go = (hash) => { if (location.hash === '#' + hash) rerender(); else location.hash = hash; };
-  window.addEventListener('hashchange', () => { ui.navs++; route(); window.scrollTo(0, 0); });
+  window.addEventListener('hashchange', () => { if (!booted) return; ui.navs++; route(); window.scrollTo(0, 0); });
 
   // ---------- dashboard ----------
   function renderDashboard() {
@@ -985,7 +1110,7 @@
   function eraseAll() {
     const typed = prompt(
       `This permanently deletes all ${state.accounts.length} accounts, tasks, planner days, lists and cadences` +
-      `${syncCfg ? ' on this device AND every synced device' : ' on this device'}.\n\nExport a backup first if you might need it.\n\nType DELETE to confirm.`);
+      `${cloudOn() ? ' on this device AND every synced device' : ' on this device'}.\n\nExport a backup first if you might need it.\n\nType DELETE to confirm.`);
     if ((typed || '').trim().toUpperCase() !== 'DELETE') { if (typed !== null) toast('Nothing was deleted'); return; }
     state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = []; state.flows = [];
     ui.listId = null;
@@ -4811,11 +4936,11 @@
       <section class="set-sec">
         <h3>Cloud sync</h3>
         <div id="sync-live">${syncStatusHtml()}</div>
-        <button type="button" class="btn ghost sm" id="set-sync">${syncCfg ? 'Sync settings' : 'Set up sync'}</button>
+        <button type="button" class="btn ghost sm" id="set-sync">${cloudOn() ? 'Sync settings' : 'Set up sync'}</button>
       </section>
       <section class="set-sec">
         <h3>Backup</h3>
-        <p class="small muted">${syncCfg ? 'Sync already keeps every version in your private GitHub repository. ' : 'Without sync, your data lives only on this device. '}You can also download a copy, or restore one.</p>
+        <p class="small muted">${cloudOn() ? 'Sync keeps the current data in your cloud database, not past versions. ' : 'Without sync, your data lives only on this device. '}You can also download a copy, or restore one.</p>
         <div class="row">
           <button type="button" class="btn ghost sm" id="set-export">Export backup</button>
           <button type="button" class="btn ghost sm" id="set-import">Import backup…</button>
@@ -5023,77 +5148,164 @@
     save(); toast('Sample data loaded'); rerender();
   }
 
-  // ---------- cloud sync (private GitHub repository) ----------
-  const SYNC_KEY = 'minicrm.sync';
-  const SYNC_FILE = 'minicrm-data.json';
+  // ---------- cloud sync (Supabase) ----------
+  // Each record is one row in the `records` table of your Supabase project (see supabase-setup.sql).
+  // A sync downloads rows changed since the last one, merges them field by field with any local
+  // edits, then uploads only the records edited on this device. You sign in with an email and
+  // password; the database only lets a signed-in user read and write their own rows.
+  const CLOUD_KEY = 'minicrm.cloud';
+  const OLD_SYNC_KEY = 'minicrm.sync'; // GitHub sync from earlier versions
   const sync = { status: 'off', message: '', last: null, timer: null, running: false, again: false, needsRender: false };
-  let syncCfg = null;
-  try { syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)); } catch (e) { /* none */ }
+  try { cloudCfg = JSON.parse(localStorage.getItem(CLOUD_KEY)); } catch (e) { /* none */ }
 
-  const b64encode = (str) => {
-    const bytes = new TextEncoder().encode(str);
-    let bin = '';
-    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    return btoa(bin);
+  const makeClient = (cfg) => window.supabase.createClient(cfg.url, cfg.key, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+  });
+
+  /** Unwrap a Supabase reply, turning its error into an exception. */
+  const ok = ({ data, error }) => {
+    if (error) throw Object.assign(new Error(error.message || 'Cloud error'), { status: error.status, code: error.code });
+    return data;
   };
-  const b64decode = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), (c) => c.charCodeAt(0)));
 
-  function gh(path, opts = {}, cfg = syncCfg) {
-    return fetch(`https://api.github.com${path}`, {
-      ...opts,
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${cfg.token}`,
-        ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
-      },
-    });
-  }
+  const ROW_COLS = 'key,parent,data,ts,deleted,seq';
 
-  async function ghError(res) {
-    let detail = '';
-    try { detail = (await res.json()).message || ''; } catch (e) { /* no body */ }
-    const msg = res.status === 401 ? 'GitHub token is invalid or expired. Reconnect sync with a new token.'
-      : res.status === 403 ? `GitHub refused access (${detail || 'permission denied'}). The token needs Contents: Read and write.`
-      : res.status === 404 ? 'Repository not found. Check the name, and that the token was given access to it.'
-      : `GitHub error ${res.status}${detail ? ': ' + detail : ''}`;
-    return Object.assign(new Error(msg), { status: res.status });
-  }
-
-  async function pullRemote(cfg = syncCfg) {
-    const res = await gh(`/repos/${cfg.repo}/contents/${SYNC_FILE}`, {}, cfg);
-    if (res.status === 404) return null;
-    if (!res.ok) throw await ghError(res);
-    const meta = await res.json();
-    let content = meta.content;
-    if (!content) { // files over 1 MB come back without inline content
-      const blob = await gh(`/repos/${cfg.repo}/git/blobs/${meta.sha}`, {}, cfg);
-      if (!blob.ok) throw await ghError(blob);
-      content = (await blob.json()).content;
+  async function pullSince(cursor) {
+    const rows = [];
+    for (let from = cursor; ;) {
+      const page = ok(await sb.from('records').select(ROW_COLS).eq('user_id', cloudUser.id).gt('seq', from).order('seq').limit(1000));
+      rows.push(...page);
+      if (page.length < 100) break; // a short page is the last one, whatever row cap the project uses
+      from = page[page.length - 1].seq;
     }
-    return { sha: meta.sha, data: normalize(JSON.parse(b64decode(content))) };
+    return rows;
   }
 
-  /** Returns the new sha, or null when the file changed underneath us (caller re-pulls). */
-  async function pushRemote(payload, sha) {
-    const res = await gh(`/repos/${syncCfg.repo}/contents/${SYNC_FILE}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        message: `Mini CRM sync ${new Date().toISOString()}`,
-        content: b64encode(JSON.stringify(payload, null, 1)),
-        ...(sha ? { sha } : {}),
-      }),
-    });
-    if (res.status === 409 || res.status === 422) return null;
-    if (!res.ok) throw await ghError(res);
-    return (await res.json()).content.sha;
+  async function pullKeys(keys) {
+    const rows = [];
+    for (let i = 0; i < keys.length; i += 100) {
+      rows.push(...ok(await sb.from('records').select(ROW_COLS).eq('user_id', cloudUser.id).in('key', keys.slice(i, i + 100))));
+    }
+    return rows;
   }
 
-  function applyMerged(merged) {
-    if (JSON.stringify(toPayload(merged)) === JSON.stringify(toPayload(state))) return;
-    state = merged;
-    snapshot = fingerprints(state);
-    save({ track: false });
+  const nestedName = (prefix) => Object.keys(NESTED).find((n) => NESTED[n] === prefix);
+
+  /** Merge downloaded rows into the data on this device. Returns the storage keys that changed. */
+  function applyRemote(rows) {
+    const tops = new Set();
+    const accounts = new Map(state.accounts.map((a) => [a.id, a]));
+    const byPrefix = new Map(COLLECTIONS.map(([name, prefix]) => [prefix, name]));
+
+    const locate = (key, parent) => {
+      const cut = key.indexOf(':') + 1;
+      const prefix = key.slice(0, cut); const id = key.slice(cut);
+      if (prefix === 'd:') {
+        return { top: key, get: () => state.days[id], set: (o) => { state.days[id] = o; }, remove: () => { delete state.days[id]; } };
+      }
+      let arr; let top = key; let wrap = (o) => o;
+      const nested = nestedName(prefix);
+      if (nested) {
+        const acct = accounts.get(parent) || state.accounts.find((a) => a[nested].some((x) => x.id === id));
+        if (!acct) return null; // its account is gone
+        arr = acct[nested]; top = 'a:' + acct.id;
+      } else if (byPrefix.has(prefix)) {
+        arr = state[byPrefix.get(prefix)];
+        if (prefix === 'a:') {
+          wrap = (o, old) => {
+            const full = { ...o, activities: old ? old.activities : [], keyDates: old ? old.keyDates : [], contacts: old ? old.contacts : [] };
+            migrateAccount(full);
+            accounts.set(id, full);
+            return full;
+          };
+        }
+      } else return null;
+      const at = () => arr.findIndex((x) => x.id === id);
+      return {
+        top,
+        get: () => arr[at()],
+        set: (o) => { const i = at(); if (i >= 0) arr[i] = wrap(o, arr[i]); else arr.push(wrap(o, null)); },
+        remove: () => { const i = at(); if (i >= 0) arr.splice(i, 1); if (prefix === 'a:') accounts.delete(id); },
+      };
+    };
+
+    const isNested = (r) => !!nestedName(r.key.slice(0, r.key.indexOf(':') + 1));
+    const ordered = [...rows.filter((r) => !isNested(r)), ...rows.filter(isNested)]; // accounts before their contacts
+    for (const r of ordered) {
+      const loc = locate(r.key, r.parent);
+      const cur = loc && loc.get();
+      const dirty = local.dirty.has(r.key);
+      if (cur && cur._s === r.seq) continue; // already have this version
+      if (r.deleted) {
+        if (cur && dirty && (cur._ts || 0) > r.ts) { cur._s = r.seq; tops.add(loc.top); continue; } // edited here after the delete: keep it
+        if (cur) { loc.remove(); tops.add(loc.top); }
+        delete state.deleted[r.key]; delete local.seen[r.key]; local.dirty.delete(r.key);
+        continue;
+      }
+      const tomb = state.deleted[r.key];
+      if (tomb != null) {
+        if (tomb >= r.ts) { local.seen[r.key] = r.seq; continue; } // deleted here more recently: the delete uploads next
+        delete state.deleted[r.key]; delete local.seen[r.key]; local.dirty.delete(r.key);
+      }
+      if (!loc || !r.data) continue;
+      const incoming = { ...r.data, _s: r.seq };
+      const next = cur && dirty ? { ...mergeRecord(cur, incoming), _s: r.seq } : incoming;
+      loc.set(next);
+      tops.add(loc.top);
+    }
+    return tops;
+  }
+
+  /** Upload records edited on this device. Returns keys the cloud refused because it holds a newer version. */
+  async function pushDirty() {
+    const live = new Map();
+    for (const [key, obj, , top, parent] of records(state)) if (local.dirty.has(key)) live.set(key, { obj, top, parent });
+    const rows = []; const sent = new Map(); const tops = new Set();
+    for (const key of [...local.dirty]) {
+      const wid = uid();
+      if (live.has(key)) {
+        const { obj, top, parent } = live.get(key);
+        const data = { ...obj };
+        delete data._s;
+        if (key.startsWith('a:')) for (const n of Object.keys(NESTED)) delete data[n];
+        rows.push({ user_id: cloudUser.id, key, parent, data, ts: obj._ts || 0, deleted: false, base: obj._s || 0, wid });
+        sent.set(key, { wid, ts: obj._ts || 0, obj, top });
+      } else if (state.deleted[key] != null) {
+        rows.push({ user_id: cloudUser.id, key, parent: null, data: null, ts: state.deleted[key], deleted: true, base: local.seen[key] || 0, wid });
+        sent.set(key, { wid, ts: state.deleted[key], tomb: true });
+      } else local.dirty.delete(key);
+    }
+    const refused = [];
+    for (let i = 0; i < rows.length; i += 200) {
+      const back = ok(await sb.from('records').upsert(rows.slice(i, i + 200), { onConflict: 'user_id,key' }).select('key,seq,wid'));
+      for (const r of back) {
+        const s = sent.get(r.key);
+        if (!s) continue;
+        if (r.wid !== s.wid) { refused.push(r.key); continue; }
+        if (s.tomb) {
+          if (state.deleted[r.key] === s.ts) { delete state.deleted[r.key]; delete local.seen[r.key]; local.dirty.delete(r.key); }
+          else local.seen[r.key] = r.seq;
+        } else {
+          s.obj._s = r.seq;
+          if (snapshot.has(r.key)) snapshot.get(r.key).s = r.seq;
+          tops.add(s.top);
+          if ((s.obj._ts || 0) === s.ts) local.dirty.delete(r.key); // not edited again while uploading
+        }
+      }
+    }
+    persist(tops);
+    return refused;
+  }
+
+  /** Take in downloaded rows, save them and refresh the screen if anything changed. */
+  function takeRemote(rows, moveCursor) {
+    const tops = applyRemote(rows);
+    if (moveCursor) for (const r of rows) if (r.seq > local.cursor) local.cursor = r.seq;
+    if (tops.size) snapshot = fingerprints(state);
+    persist(tops);
+    if (!tops.size) return;
+    clearTimeout(save.countsTimer);
+    save.countsTimer = setTimeout(updateCounts, 60);
     const el = document.activeElement;
     if (el && el.matches('input, textarea, select')) sync.needsRender = true;
     else rerender();
@@ -5105,30 +5317,57 @@
   }
 
   async function syncNow() {
-    if (!syncCfg) return;
+    if (!cloudOn()) return;
     if (sync.running || modal.open) { sync.again = true; return; } // never swap state under an open form
     if (!navigator.onLine) { setSyncStatus('offline'); return; }
     sync.running = true;
     setSyncStatus('syncing');
     try {
       for (let attempt = 0; attempt < 4; attempt++) {
-        const remote = await pullRemote();
+        const rows = await pullSince(local.cursor);
         if (modal.open) { sync.again = true; break; }
-        applyMerged(remote ? mergeStates(state, remote.data) : state);
-        const payload = toPayload(state);
-        if (remote && JSON.stringify(toPayload(remote.data)) === JSON.stringify(payload)) break;
-        if (await pushRemote(payload, remote && remote.sha)) break;
+        takeRemote(rows, true);
+        const refused = await pushDirty();
+        if (!refused.length) break;
+        const newer = await pullKeys(refused); // the cloud has a newer copy: merge it in and upload again
+        if (modal.open) { sync.again = true; break; }
+        takeRemote(newer, false);
       }
       sync.last = new Date();
-      setSyncStatus(sync.again ? 'pending' : 'idle');
+      setSyncStatus(sync.again || local.dirty.size ? 'pending' : 'idle');
+      if (local.dirty.size && !sync.again) scheduleSync(5000);
     } catch (e) {
-      setSyncStatus(navigator.onLine ? 'error' : 'offline', e.message);
+      const signedOut = e.status === 401 || /jwt|token/i.test(e.message || '');
+      setSyncStatus(navigator.onLine ? 'error' : 'offline', signedOut ? 'Your sign-in has expired. Sign in again.' : e.message);
     } finally {
       sync.running = false;
       if (sync.again && !modal.open) { sync.again = false; scheduleSync(500); }
     }
   }
 
+  /** Open the saved cloud connection, if this device has one. */
+  async function startCloud() {
+    let old = null;
+    try { old = localStorage.getItem(OLD_SYNC_KEY); } catch (e) { /* none */ }
+    if (old && !cloudCfg) {
+      // The earlier GitHub sync kept an access token here. Remove it; the data itself is on this device.
+      try { localStorage.setItem(OLD_SYNC_KEY, JSON.stringify({ moved: true })); } catch (e) { /* ignore */ }
+      setSyncStatus('error', 'Sync has moved from GitHub to a database. Set it up again on each device.');
+      return;
+    }
+    if (!cloudCfg || !window.supabase) { setSyncStatus('off'); return; }
+    try {
+      sb = makeClient(cloudCfg);
+      const { data } = await sb.auth.getSession();
+      cloudUser = data && data.session ? data.session.user : null;
+      sb.auth.onAuthStateChange((evt, session) => {
+        cloudUser = session ? session.user : null;
+        if (!cloudUser && cloudCfg) setSyncStatus('error', 'You are signed out. Sign in again to keep syncing.');
+      });
+    } catch (e) { cloudUser = null; }
+    if (cloudUser) setSyncStatus('pending');
+    else setSyncStatus('error', 'You are signed out. Sign in again to keep syncing.');
+  }
   const SYNC_LABELS = {
     off: '☁ Set up sync', pending: '↑ Saving…', syncing: '⟳ Syncing…', idle: '✓ Synced',
     offline: '⚠ Offline', error: '⚠ Sync error',
@@ -5163,85 +5402,95 @@
   }
 
   function syncSettings() {
-    if (syncCfg) {
+    if (cloudOn()) {
       openModal('Cloud sync', `
         <div id="sync-live">${syncStatusHtml()}</div>
-        <p class="small">Syncing with private repository <strong>${esc(syncCfg.repo)}</strong>.
-          Changes save automatically and sync within a few seconds whenever you're online.
-          Every sync is also kept in that repository's history, so it doubles as a backup.</p>
+        <p class="small">Signed in as <strong>${esc(cloudUser.email || '')}</strong>.
+          Changes save on this device first and sync within a few seconds whenever you're online.</p>
         <div class="row">
           <button type="button" class="btn ghost" id="sync-now">Sync now</button>
-          <button type="button" class="btn danger" id="sync-disconnect">Disconnect this device</button>
+          <button type="button" class="btn danger" id="sync-disconnect">Sign out on this device</button>
         </div>`, () => {}, 'Done');
       $('#sync-now').addEventListener('click', () => { modal.close(); syncNow(); });
-      $('#sync-disconnect').addEventListener('click', () => {
+      $('#sync-disconnect').addEventListener('click', async () => {
         if (!confirm('Stop syncing on this device? Your data stays on this device and in the cloud.')) return;
-        syncCfg = null;
-        localStorage.removeItem(SYNC_KEY);
-        modal.close(); setSyncStatus('off'); toast('Sync disconnected');
+        const client = sb;
+        sb = null; cloudUser = null; cloudCfg = null;
+        try { localStorage.removeItem(CLOUD_KEY); } catch (e) { /* ignore */ }
+        try { await client.auth.signOut({ scope: 'local' }); } catch (e) { /* already signed out */ }
+        modal.close(); setSyncStatus('off'); toast('Signed out');
       });
       return;
     }
 
+    const cfg = cloudCfg || {};
     openModal('Set up cloud sync', `
-      <p class="small">Keep the same data on your phone and computer by saving it to a <strong>private</strong>
-        GitHub repository. Do this once on each device, using the same repository.</p>
+      <p class="small">Keep the same data on your phone and computer with your own Supabase project.
+        Enter the same details on each device.</p>
       <ol class="small sync-steps">
-        <li>Create a private repository, e.g. <code>crm-data</code>: <a href="https://github.com/new" target="_blank" rel="noopener">github.com/new</a>.
-          Choose <em>Private</em> and tick <em>Add a README file</em>.</li>
-        <li>Create a token: <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>.
-          Under <em>Repository access</em> pick <em>Only select repositories</em> → your data repository.
-          Under <em>Permissions</em>, set <em>Contents</em> to <em>Read and write</em>. Generate and copy it.</li>
-        <li>Paste both below. Save the token in your Passwords app too, so you can paste it on your other device.</li>
+        <li>Create a free project at <a href="https://supabase.com/dashboard" target="_blank" rel="noopener">supabase.com/dashboard</a>.</li>
+        <li>Open its <em>SQL Editor</em>, paste in <code>supabase-setup.sql</code> from this app's repository, and run it once.</li>
+        <li>Copy the <em>Project URL</em> and the <em>publishable (anon) key</em> from the project's API settings.</li>
       </ol>
-      ${field('Repository (owner/name)', `<input name="repo" required placeholder="yourname/crm-data" autocapitalize="off" autocorrect="off" spellcheck="false">`)}
-      ${field('Access token', `<input name="token" type="password" required placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false">`)}
-      <div id="sync-connect-msg"></div>`, (data) => { connectSync(data); return false; }, 'Connect');
+      ${field('Project URL', `<input name="url" required placeholder="https://xxxx.supabase.co" value="${esc(cfg.url || '')}" autocapitalize="off" autocorrect="off" spellcheck="false">`)}
+      ${field('Publishable (anon) key', `<input name="key" required value="${esc(cfg.key || '')}" autocomplete="off" autocapitalize="off" spellcheck="false">`)}
+      ${field('Email', `<input name="email" type="email" required autocomplete="username" autocapitalize="off">`)}
+      ${field('Password', `<input name="password" type="password" required minlength="8" autocomplete="current-password">`)}
+      <label class="row small" style="flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" name="signup" style="width:auto;flex:none"> <span>First time: create my account with this email and password</span></label>
+      <div id="sync-connect-msg"></div>`, (data) => { connectCloud(data); return false; }, 'Sign in');
   }
 
-  async function connectSync(data) {
+  async function connectCloud(data) {
     const msg = $('#sync-connect-msg');
-    const show = (html) => { msg.innerHTML = html; };
-    const cfg = {
-      repo: data.repo.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, ''),
-      token: data.token.trim(),
-    };
-    if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo)) return show('<div class="sync-error">Enter the repository as owner/name, e.g. yourname/crm-data.</div>');
+    const show = (html) => { if (msg) msg.innerHTML = html; };
+    const fail = (text) => show(`<div class="sync-error">${esc(text)}</div>`);
+    const cfg = { url: data.url.trim().replace(/\/+$/, ''), key: data.key.trim() };
+    if (!/^https:\/\/[\w.-]+(:\d+)?$/.test(cfg.url)) return fail('Enter the project URL, e.g. https://xxxx.supabase.co');
+    if (!window.supabase) return fail('The sync library did not load. Reload the app and try again.');
     show('<div class="muted">Checking…</div>');
     try {
-      const res = await gh(`/repos/${cfg.repo}`, {}, cfg);
-      if (!res.ok) throw await ghError(res);
-      if (!(await res.json()).private) {
-        return show('<div class="sync-error">That repository is public, so anyone could read your CRM data. Use a private repository.</div>');
-      }
-      const remote = await pullRemote(cfg);
+      const client = sb && cloudCfg && cloudCfg.url === cfg.url && cloudCfg.key === cfg.key ? sb : makeClient(cfg);
+      const cred = { email: data.email.trim(), password: data.password };
+      const res = data.signup ? await client.auth.signUp(cred) : await client.auth.signInWithPassword(cred);
+      if (res.error) return fail(/fetch|network/i.test(res.error.message || '') ? 'Could not reach that project. Check the Project URL and your connection.' : res.error.message || 'Could not sign in.');
+      if (!res.data.session) return show('<div class="muted">Account created. Open the confirmation email, then come back, untick the box and sign in.</div>');
+      const user = res.data.session.user;
+      const probe = await client.from('records').select('key').eq('user_id', user.id).limit(1);
+      if (probe.error) return fail(`Signed in, but the database is not set up yet. Run supabase-setup.sql in the SQL Editor. (${probe.error.message})`);
+      const remoteHasData = probe.data.length > 0;
       const localHasData = state.accounts.length || state.tasks.length;
-      const remoteHasData = remote && (remote.data.accounts.length || remote.data.tasks.length);
 
       const finish = (useCloud) => {
-        syncCfg = cfg;
-        localStorage.setItem(SYNC_KEY, JSON.stringify(cfg));
-        if (useCloud) { state = remote.data; snapshot = fingerprints(state); save({ track: false }); }
+        cloudCfg = cfg; sb = client; cloudUser = user;
+        try { localStorage.setItem(CLOUD_KEY, JSON.stringify(cfg)); localStorage.removeItem(OLD_SYNC_KEY); } catch (e) { /* ignore */ }
+        // Start from the beginning of the cloud copy, and queue everything on this device to upload.
+        local.user = user.id; local.cursor = 0; local.seen = {}; local.dirty = new Set();
+        if (useCloud) { state = emptyState(); snapshot = fingerprints(state); }
+        else {
+          for (const [key, obj] of records(state)) { delete obj._s; local.dirty.add(key); }
+          for (const key of Object.keys(state.deleted)) local.dirty.add(key);
+        }
+        persist();
         modal.close(); rerender(); syncNow();
         toast('Sync connected');
       };
 
-      if (!(localHasData && remoteHasData)) return finish(!!remoteHasData);
+      if (!(localHasData && remoteHasData)) return finish(false);
       openModal('Cloud data found', `
-        <p>This repository already has Mini CRM data, and this device has data too.</p>
-        <label class="row"><input type="radio" name="mode" value="cloud" checked style="width:auto">
-          <span><strong>Use the cloud data</strong>: replace what's on this device. Best if this device only has test or sample data.</span></label>
-        <label class="row"><input type="radio" name="mode" value="merge" style="width:auto">
-          <span><strong>Merge both</strong>: keep everything from this device and the cloud.</span></label>`,
+        <p>Your cloud account already has Mini CRM data, and this device has data too.</p>
+        <label class="row"><input type="radio" name="mode" value="merge" checked style="width:auto">
+          <span><strong>Merge both</strong>: keep everything from this device and the cloud. Right for a device that was already syncing.</span></label>
+        <label class="row"><input type="radio" name="mode" value="cloud" style="width:auto">
+          <span><strong>Use the cloud data</strong>: replace what's on this device. Best if this device only has test or sample data.</span></label>`,
       (choice) => { finish(choice.mode === 'cloud'); return false; }, 'Continue');
     } catch (e) {
-      show(`<div class="sync-error">${esc(e.message || 'Could not reach GitHub. Check your connection.')}</div>`);
+      fail(e.message || 'Could not reach the database. Check your connection.');
     }
   }
 
   $('#btn-sync').addEventListener('click', syncSettings);
   window.addEventListener('online', () => syncNow());
-  window.addEventListener('offline', () => syncCfg && setSyncStatus('offline'));
+  window.addEventListener('offline', () => cloudOn() && setSyncStatus('offline'));
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(); });
   setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 60000);
   document.addEventListener('focusout', () => setTimeout(() => {
@@ -5265,7 +5514,13 @@
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkNewDay(); });
   setInterval(checkNewDay, 60000);
-  setSyncStatus(syncCfg ? 'pending' : 'off');
-  route();
-  syncNow();
+  (async () => {
+    if (!(await bootStorage())) {
+      $('#view').innerHTML = '<div class="empty">Could not open the saved data on this device. Close other Mini CRM tabs and reload. Nothing has been changed.</div>';
+      return;
+    }
+    await startCloud();
+    route();
+    syncNow();
+  })();
 })();
