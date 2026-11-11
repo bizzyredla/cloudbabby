@@ -225,7 +225,7 @@
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
-    a.activities ||= []; a.keyDates ||= []; a.vendors ||= [];
+    a.activities ||= []; a.keyDates ||= []; a.vendors ||= []; a.files ||= [];
     if (!a.contacts) {
       // Deterministic id so devices that migrate the same account separately still merge cleanly.
       a.contacts = a.contact || a.email || a.phone
@@ -399,18 +399,19 @@
   // Removed records leave a tombstone in state.deleted until the removal has been uploaded.
   // Changes are found by diffing each record against a snapshot taken at the previous save.
   const META_FIELDS = ['_ts', '_f', '_b', '_s'];
-  const NESTED = { activities: 'h:', keyDates: 'k:', contacts: 'c:' };
+  const NESTED = { activities: 'h:', keyDates: 'k:', contacts: 'c:', files: 'f:' };
   const bare = (x) => { const o = { ...x }; for (const f of META_FIELDS) delete o[f]; return o; };
 
   /** Yields [key, record, comparable fields, storage key, parent account id]. */
   function* records(st) {
     for (const a of st.accounts) {
-      const { activities, keyDates, contacts, ...rest } = a;
+      const { activities, keyDates, contacts, files, ...rest } = a;
       const top = 'a:' + a.id;
       yield [top, a, bare(rest), top, null];
       for (const h of activities) yield ['h:' + h.id, h, bare(h), top, a.id];
       for (const k of keyDates) yield ['k:' + k.id, k, bare(k), top, a.id];
       for (const c of contacts) yield ['c:' + c.id, c, bare(c), top, a.id];
+      for (const f of files || []) yield ['f:' + f.id, f, bare(f), top, a.id];
     }
     for (const [name, prefix] of COLLECTIONS.slice(1)) for (const x of st[name]) yield [prefix + x.id, x, bare(x), prefix + x.id, null];
     for (const [d, day] of Object.entries(st.days)) yield ['d:' + d, day, bare(day), 'd:' + d, null];
@@ -1530,6 +1531,8 @@
               <button class="icon-btn" data-act="del-keydate" data-id="${a.id}" data-kid="${k.id}" title="Delete">✕</button>
             </li>`).join('')}</ul>` : '<div class="empty">Track renewals, contract dates, QBRs, decision dates…</div>'}
         </div>
+
+        ${filesSection(a)}
 
         ${openTasks.length ? `
         <div>
@@ -4754,6 +4757,15 @@
         if (k.done) acct.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Completed: ${k.label}`, notes: k.note || '', createdAt: new Date().toISOString() });
         touch(acct); save(); rerender(); return;
       }
+      case 'add-file': return pickFiles(acct);
+      case 'open-file': return openFile(acct, el.dataset.fid);
+      case 'del-file': {
+        const f = (acct.files || []).find((x) => x.id === el.dataset.fid);
+        if (f && confirm(`Delete ${f.name}? It's removed from every synced device.`)) {
+          acct.files = acct.files.filter((x) => x.id !== f.id); touch(acct); save(); rerender();
+        }
+        return;
+      }
       case 'del-keydate':
         if (confirm('Delete this key date?')) {
           acct.keyDates = acct.keyDates.filter((k) => k.id !== kid); touch(acct); save(); rerender();
@@ -5148,6 +5160,109 @@
     save(); toast('Sample data loaded'); rerender();
   }
 
+  // ---------- attachments ----------
+  // Files live in the `attachments` bucket of your Supabase project, at <user id>/<file id>.
+  // The account only keeps each file's name, size and type, so editing an account never re-uploads
+  // a file. Files open through a short-lived private link. Removing a file's record from the account
+  // deletes the stored file once that removal has synced.
+  const FILE_BUCKET = 'attachments';
+  const FILE_MAX = 10 * 1024 * 1024;   // hard cap per file
+  const IMG_SHRINK_OVER = 1.5 * 1024 * 1024;
+  const IMG_MAX_SIDE = 2000;
+  const filePath = (fid) => `${cloudUser.id}/${fid}`;
+
+  const fmtSize = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+  function fileIcon(f) {
+    const t = (f.type || '') + ' ' + f.name.toLowerCase();
+    if (/image\//.test(t)) return '🖼';
+    if (/pdf/.test(t)) return '📄';
+    if (/sheet|excel|csv|\.xls/.test(t)) return '📊';
+    if (/word|\.doc/.test(t)) return '📝';
+    if (/presentation|powerpoint|\.ppt/.test(t)) return '📽';
+    return '📎';
+  }
+
+  function filesSection(a) {
+    const files = [...(a.files || [])].sort((x, y) => (y.addedAt || '').localeCompare(x.addedAt || ''));
+    return `
+        <div>
+          <div class="section-head"><h2 style="margin:0">Attachments <span class="muted small">(${files.length})</span></h2><button class="btn sm ghost" data-act="add-file" data-id="${a.id}">+ Add file</button></div>
+          ${files.length ? `<ul class="list">${files.map((f) => `
+            <li>
+              <span class="file-ic" aria-hidden="true">${fileIcon(f)}</span>
+              <div class="grow">
+                <button type="button" class="link-btn file-link" data-act="open-file" data-id="${a.id}" data-fid="${f.id}">${esc(f.name)}</button>
+                <div class="small muted">${fmtSize(f.size || 0)}${f.addedAt ? ' · ' + fmtDate(f.addedAt.slice(0, 10)) : ''}</div>
+              </div>
+              <button class="icon-btn" data-act="del-file" data-id="${a.id}" data-fid="${f.id}" title="Delete">✕</button>
+            </li>`).join('')}</ul>`
+            : `<div class="empty">${cloudOn() ? 'Proposals, census files, benefit summaries, signed agreements… Up to 10 MB each.' : 'Set up cloud sync to attach files. They are stored in your Supabase project.'}</div>`}
+        </div>`;
+  }
+
+  /** Shrink a large photo so it uploads and opens quickly. Returns the original if that isn't smaller. */
+  async function shrinkImage(file) {
+    if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(file.type) || file.size <= IMG_SHRINK_OVER) return file;
+    try {
+      const bmp = await createImageBitmap(file);
+      const k = Math.min(1, IMG_MAX_SIDE / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      if (bmp.close) bmp.close();
+      const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.82));
+      if (!blob || blob.size >= file.size) return file;
+      return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+    } catch (e) { return file; } // a format this browser can't read: keep it as it is
+  }
+
+  function pickFiles(acct) {
+    if (!acct) return;
+    if (!cloudOn()) { toast('Set up cloud sync first. Attachments are stored in your Supabase project.'); return; }
+    const input = document.createElement('input');
+    input.type = 'file'; input.multiple = true;
+    input.addEventListener('change', () => { if (input.files.length) addFiles(acct.id, [...input.files]); });
+    input.click();
+  }
+
+  /** Upload files and attach them to an account. Returns how many were added. */
+  async function addFiles(accountId, list) {
+    if (!cloudOn()) { toast('Set up cloud sync first.'); return 0; }
+    if (!navigator.onLine) { toast("You're offline. Add files once you're back online."); return 0; }
+    let added = 0; const problems = [];
+    for (const original of list) {
+      const file = await shrinkImage(original);
+      if (file.size > FILE_MAX) { problems.push(`${original.name} is over 10 MB`); continue; }
+      const id = uid();
+      toast(`Uploading ${file.name}…`);
+      const { error } = await sb.storage.from(FILE_BUCKET).upload(filePath(id), file, { contentType: file.type || 'application/octet-stream', upsert: false });
+      if (error) { problems.push(`${original.name}: ${/bucket not found/i.test(error.message || '') ? 'file storage is not set up yet. Run supabase-setup.sql again.' : error.message}`); continue; }
+      const acct = getAccount(accountId);
+      if (!acct) { sb.storage.from(FILE_BUCKET).remove([filePath(id)]).catch(() => {}); break; } // account deleted meanwhile
+      (acct.files ||= []).push({ id, name: file.name, size: file.size, type: file.type || '', addedAt: new Date().toISOString() });
+      touch(acct); save(); added++;
+      if (!modal.open) rerender();
+    }
+    if (problems.length) toast(problems.join(' · '));
+    else if (added) toast(added === 1 ? 'File attached' : `${added} files attached`);
+    return added;
+  }
+
+  async function openFile(acct, fid) {
+    const f = acct && (acct.files || []).find((x) => x.id === fid);
+    if (!f) return;
+    if (!cloudOn()) { toast('Sign in to cloud sync to open attachments.'); return; }
+    const viewable = /^(image\/|application\/pdf|text\/)/.test(f.type || '');
+    const win = window.open('', '_blank'); // opened now, while the tap still counts, so it isn't blocked
+    const { data, error } = await sb.storage.from(FILE_BUCKET).createSignedUrl(filePath(f.id), 300, viewable ? undefined : { download: f.name });
+    if (error || !data) {
+      if (win) win.close();
+      toast(`Could not open ${f.name}: ${error ? error.message : 'no link'}`);
+      return;
+    }
+    if (win) win.location.href = data.signedUrl; else window.location.href = data.signedUrl;
+  }
+
   // ---------- cloud sync (Supabase) ----------
   // Each record is one row in the `records` table of your Supabase project (see supabase-setup.sql).
   // A sync downloads rows changed since the last one, merges them field by field with any local
@@ -5206,14 +5321,14 @@
       let arr; let top = key; let wrap = (o) => o;
       const nested = nestedName(prefix);
       if (nested) {
-        const acct = accounts.get(parent) || state.accounts.find((a) => a[nested].some((x) => x.id === id));
+        const acct = accounts.get(parent) || state.accounts.find((a) => (a[nested] || []).some((x) => x.id === id));
         if (!acct) return null; // its account is gone
-        arr = acct[nested]; top = 'a:' + acct.id;
+        arr = (acct[nested] ||= []); top = 'a:' + acct.id;
       } else if (byPrefix.has(prefix)) {
         arr = state[byPrefix.get(prefix)];
         if (prefix === 'a:') {
           wrap = (o, old) => {
-            const full = { ...o, activities: old ? old.activities : [], keyDates: old ? old.keyDates : [], contacts: old ? old.contacts : [] };
+            const full = { ...o, activities: old ? old.activities : [], keyDates: old ? old.keyDates : [], contacts: old ? old.contacts : [], files: old ? old.files || [] : [] };
             migrateAccount(full);
             accounts.set(id, full);
             return full;
@@ -5275,7 +5390,7 @@
         sent.set(key, { wid, ts: state.deleted[key], tomb: true });
       } else local.dirty.delete(key);
     }
-    const refused = [];
+    const refused = []; const gone = [];
     for (let i = 0; i < rows.length; i += 200) {
       const back = ok(await sb.from('records').upsert(rows.slice(i, i + 200), { onConflict: 'user_id,key' }).select('key,seq,wid'));
       for (const r of back) {
@@ -5283,6 +5398,7 @@
         if (!s) continue;
         if (r.wid !== s.wid) { refused.push(r.key); continue; }
         if (s.tomb) {
+          if (r.key.startsWith('f:')) gone.push(filePath(r.key.slice(2)));
           if (state.deleted[r.key] === s.ts) { delete state.deleted[r.key]; delete local.seen[r.key]; local.dirty.delete(r.key); }
           else local.seen[r.key] = r.seq;
         } else {
@@ -5294,6 +5410,7 @@
       }
     }
     persist(tops);
+    if (gone.length) sb.storage.from(FILE_BUCKET).remove(gone).catch(() => {}); // best effort: the record is already gone
     return refused;
   }
 

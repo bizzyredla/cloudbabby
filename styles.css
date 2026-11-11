@@ -1327,3 +1327,8 @@ input, select, textarea { border-radius: 10px; }
   .ss-log { order: 5; }
   .ss-secondary { order: 6; }
 }
+
+/* attachments */
+.file-ic { font-size: 1.25rem; width: 1.75rem; text-align: center; flex: none; }
+.file-link { display: block; max-width: 100%; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-link:hover { text-decoration: underline; }

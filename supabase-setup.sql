@@ -58,3 +58,25 @@ create policy "change own records" on public.records
 revoke all on public.records from anon;
 grant select, insert, update on public.records to authenticated;
 grant usage on sequence public.records_seq to authenticated;
+
+-- ---------- attachments ----------
+-- A private bucket for files attached to accounts, 10 MB per file. Each user's files sit in a folder
+-- named after their user id, and these rules let a signed-in user reach only their own folder.
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('attachments', 'attachments', false, 10485760)
+on conflict (id) do update set public = false, file_size_limit = 10485760;
+
+drop policy if exists "minicrm read own files" on storage.objects;
+create policy "minicrm read own files" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'attachments' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+drop policy if exists "minicrm add own files" on storage.objects;
+create policy "minicrm add own files" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'attachments' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+drop policy if exists "minicrm delete own files" on storage.objects;
+create policy "minicrm delete own files" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'attachments' and (storage.foldername(name))[1] = (select auth.uid())::text);
