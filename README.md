@@ -280,6 +280,18 @@ and as soon as a lost connection comes back. Offline edits are kept and uploaded
   token is removed from the device and a banner asks you to set up sync again. You can delete the
   token at github.com/settings/personal-access-tokens.
 
+### Attachments
+
+Each account has an **Attachments** section for proposals, census files, agreements and the like.
+Files are stored in a private `attachments` bucket in your Supabase project (set up by
+`supabase-setup.sql`), so attachments need cloud sync turned on.
+
+- Up to 10 MB per file. Photos over 1.5 MB are shrunk to a 2000 px JPEG before upload.
+- The account record keeps only each file's name, size and type, so editing an account never
+  re-uploads files, and files are downloaded only when you open them.
+- Files open through a private link that expires after 5 minutes.
+- Deleting a file (or its account) removes the stored file once the change has synced.
+
 On first launch, click **Load sample data** to explore with example accounts.
 
 ## Files
