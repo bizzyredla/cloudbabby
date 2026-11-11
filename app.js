@@ -5136,12 +5136,12 @@
     );
     state.days[t] = { priorities: ['Move Northwind to Negotiation', 'Unblock Helix on HIPAA', 'Prep BrightPath webinar'], notes: '' };
     const plan = getPlan(t, true);
-    Object.assign(plan.outreach[0], { name: 'Helix Health', kind: 'Call', note: 'HIPAA follow-up' });
-    Object.assign(plan.outreach[1], { name: 'Oak & Iron Manufacturing', kind: 'LinkedIn', note: 'Connect with Chris' });
-    Object.assign(plan.outreach[2], { name: 'Northwind Logistics', kind: 'Email', note: 'Send pricing options' });
-    Object.assign(plan.visits[0], { name: 'Northwind Logistics', note: 'Drop off proposal binder' });
-    Object.assign(plan.channel[0], { name: 'BrightPath Consulting', kind: 'Call', note: 'Webinar prep' });
-    Object.assign(plan.channel[1], { name: 'Summit Tech Alliance', kind: 'Email', note: 'Onboarding agenda' });
+    Object.assign(plan.outreach[0], { name: helix.name, accountId: helix.id, kind: 'Call', note: 'HIPAA follow-up' });
+    Object.assign(plan.outreach[1], { name: oak.name, accountId: oak.id, kind: 'LinkedIn', note: 'Connect with Chris' });
+    Object.assign(plan.outreach[2], { name: northwind.name, accountId: northwind.id, kind: 'Email', note: 'Send pricing options' });
+    Object.assign(plan.visits[0], { name: northwind.name, accountId: northwind.id, note: 'Drop off proposal binder' });
+    Object.assign(plan.channel[0], { name: brightpath.name, accountId: brightpath.id, kind: 'Call', note: 'Webinar prep' });
+    Object.assign(plan.channel[1], { name: summit.name, accountId: summit.id, kind: 'Email', note: 'Onboarding agenda' });
     helix.revisitDate = t; helix.revisitNote = 'Bring security packet';
     oak.revisitDate = addDays(t, -1); oak.revisitNote = 'Meet plant HR lead';
     northwind.revisitDate = addDays(t, 10); northwind.revisitNote = 'Benefits comparison review';
