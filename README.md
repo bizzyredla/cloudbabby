@@ -167,7 +167,7 @@ No install, no build step: open `index.html` in a browser.
 - Search accounts and contacts from any screen (🔍, or press `/` or Ctrl/⌘-K on a computer)
 - Settings (sliders icon): cloud sync, export/import backup, load sample data, erase all data
 - On phones, a bottom tab bar like a native app. Updates install themselves on the next launch
-- A red banner appears if sync ever stops (for example an expired GitHub token), so you never
+- A red banner appears if sync ever stops (for example an expired sign-in), so you never
   unknowingly work unsynced
 - Stage changes are logged to history whether they're made on the board, in Edit, or while
   logging an activity. You're warned before creating two accounts with the same name
@@ -247,24 +247,36 @@ The same steps work on Android in Chrome (menu, then **Install app**).
 
 ## Data
 
-Every change is saved instantly on the device (`localStorage`). In **Settings**, use **Export backup**
-to save a JSON copy and **Import backup** to restore it. **Erase all data…** wipes everything; when
-sync is on, the erase also clears the cloud copy and every synced device.
+Every change is saved instantly on the device, in the browser's IndexedDB database. Each account,
+task, list, cadence and planner day is its own row, so a save writes only what changed. The first
+launch after upgrading from an older version copies the old `localStorage` data across and leaves
+the original in place. In **Settings**, use **Export backup** to save a JSON copy and
+**Import backup** to restore it. **Erase all data…** wipes everything; when sync is on, the erase
+also clears the cloud copy and every synced device.
 
 ### Cloud sync (phone + computer)
 
-Tap **☁ Set up sync** to keep the same data on every device. Data is stored as
-`minicrm-data.json` in a **private** GitHub repository that you own:
+Sync uses your own [Supabase](https://supabase.com) project (a hosted Postgres database):
 
-1. Create a private repository (e.g. `crm-data`) with a README.
-2. Create a fine-grained token at github.com/settings/personal-access-tokens/new with
-   access to only that repository and **Contents: Read and write**.
-3. In Mini CRM on each device, tap **☁ Set up sync** and enter `owner/repo` and the token.
+1. Create a free project at supabase.com/dashboard.
+2. Open the project's **SQL Editor**, paste in [`supabase-setup.sql`](supabase-setup.sql) and run it once.
+3. In Mini CRM on each device, tap **☁ Set up sync** and enter the Project URL, the publishable
+   (anon) key, and an email and password. Tick "create my account" the first time only.
 
 The app syncs a few seconds after each change, when it's reopened, every minute while it's open,
-and as soon as a lost connection comes back. Offline edits are kept and uploaded later. Edits from
-different devices merge record by record (newest edit wins, deletions carry over), and every sync is
-a commit, so the repository history is also a full backup. Public repositories are refused.
+and as soon as a lost connection comes back. Offline edits are kept and uploaded later.
+
+- Each record is one database row. Only records you changed are uploaded.
+- Edits from different devices merge **field by field** (the newest edit of each field wins), so
+  changing the notes on your phone and the value on your computer keeps both.
+- The database refuses a write made from an out-of-date copy; the app then downloads the newer
+  row, merges, and uploads again.
+- Row level security limits every signed-in user to their own rows. The publishable key alone
+  cannot read anything.
+- Earlier versions synced to a GitHub repository. That is gone: on first launch the saved GitHub
+  token is removed from the device and a banner asks you to set up sync again. You can delete the
+  token at github.com/settings/personal-access-tokens.
+
 On first launch, click **Load sample data** to explore with example accounts.
 
 ## Files
@@ -272,4 +284,6 @@ On first launch, click **Load sample data** to explore with example accounts.
 - `index.html`: page shell
 - `styles.css`: styles (light/dark mode, responsive)
 - `app.js`: all app logic
+- `supabase-setup.sql`: one-time database setup for cloud sync
+- `vendor/supabase`: Supabase client library (MIT license), bundled so nothing loads from a CDN
 - `manifest.webmanifest`, `sw.js`, `icons/`: home-screen install and offline support
