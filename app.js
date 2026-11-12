@@ -1743,27 +1743,10 @@
           </div>
         </div>` : ''}
 
-      <section class="hero">
-        <div class="hero-text">
-          <div class="eyebrow"><i class="dot"></i>A little focus. A lot of forward.</div>
-          <h2>Great relationships.<br>One small step at a time.</h2>
-          <p>${focusCount ? `You have <strong>${plural(focusCount, 'item')}</strong> to follow up on today. Let's keep the momentum going.` : 'Nothing is overdue. A great day to start new conversations.'}</p>
-          <a class="btn hero-btn" href="#planner/${t}">Let's plan your day →</a>
-        </div>
-        <svg class="hero-art" viewBox="0 0 220 150" aria-hidden="true">
-          <ellipse cx="120" cy="138" rx="96" ry="7" fill="currentColor" opacity=".12"/>
-          <path d="M55 138V86a40 40 0 0 1 80 0v52" fill="none" stroke="currentColor" stroke-width="16" opacity=".18"/>
-          <rect x="86" y="96" width="24" height="42" rx="3" fill="#5f9a77"/>
-          <rect x="116" y="78" width="24" height="60" rx="3" fill="#477f60"/>
-          <rect x="146" y="52" width="24" height="86" rx="3" fill="#2f6b52"/>
-          <path d="M80 82l34-26 22 12 40-38" fill="none" stroke="#2f6b52" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M168 28l10 2-2 10" fill="none" stroke="#2f6b52" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="62" cy="48" r="11" fill="#fff"/><path d="M57 48l4 4 7-8" fill="none" stroke="#2f6b52" stroke-width="2.5" stroke-linecap="round"/>
-          <path d="M70 128c-6-10-2-20 6-24 2 9-1 18-6 24zm2 0c4-8 12-11 18-9-4 7-11 10-18 9z" fill="#477f60"/>
-          <path d="M196 64l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#2f6b52"/>
-          <circle cx="200" cy="110" r="3" fill="#2f6b52" opacity=".5"/><circle cx="102" cy="20" r="3" fill="#2f6b52" opacity=".5"/>
-        </svg>
-      </section>
+      <div class="focus-bar">
+        <span>${focusCount ? `<strong>${plural(focusCount, 'item')}</strong> to follow up on today.` : 'Nothing is overdue today.'}</span>
+        <a class="btn sm focus-btn" href="#planner/${t}">Plan your day →</a>
+      </div>
 
       <div class="kpi-grid4">
         ${kpi('#accounts', 'sage', 'accounts', 'Total accounts', state.accounts.length, `<span class="pill prospect">${plural(prospects.length, 'prospect')}</span> ${plural(partners.length, 'partner')}`)}
