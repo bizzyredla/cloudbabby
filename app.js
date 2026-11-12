@@ -1662,7 +1662,7 @@
       
         </div>
       </div>
-      <footer class="ov-foot small muted"><span>Made for meaningful connections.</span><span>mini crm ✦ A little more organized.</span></footer>`;
+      <footer class="ov-foot small muted"><span>Made for meaningful connections.</span><span>Bbars OS ✦ A little more organized.</span></footer>`;
     bindChartTips();
   }
 
