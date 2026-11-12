@@ -112,7 +112,7 @@
     continue: 'Continue to next step', pause: 'Pause and set a follow-up', meeting: 'Meeting booked: finish', replied: 'Replied / engaged: finish',
     notinterested: 'Not interested: finish', bad: 'Bad data / left company: finish',
   };
-  const FINISH_LABELS = { completed: 'Completed all steps', meeting: 'Meeting booked', replied: 'Replied', notinterested: 'Not interested', bad: 'Bad data' };
+  const FINISH_LABELS = { completed: 'Completed all steps', meeting: 'Meeting booked', replied: 'Replied', referred: 'Sent a referral', notinterested: 'Not interested', bad: 'Bad data' };
   const CADENCE_COLORS = ['#2f6fed', '#d9480f', '#0f8a6a', '#8a4bd6', '#c2255c', '#c98a00', '#0b7285'];
 
   // Starter cadences: [day, type, step name, subject, script].
@@ -914,30 +914,184 @@
   const dealComp = (deal) => compEstimate(planOf(getAccount(deal.channelPartnerId)), dealInputs(deal)).total;
   const est = (n) => `${money(Math.round(n))}`;
 
-  // ----- health: four signals -----
-  function partnerHealth(p) {
-    const t = today();
-    const lt = lastTouchDate(p);
-    const ref = lastReferralDate(p);
-    const people = p.contacts.filter((c) => !c.status || c.status === 'Active');
-    const signals = [
-      { ok: !!lt && daysBetween(lt, t) <= 30, good: 'Touched in the last 30 days', bad: lt ? `No touch in ${daysBetween(lt, t)} days` : 'Never touched' },
-      { ok: !!ref && daysBetween(ref, t) <= 90, good: 'Referral in the last 90 days', bad: ref ? 'No referral in 90+ days' : 'No referrals yet' },
-      { ok: p.agreementStatus === 'Signed', good: 'Agreement signed', bad: p.agreementStatus === 'Expired' ? 'Agreement expired' : 'No signed agreement' },
-      { ok: people.length >= 2, good: `${people.length} stakeholders mapped`, bad: people.length ? 'Only 1 stakeholder' : 'No stakeholders' },
-    ];
-    const score = signals.filter((s) => s.ok).length;
-    const level = score >= 3 ? 'good' : score === 2 ? 'warn' : 'bad';
-    return { score, level, label: { good: 'Healthy', warn: 'Watch', bad: 'At risk' }[level], signals };
-  }
-  const healthDot = (h) => `<span class="health ${h.level}" title="${esc(h.signals.map((s) => (s.ok ? '✓ ' + s.good : '✗ ' + s.bad)).join('\n'))}"><i></i>${h.label}</span>`;
-
   const nextStep = (p) => state.tasks.filter((x) => x.accountId === p.id && !x.done).sort((x, y) => x.date.localeCompare(y.date))[0] || null;
+
+  // ----- tiers: value first, then time -----
+  // A partner's tier comes from what they produce: A has referred a deal in the last 12 months,
+  // B is warm (met or committed, or referred before), C is cold (signed or imported, not met).
+  // The tier sets the touch target, whether the quiet-partner rule applies and which cadence fits.
+  const TIERS = {
+    A: { name: 'Producing', days: 30, every: 'monthly', why: 'Referred a deal in the last 12 months' },
+    B: { name: 'Warm', days: 90, every: 'quarterly', why: 'Met or committed, no referral in 12 months' },
+    C: { name: 'Cold', days: 0, every: 'by cadence', why: 'Signed or imported, not met yet' },
+  };
+  const GIVE_KINDS = ['Client intro', 'Co-marketing', 'Event invite', 'Benchmark report', 'Referral out'];
+  const yearAgo = () => addDays(today(), -365);
+  const referrals12 = (p) => referredBy(p).filter((x) => x.referredAt && x.referredAt >= yearAgo());
+  const gives12 = (p) => p.activities.filter((h) => h.give && h.date >= yearAgo());
+  function autoTier(p) {
+    const ref = lastReferralDate(p);
+    if (ref && ref >= yearAgo()) return 'A';
+    if (ref || ['Met', 'Committed', 'Producing'].includes(p.stage) || p.activities.some((h) => ['Meeting', 'Visit', 'Demo'].includes(h.kind))) return 'B';
+    return 'C';
+  }
+  /** '' for closed partners; a manual tier on the partner wins over the automatic one. */
+  const partnerTier = (p) => (p.stage === 'Closed' ? '' : ['A', 'B', 'C'].includes(p.tier) ? p.tier : autoTier(p));
+  const tierPill = (t) => (t ? `<span class="tier tier-${t}" title="Tier ${t} · ${TIERS[t].name}: touch ${TIERS[t].every}">${t}</span>` : '<span class="muted">—</span>');
+  /** Past the tier's touch target (A: 30 days, B: 90). Tier C is worked by cadence, so never late. */
+  function touchGap(p, tier = partnerTier(p)) {
+    const lt = lastTouchDate(p);
+    const days = lt ? daysBetween(lt, today()) : null;
+    if (!tier || tier === 'C') return { late: false, days };
+    return { late: days === null || days > TIERS[tier].days, days };
+  }
+  const agreementLeft = (p) => (p.agreementEnd ? daysBetween(today(), p.agreementEnd) : null);
+
+  // ----- partner cadences: C gets Activate, B gets a quarterly value share -----
+  const PARTNER_CADENCES = {
+    C: { name: 'Partner Activate', description: 'Cold partners: earn a first meeting.', color: '#0b7285', steps: [
+      [1, 'email', 'Intro: how we work with partners', 'Working together on your clients', 'Hi {{first_name}},\n\nI work with brokers and advisors whose clients have outgrown in-house HR and benefits. Partners keep the relationship and get paid on what we place together.\n\nWorth 20 minutes to see if your book fits?'],
+      [3, 'call', 'Intro call', '', 'Goal: a 20-minute intro meeting. Ask which clients are growing, already on a PEO, or struggling with HR and compliance.'],
+      [6, 'linkedin', 'Connect', '', 'Connect with a short note that references the email.'],
+      [10, 'email', 'One-pager and comp overview', 'How partner comp works', 'Hi {{first_name}},\n\nA one-page overview of how referrals work and what partners earn. Happy to run the numbers on a client you have in mind.'],
+      [14, 'call', 'Book the intro meeting', '', 'Offer two times this week. Mention one client type that fits.'],
+      [21, 'email', 'Benchmark offer', 'A free benchmark for one client', 'Hi {{first_name}},\n\nIf one of your clients is renewing soon, I can put together a benefits and cost benchmark you can bring to them. No strings.'],
+    ] },
+    B: { name: 'Partner value share', description: 'Warm partners: a quarterly reason to talk, aiming for a first referral.', color: '#c98a00', steps: [
+      [1, 'email', 'Market update or benchmark', 'Something useful for your renewals', 'Hi {{first_name}},\n\nA quick market update your clients may ask about this quarter.'],
+      [21, 'call', 'Check in: clients renewing soon?', '', 'Ask which clients renew in the next 90 days and where they feel pressure.'],
+      [40, 'email', 'Case study', 'How a client like yours made the switch', ''],
+      [60, 'email', 'Event or webinar invite', 'Join us', ''],
+      [85, 'call', 'Quarterly review: ask for one introduction', '', 'Recap what you shared this quarter and ask for one introduction.'],
+    ] },
+  };
+  const partnerCadence = (tier) => state.cadences.find((c) => c.partnerTier === tier);
+  function ensurePartnerCadence(tier) {
+    let cad = partnerCadence(tier);
+    if (cad) return cad;
+    const tp = PARTNER_CADENCES[tier];
+    cad = { id: uid(), name: tp.name, description: tp.description, color: tp.color, skipWeekends: true, partnerTier: tier,
+      steps: tp.steps.map(([day, type, title, subject, body]) => ({ id: uid(), day, type, title, subject, body })) };
+    state.cadences.push(cad);
+    return cad;
+  }
+  const partnerContact = (p) => p.contacts.find((c) => c.primary && (!c.status || c.status === 'Active')) || p.contacts.find((c) => !c.status || c.status === 'Active');
+  const inPartnerCadence = (p, cad) => !!cad && state.enrollments.some((e) => e.cadenceId === cad.id && e.accountId === p.id && e.status !== 'finished');
+  /** Enroll every partner of a tier who isn't in its cadence yet, spread over workdays. */
+  function enrollTier(tier) {
+    const cad = ensurePartnerCadence(tier);
+    const list = partners().filter((p) => partnerTier(p) === tier && !inPartnerCadence(p, cad));
+    const picks = list.map((p) => ({ a: p, c: partnerContact(p) })).filter((x) => x.c);
+    const dated = staggerStarts(picks, today(), Number(ui.enrollPerDay) || 8);
+    for (const x of dated) enroll(cad, x.a, x.c, x.date);
+    return { cad, n: dated.length, noContact: list.length - picks.length, last: dated.length ? dated[dated.length - 1].date : '' };
+  }
+  /** Leave Activate once met (tier B) or referring (A); leave value share on the first referral. */
+  function partnerCadenceExits() {
+    let n = 0;
+    for (const e of state.enrollments) {
+      if (e.status === 'finished') continue;
+      const cad = cadenceById(e.cadenceId);
+      if (!cad || !cad.partnerTier) continue;
+      const p = getAccount(e.accountId);
+      if (!p) continue;
+      const tier = partnerTier(p);
+      if (cad.partnerTier === 'C' && (tier === 'A' || tier === 'B')) { finishEnrollment(e, tier === 'A' ? 'referred' : 'meeting'); n++; }
+      else if (cad.partnerTier === 'B' && tier === 'A') { finishEnrollment(e, 'referred'); n++; }
+    }
+    return n;
+  }
+
+  // ----- reciprocity: what you gave vs what you got -----
+  function giveForm(partnerId, kind = GIVE_KINDS[0]) {
+    const ps = partners().filter((x) => x.stage !== 'Closed').sort((x, y) => x.name.localeCompare(y.name));
+    if (!ps.length) { toast('Add a partner first'); return; }
+    const p0 = getAccount(partnerId) || ps[0];
+    openModal('Log something you gave', `
+      <p class="small muted" style="margin:0">Partners keep sending deals to people who send something back. Logging it keeps the give/get balance honest.</p>
+      <div class="grid-2">
+        ${field('Partner', `<select name="partnerId">${ps.map((x) => opt(x.id, x.name, p0.id)).join('')}</select>`)}
+        ${field('What you gave', `<select name="give">${GIVE_KINDS.map((k) => opt(k, k, kind)).join('')}</select>`)}
+        ${field('About (client, event, report)', `<input name="about" list="dl-give-about" placeholder="e.g. Sunrise Bakery, Q1 webinar"><datalist id="dl-give-about">${state.accounts.filter((a) => a.type === 'prospect').map((a) => `<option value="${esc(a.name)}">`).join('')}</datalist>`)}
+        ${field('Date', `<input name="date" type="date" value="${today()}">`)}
+        ${field('Notes', '<textarea name="notes" rows="2"></textarea>', 'span-2')}
+      </div>`, (data) => {
+      const p = getAccount(data.partnerId);
+      p.activities.push({ id: uid(), date: data.date || today(), kind: 'Other', give: data.give, summary: `Gave: ${data.give}${data.about ? ` · ${data.about.trim()}` : ''}`, notes: data.notes, contactId: (partnerContact(p) || {}).id || '', createdAt: new Date().toISOString() });
+      touch(p);
+      toast(`Logged for ${p.name}: ${data.give.toLowerCase()}`);
+    }, 'Log it', { wide: true });
+  }
+
+  // ----- client map: their book as your prospecting list -----
+  const NON_VENDOR = (v) => v && v !== NO_VENDOR;
+  function clientFacts(c) {
+    const acct = clientAccount(c);
+    const incumbent = c.vendor || (acct ? acct.vendors.filter(NON_VENDOR)[0] || '' : '');
+    const renewal = c.renewal || (acct && acct.vendorRenewal) || '';
+    const left = renewal ? daysBetween(today(), renewal) : null;
+    return { c, acct, incumbent, renewal, soon: left !== null && left >= 0 && left <= 90, competitor: !!incumbent && COMPETITORS.includes(incumbent), target: c.kind === 'target' || (acct && isOpenDeal(acct)) };
+  }
+  function clientMap(p) {
+    const all = partnerClients(p).filter((c) => c.kind !== 'former').map(clientFacts);
+    const worth = all.filter((x) => x.soon || x.competitor || x.target)
+      .sort((x, y) => (y.soon - x.soon) || (x.renewal || '9').localeCompare(y.renewal || '9') || (y.competitor - x.competitor) || x.c.name.localeCompare(y.c.name));
+    return { all, worth };
+  }
+  function callAgenda(p) {
+    const { worth } = clientMap(p);
+    const line = (x) => `${x.c.name}${x.incumbent ? ` (${x.incumbent})` : ''}${x.renewal ? `, renews ${fmtDate(x.renewal, { month: 'short', day: 'numeric' })}` : ''}`;
+    const soon = worth.filter((x) => x.soon); const comp = worth.filter((x) => !x.soon && x.competitor); const tgt = worth.filter((x) => !x.soon && !x.competitor);
+    const refs = referredBy(p).filter(isOpenDeal);
+    return [`Call agenda · ${p.name}`,
+      refs.length && `Update on what they sent: ${refs.map((x) => `${x.name} (${stageShort(x.stage)})`).join('; ')}`,
+      soon.length && `Renewing in the next 90 days: ${soon.map(line).join('; ')}`,
+      comp.length && `On a competitor PEO: ${comp.map(line).join('; ')}`,
+      tgt.length && `Co-sell targets: ${tgt.map(line).join('; ')}`,
+      gives12(p).length ? `What we've shared this year: ${gives12(p).map((h) => h.give).join(', ')}` : 'Offer something: a benchmark, a client intro or an event invite'].filter(Boolean).join('\n');
+  }
+  const copyText = (text, msg = 'Copied') => (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => toast(msg), () => { prompt('Copy this:', text); });
+
+  function clientEditForm(p, c) {
+    openModal(`Client · ${c.name}`, `
+      <div class="grid-2">
+        ${field('Company', `<input name="name" value="${esc(c.name)}" required>`)}
+        ${field('Relationship', `<select name="kind">${Object.entries(CLIENT_KINDS).map(([k, l]) => opt(k, l, c.kind)).join('')}</select>`)}
+        ${field('Current PEO / vendor', `<input name="vendor" list="dl-vendors-c" value="${esc(c.vendor || '')}"><datalist id="dl-vendors-c">${allVendors().map((v) => `<option value="${esc(v)}">`).join('')}</datalist>`)}
+        ${field('Renewal date', `<input name="renewal" type="date" value="${esc(c.renewal || '')}">`)}
+        ${field('Location', `<input name="location" value="${esc(c.location || '')}">`)}
+        ${field('Employees', `<input name="employees" type="number" min="0" value="${esc(c.employees || '')}">`)}
+      </div>`, (data) => {
+      if (!data.name.trim()) return false;
+      Object.assign(c, { name: data.name.trim(), kind: data.kind, vendor: data.vendor.trim(), renewal: data.renewal, location: data.location, employees: data.employees });
+      touch(p);
+    }, 'Save');
+  }
+
+  /** One row per partner for the table. */
+  function partnerRowData(p) {
+    const tier = partnerTier(p);
+    const refs = referredBy(p);
+    const open = refs.filter(isOpenDeal);
+    const won = refs.filter((x) => x.stage === 'Closed Won');
+    const gap = touchGap(p, tier);
+    const ns = nextStep(p);
+    const enr = liveEnrollments().find((x) => x.acct.id === p.id && x.e.status !== 'finished');
+    return {
+      p, tier, gap, ns, enr,
+      refs12: referrals12(p).length, refsAll: refs.length,
+      pipe: open.reduce((n, x) => n + (Number(x.value) || 0), 0),
+      compWon: won.reduce((n, x) => n + dealComp(x), 0), compOpen: open.reduce((n, x) => n + dealComp(x), 0),
+      given: gives12(p).length, got: referrals12(p).length,
+      left: agreementLeft(p),
+    };
+  }
 
   // ----- rules -----
   const RULE_LABELS = {
     onboard: ['New partner → onboarding playbook', 'Dated steps for the partner type go into the planner.'],
-    quiet: ['Quiet partner → re-engage task', 'Engaged through Dormant partners with no touch in 45 days.'],
+    quiet: ['Quiet partner → re-engage task', 'Tier A with no touch in 30 days, Tier B in 90. Tier C goes through the Activate cadence instead.'],
+    agreement: ['Agreement ending → renewal task', 'A task 60 days before a partner agreement ends.'],
     update: ['Referred deal changes stage → update the partner', 'A task to tell the partner what moved.'],
   };
   const ruleOn = (k) => (ui.partnerRules || {})[k] !== false;
@@ -951,19 +1105,36 @@
     p.playbook = key; touch(p);
   }
 
-  /** Daily check: a re-engage task for each quiet partner (once, until done). */
+  /**
+   * Partner rules: re-engage tasks for quiet Tier A/B partners (once, until done), renewal tasks 60
+   * days before an agreement ends, and partner-cadence exits when a tier changes. Cold (Tier C)
+   * partners never get re-engage tasks; open ones made before tiers existed are cleared.
+   */
   function runPartnerRules() {
-    if (!ruleOn('quiet')) return false;
     const t = today();
-    let made = false;
+    let made = partnerCadenceExits() > 0;
+    const n0 = state.tasks.length;
+    state.tasks = state.tasks.filter((x) => {
+      if (x.rule !== 'reengage' || x.done) return true;
+      const pa = getAccount(x.accountId);
+      return !pa || partnerTier(pa) !== 'C';
+    });
+    if (state.tasks.length !== n0) made = true;
     for (const p of partners()) {
-      if (!['Engaged', 'Met', 'Committed', 'Producing', 'Dormant'].includes(p.stage)) continue;
-      const lt = lastTouchDate(p);
-      if (lt && daysBetween(lt, t) < 45) continue;
-      if (state.tasks.some((x) => x.accountId === p.id && x.rule === 'reengage' && !x.done)) continue;
-      state.tasks.push({ id: uid(), date: t, time: '', title: `Re-engage ${p.name}`, accountId: p.id, priority: 'med', done: false, rule: 'reengage', categoryId: 'cat-partner',
-        notes: `${lt ? `Last touch ${relDays(lt)}.` : 'No touch logged yet.'} Share a product update, a success story or a client idea.` });
-      made = true;
+      const tier = partnerTier(p);
+      if (ruleOn('quiet') && (tier === 'A' || tier === 'B') && touchGap(p, tier).late
+        && !state.tasks.some((x) => x.accountId === p.id && x.rule === 'reengage' && !x.done)) {
+        const lt = lastTouchDate(p);
+        state.tasks.push({ id: uid(), date: t, time: '', title: `Re-engage ${p.name}`, accountId: p.id, priority: tier === 'A' ? 'high' : 'med', done: false, rule: 'reengage', categoryId: 'cat-partner',
+          notes: `Tier ${tier} (${TIERS[tier].name}): touch ${TIERS[tier].every}. ${lt ? `Last touch ${relDays(lt)}.` : 'No touch logged yet.'} Bring something: a client idea, a benchmark or an event invite.` });
+        made = true;
+      }
+      if (ruleOn('agreement') && p.agreementEnd && p.agreementStatus !== 'Expired' && agreementLeft(p) <= 60
+        && !state.tasks.some((x) => x.rule === 'agreement' && x.accountId === p.id && x.agreementEnd === p.agreementEnd)) {
+        state.tasks.push({ id: uid(), date: t, time: '', title: `Renew agreement with ${p.name} (ends ${fmtDate(p.agreementEnd, { month: 'short', day: 'numeric' })})`, accountId: p.id, priority: 'high', done: false,
+          rule: 'agreement', agreementEnd: p.agreementEnd, categoryId: 'cat-partner', notes: '' });
+        made = true;
+      }
     }
     return made;
   }
@@ -979,29 +1150,66 @@
   }
 
   // ----- the Partners page -----
+  const PT_QUICK = { all: 'All', A: 'Tier A', B: 'Tier B', C: 'Tier C', untouched: 'Past touch target', expiring: 'Agreement ending' };
+  const PT_COLS = [['name', 'Partner'], ['tier', 'Tier'], ['type', 'Type'], ['refs', 'Referrals 12 mo'], ['pipe', 'Referred pipeline'], ['comp', 'Est. comp won / open'], ['give', 'Given / got'], ['touch', 'Last touch'], ['next', 'Next step']];
   function renderPartners() {
+    if (runPartnerRules()) save();
     const all = partners();
     const t = today();
+    const data = all.map(partnerRowData);
     const q = (ui.ptSearch || '').trim().toLowerCase();
-    const rows = all.map((p) => ({ p, h: partnerHealth(p), refs: referredBy(p) })).filter(({ p, h }) => {
-      if (ui.ptType && ui.ptType !== 'all' && p.partnerType !== ui.ptType) return false;
-      if (ui.ptStage && ui.ptStage !== 'all' && p.stage !== ui.ptStage) return false;
-      if (ui.ptHealth && ui.ptHealth !== 'all' && h.level !== ui.ptHealth) return false;
-      if (ui.ptOwner && ui.ptOwner !== 'all' && (p.owner || '') !== ui.ptOwner) return false;
-      return !q || haystack(p).includes(q);
-    }).sort((x, y) => ({ bad: 0, warn: 1, good: 2 }[x.h.level] - { bad: 0, warn: 1, good: 2 }[y.h.level]) || x.p.name.localeCompare(y.p.name));
+    const quick = PT_QUICK[ui.ptQuick] ? ui.ptQuick : 'all';
+    const test = {
+      all: () => true, A: (r) => r.tier === 'A', B: (r) => r.tier === 'B', C: (r) => r.tier === 'C',
+      untouched: (r) => r.gap.late, expiring: (r) => r.left !== null && r.left <= 60,
+    };
+    const filtered = data.filter((r) => {
+      if (ui.ptType && ui.ptType !== 'all' && r.p.partnerType !== ui.ptType) return false;
+      if (ui.ptOwner && ui.ptOwner !== 'all' && (r.p.owner || '') !== ui.ptOwner) return false;
+      return !q || haystack(r.p).includes(q);
+    });
+    const shown = filtered.filter(test[quick]);
+    const tierOrder = (r) => ({ A: 0, B: 1, C: 2 }[r.tier] ?? 3);
+    const key = { name: (r) => r.p.name.toLowerCase(), tier: tierOrder, type: (r) => (r.p.partnerType || '~').toLowerCase(), refs: (r) => -r.refs12, pipe: (r) => -r.pipe,
+      comp: (r) => -(r.compWon + r.compOpen), give: (r) => r.given - r.got, touch: (r) => -(r.gap.days ?? 99999), next: (r) => (r.ns ? r.ns.date : '9999') }[ui.ptSort] || null;
+    const dir = ui.ptDir === -1 ? -1 : 1;
+    shown.sort((x, y) => {
+      if (key) { const a = key(x); const b = key(y); if (a < b) return -dir; if (a > b) return dir; }
+      return tierOrder(x) - tierOrder(y) || y.refs12 - x.refs12 || y.pipe - x.pipe || x.p.name.localeCompare(y.p.name);
+    });
+    const limit = ui.ptLimit || 25;
+    const owners = [...new Set([...PARTNER_OWNERS, ...all.map((p) => p.owner).filter(Boolean)])];
+    const by = (tier) => data.filter((r) => r.tier === tier);
+    const A = by('A'); const B = by('B'); const C = by('C');
+    const okA = A.filter((r) => !r.gap.late).length; const okB = B.filter((r) => !r.gap.late).length;
+    const cadC = partnerCadence('C'); const cadB = partnerCadence('B');
+    const inC = C.filter((r) => inPartnerCadence(r.p, cadC)).length;
+    const inB = B.filter((r) => inPartnerCadence(r.p, cadB)).length;
+    const weekSteps = (cad) => (cad ? Object.values(cadSchedule(t, addDays(weekStart(t), 6), { all: true })).flat().filter((c) => c.cad === cad && c.st !== 'done').reduce((n, c) => n + c.people.length, 0) : 0);
     const referred = state.accounts.filter((x) => x.channelPartnerId && getAccount(x.channelPartnerId));
-    const recent = referred.filter((x) => x.referredAt && daysBetween(x.referredAt, t) <= 90).length;
     const open = referred.filter(isOpenDeal);
     const openValue = open.reduce((n, x) => n + (Number(x.value) || 0), 0);
     const openComp = open.reduce((n, x) => n + dealComp(x), 0);
-    const active = all.filter((p) => ['Engaged', 'Met', 'Committed', 'Producing'].includes(p.stage)).length;
-    const owners = [...new Set([...PARTNER_OWNERS, ...all.map((p) => p.owner).filter(Boolean)])];
-    const attention = all.map((p) => ({ p, h: partnerHealth(p) })).filter(({ p, h }) => h.level !== 'good' && p.stage !== 'Closed' && p.stage !== 'Target').slice(0, 6);
+    const won12 = referred.filter((x) => x.stage === 'Closed Won' && x.referredAt >= yearAgo()).length;
+    const bar = (n, d) => `<div class="pt-bar ${d && n < d ? 'behind' : ''}"><i style="width:${d ? Math.round((n / d) * 100) : 0}%"></i></div>`;
+    const tile = (tier, body) => `<div class="card kpi-card pt-tile ${quick === tier ? 'on' : ''}" data-act="pt-quick" data-q="${tier}" role="button" tabindex="0">${body}</div>`;
+    const counts = Object.fromEntries(Object.keys(PT_QUICK).map((k) => [k, filtered.filter(test[k]).length]));
+    const recip = data.filter((r) => r.given + r.got).sort((x, y) => y.got - x.got || y.given - x.given).slice(0, 8);
+    const rmax = Math.max(1, ...recip.map((r) => Math.max(r.given, r.got)));
+    const withClients = all.filter((p) => partnerClients(p).length).sort((x, y) => partnerClients(y).length - partnerClients(x).length);
+    const cmP = getAccount(ui.cmPartner) && partnerClients(getAccount(ui.cmPartner)).length ? getAccount(ui.cmPartner) : withClients[0];
+    const cm = cmP ? clientMap(cmP) : null;
+    const live = all.filter((p) => p.stage !== 'Closed');
+    const agreements = live.filter((p) => p.agreementEnd || ['In discussion', 'Expired'].includes(p.agreementStatus))
+      .sort((x, y) => (x.agreementEnd || '9').localeCompare(y.agreementEnd || '9') || x.name.localeCompare(y.name));
+    const noEnd = live.filter((p) => p.agreementStatus === 'Signed' && !p.agreementEnd).length;
 
     $('#view').innerHTML = `
       <div class="page-head">
-        <div class="row" style="gap:.85rem"><h1>Partners <span class="muted small">(${all.length})</span></h1>${peopleSwitch('partners')}</div>
+        <div>
+          <div class="row" style="gap:.85rem"><h1>Partners <span class="muted small">(${all.length})</span></h1>${peopleSwitch('partners')}</div>
+          <div class="muted small">Tiered by what they produce. Touch targets by tier: A monthly, B quarterly, C by cadence.</div>
+        </div>
         <div class="row">
           <button class="btn ghost" data-act="comp-calc">Calculator</button>
           <button class="btn ghost" data-act="comp-rates">Comp rates</button>
@@ -1010,50 +1218,94 @@
         </div>
       </div>
       <div class="kpi-grid4 pt-kpis">
-        <div class="card kpi-card"><span class="kpi-label">Active partners</span><div class="kpi-value">${active}</div><div class="kpi-sub">Engaged through Producing · ${all.length} total</div></div>
-        <div class="card kpi-card"><span class="kpi-label">Referrals, last 90 days</span><div class="kpi-value">${recent}</div><div class="kpi-sub">${plural(referred.length, 'referral')} all time</div></div>
-        <div class="card kpi-card"><span class="kpi-label">Referred open pipeline</span><div class="kpi-value">${money(openValue)}</div><div class="kpi-sub">${plural(open.length, 'deal')} in S1–S5</div></div>
-        <div class="card kpi-card"><span class="kpi-label">Est. partner comp (open)</span><div class="kpi-value">${est(openComp)}</div><div class="kpi-sub">Year one · estimate, not a payout</div></div>
+        ${tile('A', `<span class="kpi-label">${tierPill('A')} Tier A · Producing</span><div class="kpi-value">${okA} <span class="kpi-of">of ${A.length}</span></div><div class="kpi-sub">touched in the last 30 days</div>${bar(okA, A.length)}`)}
+        ${tile('B', `<span class="kpi-label">${tierPill('B')} Tier B · Warm</span><div class="kpi-value">${okB} <span class="kpi-of">of ${B.length}</span></div><div class="kpi-sub">touched in the last 90 days${B.length - inB ? ` · <button type="button" class="link-btn small" data-act="pt-enroll" data-tier="B">${B.length - inB} not in value-share cadence</button>` : ''}</div>${bar(okB, B.length)}`)}
+        ${tile('C', `<span class="kpi-label">${tierPill('C')} Tier C · Cold</span><div class="kpi-value">${inC} <span class="kpi-of">of ${C.length}</span></div><div class="kpi-sub">in Activate cadence · ${plural(weekSteps(cadC), 'step')} this week</div>${C.length - inC ? `<button type="button" class="btn sm" data-act="pt-enroll" data-tier="C">Enroll ${C.length - inC} in Activate</button>` : bar(inC, C.length)}`)}
+        <div class="card kpi-card"><span class="kpi-label">Referred pipeline</span><div class="kpi-value">${money(openValue)}</div><div class="kpi-sub">${plural(open.length, 'open deal')} · ${est(openComp)} est. comp · ${won12} won in 12 mo</div></div>
       </div>
-      ${attention.length ? `<div class="card pt-attention">
-        <div class="section-head"><h2 style="margin:0">Needs a little attention</h2><span class="small muted">Health is from last touch, referrals, agreement and stakeholders</span></div>
-        <ul class="list">${attention.map(({ p, h }) => `<li>
-          ${healthDot(h)}
-          <div class="grow"><a class="title" href="#account/${p.id}">${esc(p.name)}</a><div class="small muted">${esc(h.signals.filter((s) => !s.ok).map((s) => s.bad).join(' · '))}</div></div>
-          <button class="btn sm ghost" data-act="log" data-id="${p.id}">Log touch</button>
-        </li>`).join('')}</ul>
-      </div>` : ''}
-      <div class="filters">
-        <input type="search" id="pt-search" placeholder="Search partners, people, notes…" value="${esc(ui.ptSearch || '')}">
-        <select id="pt-type" aria-label="Partner type"><option value="all">All partner types</option>${PARTNER_TYPES.map((x) => `<option ${ui.ptType === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
-        <select id="pt-stage" aria-label="Stage"><option value="all">All stages</option>${STAGES.partner.map((x) => `<option ${ui.ptStage === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
-        <select id="pt-health" aria-label="Health"><option value="all">Any health</option>${[['good', 'Healthy'], ['warn', 'Watch'], ['bad', 'At risk']].map(([k, l]) => `<option value="${k}" ${ui.ptHealth === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        <select id="pt-owner" aria-label="Owner"><option value="all">Any owner</option>${owners.map((x) => `<option ${ui.ptOwner === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+
+      <div class="card pt2-card">
+        <div class="section-head" style="margin-bottom:.2rem">
+          <div><h2 style="margin:0">Partner table</h2><div class="small muted">Click a column to sort. Default: tier, then referrals. Red = past the tier's touch target, or getting without giving.</div></div>
+          <button class="btn ghost sm" data-act="pt-export">Export</button>
+        </div>
+        <div class="pt-quick">${Object.entries(PT_QUICK).map(([k, l]) => `<button type="button" class="q-tab ${quick === k ? 'active' : ''}" data-act="pt-quick" data-q="${k}">${esc(l)} <span>${counts[k]}</span></button>`).join('')}</div>
+        <div class="filters pt-filters">
+          <input type="search" id="pt-search" placeholder="Search partners, people, notes…" value="${esc(ui.ptSearch || '')}">
+          <select id="pt-type" aria-label="Partner type"><option value="all">All partner types</option>${PARTNER_TYPES.map((x) => `<option ${ui.ptType === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+          <select id="pt-owner" aria-label="Owner"><option value="all">Any owner</option>${owners.map((x) => `<option ${ui.ptOwner === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        </div>
+        ${shown.length ? `<div class="rs-wrap"><table class="rs-table ptt-table">
+          <thead><tr>${PT_COLS.map(([k, l]) => `<th><button type="button" class="th-sort ${ui.ptSort === k ? 'on' : ''}" data-act="pt-sort" data-k="${k}">${esc(l)}${ui.ptSort === k ? (dir === 1 ? ' ▴' : ' ▾') : ''}</button></th>`).join('')}</tr></thead>
+          <tbody>${shown.slice(0, limit).map((r) => {
+            const { p } = r;
+            const ns = r.ns ? `<span class="${r.ns.date < t ? 'pt-late' : ''}">${esc(r.ns.title)} · ${esc(relDays(r.ns.date))}</span>`
+              : r.enr ? `<span class="muted">${esc(r.enr.cad.name)} · step ${r.enr.e.step + 1} of ${r.enr.cad.steps.length}</span>`
+              : `<span class="${r.tier === 'A' || r.tier === 'B' ? 'pt-late' : 'muted'}">Nothing planned</span>`;
+            return `<tr class="ptt-row" data-act="open-account" data-id="${p.id}">
+              <td><strong>${esc(p.name)}</strong>${p.owner && p.owner !== 'Me' ? `<div class="small muted">${esc(p.owner)}</div>` : ''}</td>
+              <td title="${esc(r.tier ? `${TIERS[r.tier].name}: ${p.tier ? 'set by hand' : TIERS[r.tier].why}` : 'Closed')}">${tierPill(r.tier)}</td>
+              <td class="small">${esc(p.partnerType || '—')}</td>
+              <td>${r.refs12}${r.refsAll > r.refs12 ? ` <span class="small muted">(${r.refsAll} all)</span>` : ''}</td>
+              <td>${r.pipe ? money(r.pipe) : '<span class="muted">—</span>'}</td>
+              <td>${r.compWon || r.compOpen ? `${est(r.compWon)} / ${est(r.compOpen)}` : '<span class="muted">—</span>'}</td>
+              <td class="${r.got && !r.given ? 'pt-late' : ''}" title="Given to them / referrals from them, last 12 months">${r.given} / ${r.got}</td>
+              <td class="${r.gap.late ? 'pt-late' : ''}">${r.gap.days === null ? 'never' : esc(relDays(lastTouchDate(p)))}</td>
+              <td class="small ptt-next">${ns}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+        ${shown.length > limit ? `<button type="button" class="link-btn" data-act="pt-more">Show ${shown.length - limit} more ▾</button>` : ''}`
+          : `<div class="empty">${all.length ? 'No partners match.' : 'No partners yet. Add a broker, CPA or other referral partner to start.'}</div>`}
       </div>
-      ${rows.length ? `<div class="pt-grid">${rows.map(({ p, h, refs }) => {
-        const o = refs.filter(isOpenDeal);
-        const ns = nextStep(p);
-        const lt = lastTouchDate(p); const ref = lastReferralDate(p);
-        return `<div class="card pt-card" data-act="open-account" data-id="${p.id}" role="link" tabindex="0">
-          <div class="row spread" style="flex-wrap:nowrap;align-items:flex-start">
-            <div style="min-width:0"><strong class="ellipsis" style="display:block">${esc(p.name)}</strong><div class="small muted">${esc(p.partnerType || 'Partner')} · ${esc(p.stage)}${p.owner ? ' · ' + esc(p.owner) : ''}</div></div>
-            ${healthDot(h)}
-          </div>
-          <div class="pt-stats">
-            <div><span>Last touch</span>${lt ? esc(relDays(lt)) : 'never'}</div>
-            <div><span>Last referral</span>${ref ? esc(relDays(ref)) : 'none'}</div>
-            <div><span>Referred open</span>${o.length ? `${o.length} · ${money(o.reduce((n, x) => n + (Number(x.value) || 0), 0))}` : '—'}</div>
-            <div><span>Clients mapped</span>${partnerClients(p).length || '—'}</div>
-          </div>
-          <div class="small ${ns && ns.date < t ? 'pt-late' : 'muted'} ellipsis">${ns ? `Next: ${esc(ns.title)} · ${esc(relDays(ns.date))}` : 'No next step planned'}</div>
-        </div>`;
-      }).join('')}</div>` : `<div class="card empty-soft">${all.length ? 'No partners match these filters.' : 'No partners yet. Add a broker, CPA or other referral partner to start.'}</div>`}
+
+      <div class="pt-lower">
+        <div class="card">
+          <h2 style="margin:0">Reciprocity</h2>
+          <p class="small muted" style="margin:.2rem 0 .6rem">What you gave vs what you got, last 12 months.</p>
+          ${recip.length ? `<div class="rc-list">${recip.map((r) => `<a class="rc-row" href="#account/${r.p.id}">
+            <span class="rc-name">${esc(r.p.name)}</span>
+            <span class="rc-bars"><i class="g" style="width:${(r.given / rmax) * 50}%"></i><i class="r" style="width:${(r.got / rmax) * 50}%"></i></span>
+            <span class="small ${r.got && !r.given ? 'pt-late' : 'muted'}">${r.given} / ${r.got}</span>
+          </a>`).join('')}</div>
+          <div class="rc-key small muted"><span><i class="g"></i> given to them</span><span><i class="r"></i> received from them</span></div>`
+            : '<div class="empty">Log a referral or something you gave and the balance shows here.</div>'}
+          <div class="row rc-acts">${GIVE_KINDS.map((k) => `<button type="button" class="btn ghost sm" data-act="pt-give" data-kind="${esc(k)}">+ ${esc(k)}</button>`).join('')}</div>
+        </div>
+
+        <div class="card">
+          <div class="section-head" style="margin-bottom:.2rem"><h2 style="margin:0">Client map</h2>
+            ${withClients.length > 1 ? `<select id="cm-partner" aria-label="Partner">${withClients.map((p) => opt(p.id, p.name, cmP.id)).join('')}</select>` : ''}</div>
+          ${cm ? `<p class="small muted" style="margin:0 0 .5rem">${esc(cmP.name)}'s clients worth raising: renewing in 90 days, on a competitor PEO, or already a target. <b>${cm.worth.length} of ${cm.all.length}</b>.</p>
+            ${cm.worth.length ? `<div class="cm-list">${cm.worth.slice(0, 8).map((x) => `<div class="cm-row">
+              <div class="grow" style="min-width:0">${x.acct ? `<a class="title" href="#account/${x.acct.id}">${esc(x.c.name)}</a>` : `<strong>${esc(x.c.name)}</strong>`}
+                <div class="small muted">${esc(x.incumbent || 'Vendor unknown')}${x.acct ? ` · ${esc(stageShort(x.acct.stage))}` : x.c.kind === 'target' ? ' · co-sell target' : ''}</div></div>
+              <span class="small ${x.soon ? 'pt-late' : 'muted'}">${x.renewal ? esc(fmtDate(x.renewal, { month: 'short', day: 'numeric' })) : '—'}</span>
+              <button type="button" class="icon-btn" data-act="pt-client-edit" data-id="${cmP.id}" data-client="${x.c.id}" title="Edit vendor and renewal" aria-label="Edit ${esc(x.c.name)}">✎</button>
+              ${x.acct ? '' : `<button type="button" class="btn sm ghost" data-act="client-prospect" data-id="${cmP.id}" data-client="${x.c.id}">Add</button>`}
+            </div>`).join('')}</div>` : `<div class="empty">None flagged yet. Add each client's current vendor and renewal date (✎ on the partner's Accounts tab) to surface them.</div>`}
+            <div class="row" style="margin-top:.6rem"><button type="button" class="btn sm" data-act="pt-agenda" data-id="${cmP.id}">Copy call agenda</button><button type="button" class="btn sm ghost" data-act="pt-open-tab" data-id="${cmP.id}" data-tab="accounts">All ${cm.all.length} clients</button></div>`
+            : '<div class="empty">Paste a partner\'s book of business (their page → Accounts → + Add clients). Clients renewing soon or on a competitor PEO become the agenda for your next call.</div>'}
+        </div>
+
+        <div class="card">
+          <h2 style="margin:0">Agreements</h2>
+          <p class="small muted" style="margin:.2rem 0 .6rem">60-day warning before an agreement ends; a renewal task is added automatically.</p>
+          ${agreements.length ? `<ul class="list ag-list">${agreements.slice(0, 10).map((p) => {
+            const left = agreementLeft(p);
+            return `<li><a class="title grow" href="#account/${p.id}">${esc(p.name)}</a>
+              <span class="small ${left !== null && left <= 60 ? 'pt-late' : 'muted'}">${p.agreementEnd ? `${esc(fmtDate(p.agreementEnd))} · ${left < 0 ? `ended ${-left} days ago` : `${left} days`}` : `${esc(p.agreementStatus || 'None')} · no end date`}</span></li>`;
+          }).join('')}</ul>` : ''}
+          ${noEnd ? `<p class="small muted" style="margin:.5rem 0 0">${plural(noEnd, 'signed partner')} with no end date. Add one under Edit → Partner details to get the warning.</p>` : agreements.length ? '' : '<div class="empty">Add agreement end dates on a partner (Edit → Partner details).</div>'}
+        </div>
+      </div>
+
       <div class="card pt-rules">
         <h3 style="margin:0 0 .5rem">Automatic rules</h3>
         ${Object.entries(RULE_LABELS).map(([k, [name, sub]]) => `<label class="row pt-rule"><input type="checkbox" data-rule="${k}" ${ruleOn(k) ? 'checked' : ''} style="width:auto"><span><b>${esc(name)}</b><br><span class="small muted">${esc(sub)}</span></span></label>`).join('')}
       </div>`;
-    const bind = (sel, key) => $(sel).addEventListener('change', (e) => { ui[key] = e.target.value; renderPartners(); });
-    bind('#pt-type', 'ptType'); bind('#pt-stage', 'ptStage'); bind('#pt-health', 'ptHealth'); bind('#pt-owner', 'ptOwner');
+    const bind = (sel, k) => { const el = $(sel); if (el) el.addEventListener('change', (e) => { ui[k] = e.target.value; ui.ptLimit = 0; renderPartners(); }); };
+    bind('#pt-type', 'ptType'); bind('#pt-owner', 'ptOwner'); bind('#cm-partner', 'cmPartner');
     $('#pt-search').addEventListener('input', (e) => {
       ui.ptSearch = e.target.value; clearTimeout(ui.searchTimer);
       ui.searchTimer = setTimeout(() => { if (!$('#pt-search')) return; const pos = $('#pt-search').selectionStart; renderPartners(); const el = $('#pt-search'); el.focus(); el.setSelectionRange(pos, pos); }, 160);
@@ -1064,16 +1316,30 @@
     }));
   }
 
+  function partnersCsv() {
+    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [['Partner', 'Tier', 'Type', 'Stage', 'Owner', 'Referrals 12 mo', 'Referrals all time', 'Referred pipeline', 'Est. comp won', 'Est. comp open', 'Given 12 mo', 'Got 12 mo', 'Last touch', 'Agreement', 'Agreement ends', 'Next step']];
+    for (const r of partners().map(partnerRowData)) {
+      rows.push([r.p.name, r.tier, r.p.partnerType, r.p.stage, r.p.owner, r.refs12, r.refsAll, r.pipe, Math.round(r.compWon), Math.round(r.compOpen), r.given, r.got, lastTouchDate(r.p), r.p.agreementStatus, r.p.agreementEnd, r.ns ? `${r.ns.title} (${r.ns.date})` : '']);
+    }
+    downloadFile(`Partners-${today()}.csv`, rows.map((x) => x.map(cell).join(',')).join('\r\n'), 'text/csv');
+  }
+
   // ----- partner page: summary strip and tabs -----
   const PARTNER_TABS = { overview: 'Overview', people: 'People', accounts: 'Accounts', pipeline: 'Pipeline & comp', plan: 'Plan' };
   function partnerStrip(a) {
-    const h = partnerHealth(a);
+    const tier = partnerTier(a);
+    const gap = touchGap(a, tier);
     const ns = nextStep(a);
     const plan = planOf(a);
+    const left = agreementLeft(a);
+    const given = gives12(a).length; const got = referrals12(a).length;
     return `
       <div class="pt-strip">
-        <div><span>Health</span>${healthDot(h)}</div>
-        <div><span>Agreement</span>${esc(a.agreementStatus || 'None')}${a.nationalAgreement ? ' <span class="pill">National</span>' : ''}</div>
+        <div><span>Tier</span>${tierPill(tier)} ${tier ? `${esc(TIERS[tier].name)}${a.tier ? ' <span class="small muted">(set by hand)</span>' : ''}` : 'Closed'}</div>
+        <div><span>Touch ${tier ? esc(TIERS[tier].every) : ''}</span><span class="${gap.late ? 'pt-late' : ''}">${gap.days === null ? 'Never touched' : `Last ${esc(relDays(lastTouchDate(a)))}`}</span></div>
+        <div><span>Given / got · 12 mo</span><span class="${got && !given ? 'pt-late' : ''}">${given} / ${got}</span> <button type="button" class="link-btn small" data-act="pt-give" data-id="${a.id}">+ Give</button></div>
+        <div><span>Agreement</span>${esc(a.agreementStatus || 'None')}${a.agreementEnd ? ` <span class="small ${left <= 60 ? 'pt-late' : 'muted'}">· ends ${esc(fmtDate(a.agreementEnd, { month: 'short', day: 'numeric', year: 'numeric' }))}</span>` : ''}${a.nationalAgreement ? ' <span class="pill">National</span>' : ''}</div>
         <div><span>Comp plan</span>${plan ? esc(plan.name) : '—'}</div>
         <div><span>Owner</span>${esc(a.owner || '—')}</div>
         <div class="pt-next"><span>Next step</span>${ns ? `${esc(ns.title)} <span class="small muted">${esc(relDays(ns.date))}</span>` : '<span class="muted">None planned</span>'}</div>
@@ -1148,8 +1414,9 @@
     return `<li>
       <div class="grow">
         ${acct ? `<a class="title" href="#account/${acct.id}">${esc(c.name)}</a>` : `<span class="title">${esc(c.name)}</span>`}
-        <div class="small muted">${[c.location, c.employees ? `${c.employees} employees` : '', c.ein ? `EIN ${c.ein}` : ''].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</div>
+        <div class="small muted">${[c.location, c.employees ? `${c.employees} employees` : '', c.ein ? `EIN ${c.ein}` : '', c.vendor ? `on ${c.vendor}` : '', c.renewal ? `renews ${fmtDate(c.renewal, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</div>
       </div>
+      <button class="icon-btn" data-act="pt-client-edit" data-id="${p.id}" data-client="${c.id}" title="Edit vendor, renewal and details" aria-label="Edit ${esc(c.name)}">✎</button>
       ${acct ? `<span class="pill" title="Already in your CRM">In CRM · ${esc(stageShort(acct.stage))}</span>` : ''}
       <select class="pt-kind" data-client-kind data-id="${p.id}" data-client="${c.id}" aria-label="Relationship">${Object.entries(CLIENT_KINDS).map(([k, l]) => opt(k, l, c.kind)).join('')}</select>
       ${acct ? '' : `<button class="btn sm ghost" data-act="client-prospect" data-id="${p.id}" data-client="${c.id}" title="Create a prospect account for this client">+ Prospect</button>`}
@@ -1178,17 +1445,48 @@
         <label class="row small">Comp plan <select data-comp-plan data-id="${a.id}">${compPlans().map((x) => opt(x.id, x.name, plan && plan.id)).join('')}</select></label>
         <div class="row"><button class="btn sm ghost" data-act="comp-rates">Comp rates</button><button class="btn sm ghost" data-act="comp-calc" data-pid="${a.id}">What-if calculator</button></div>
       </div>
-      <div class="cad-stats">
-        <div><b>${open.length}</b><span>Open referred deals</span></div>
-        <div><b>${money(open.reduce((n, x) => n + (Number(x.value) || 0), 0))}</b><span>Open pipeline</span></div>
-        <div class="good"><b>${est(openTotal)}</b><span>Est. comp, open</span></div>
-        <div><b>${won.length}</b><span>Won</span></div>
-        <div><b>${est(wonTotal)}</b><span>Est. comp, won</span></div>
-      </div>
+      ${(() => { const sc = partnerScorecard(a); return `<div class="section-head" style="margin:0"><h3 style="margin:0">Referral scorecard</h3><button type="button" class="btn sm ghost" data-act="pt-qbr" data-id="${a.id}">Copy for a partner review</button></div>
+      <div class="cad-stats pt-score">
+        <div><b>${sc.r12}</b><span>Referrals, 12 mo${sc.all > sc.r12 ? ` (${sc.all} all)` : ''}</span></div>
+        <div><b>${sc.winRate === null ? '—' : sc.winRate + '%'}</b><span>Win rate${sc.won + sc.lost ? ` · ${sc.won} of ${sc.won + sc.lost}` : ''}</span></div>
+        <div><b>${sc.avg ? money(Math.round(sc.avg)) : '—'}</b><span>Avg won deal</span></div>
+        <div class="good"><b>${est(wonTotal)} / ${est(openTotal)}</b><span>Est. comp won / open</span></div>
+        <div><b>${sc.days === null ? '—' : sc.days}</b><span>Days, referral → close</span></div>
+        <div class="${sc.got && !sc.given ? 'bad' : ''}"><b>${sc.given} / ${sc.got}</b><span>Given / got, 12 mo</span></div>
+      </div>`; })()}
       <h3 style="margin:.25rem 0 0">Open (S1–S5)</h3>
       ${open.length ? table(open) : '<div class="empty">No open referred deals.</div>'}
       ${won.length ? `<h3 style="margin:.25rem 0 0">Closed Won</h3>${table(won)}` : ''}
       <p class="small muted" style="margin:0">Estimates from your comp rates using each deal's enrolled employees (or headcount), annual admin fees and setup fee. Not a payout statement.</p>`;
+  }
+
+  function partnerScorecard(a) {
+    const refs = referredBy(a);
+    const plan = planOf(a);
+    const won = refs.filter((x) => x.stage === 'Closed Won'); const lost = refs.filter((x) => x.stage === 'Closed Lost');
+    const open = refs.filter(isOpenDeal);
+    const vals = won.map((x) => Number(x.value) || 0).filter(Boolean);
+    const cyc = won.filter((x) => x.referredAt && x.closeDate && x.closeDate >= x.referredAt).map((x) => daysBetween(x.referredAt, x.closeDate));
+    const comp = (list) => list.reduce((n, x) => n + compEstimate(plan, dealInputs(x)).total, 0);
+    return {
+      r12: referrals12(a).length, all: refs.length, won: won.length, lost: lost.length,
+      winRate: won.length + lost.length ? pct(won.length, won.length + lost.length) : null,
+      avg: vals.length ? vals.reduce((n, v) => n + v, 0) / vals.length : null,
+      days: cyc.length ? Math.round(cyc.reduce((n, v) => n + v, 0) / cyc.length) : null,
+      open: open.length, pipe: open.reduce((n, x) => n + (Number(x.value) || 0), 0), compWon: comp(won), compOpen: comp(open),
+      given: gives12(a).length, got: referrals12(a).length, gives: gives12(a),
+    };
+  }
+  function qbrText(a) {
+    const sc = partnerScorecard(a);
+    return [`${a.name} · partner review, ${fmtDate(today())}`,
+      `Referrals: ${sc.r12} in the last 12 months (${sc.all} all time)`,
+      `Won: ${sc.won}${sc.winRate !== null ? ` · win rate ${sc.winRate}%` : ''}${sc.avg ? ` · average deal ${money(Math.round(sc.avg))}` : ''}`,
+      `Open: ${plural(sc.open, 'deal')} · ${money(sc.pipe)} pipeline`,
+      `Estimated partner comp: ${est(sc.compWon)} won · ${est(sc.compOpen)} open (estimates, not a statement)`,
+      sc.days !== null && `Referral to close: ${sc.days} days on average`,
+      sc.gives.length ? `What we shared: ${sc.gives.map((h) => h.summary.replace(/^Gave: /, '')).join('; ')}` : '',
+      clientMap(a).worth.length ? `Clients to discuss: ${clientMap(a).worth.slice(0, 5).map((x) => x.c.name).join(', ')}` : ''].filter(Boolean).join('\n');
   }
 
   function partnerPlan(a) {
@@ -1251,6 +1549,7 @@
       state.accounts.push(acct);
       p.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Referral: ${acct.name}`, notes: '', contactId: data.channelContactId || '', createdAt: now });
       touch(p);
+      partnerCadenceExits();
       toast(`Referral logged: ${acct.name}`);
     }, 'Log referral', { wide: true });
     const fill = () => {
@@ -1289,15 +1588,34 @@
     });
   }
 
+  /** A renewal date from a pasted cell: 1/1/2027, 2027-01-01 or "Jan 1" (next one coming). */
+  function cellDate(c) {
+    let m = c.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return c;
+    m = c.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    if (m) { const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]); return `${y}-${pad(Number(m[1]))}-${pad(Number(m[2]))}`; }
+    m = c.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})$/i);
+    if (m) {
+      const mon = 'janfebmaraprmayjunjulaugsepoctnovdec'.indexOf(m[1].toLowerCase()) / 3 + 1;
+      const t = today(); let iso = `${t.slice(0, 4)}-${pad(mon)}-${pad(Number(m[2]))}`;
+      if (iso < t) iso = `${Number(t.slice(0, 4)) + 1}${iso.slice(4)}`;
+      return iso;
+    }
+    return '';
+  }
+
   function parseClientRows(text) {
     return String(text || '').split(/\r?\n/).map((line) => {
       const cells = (line.includes('\t') ? line.split('\t') : line.split(/,(?=\s*\S)(?![^"]*"\s*$)/)).map((x) => x.replace(/^"|"$/g, '').trim()).filter(Boolean);
       if (!cells.length) return null;
-      const r = { name: cells[0], location: '', employees: '', ein: '' };
+      const r = { name: cells[0], location: '', employees: '', ein: '', vendor: '', renewal: '' };
       if (/^employer|^company|^name$/i.test(r.name)) return null; // header row
       for (const c of cells.slice(1)) {
+        const vendor = allVendors().find((v) => v !== NO_VENDOR && c.toLowerCase().includes(v.toLowerCase()));
         if (/^\d{2}-\d{7}$/.test(c)) r.ein = c;
+        else if (!r.renewal && cellDate(c)) r.renewal = cellDate(c);
         else if (/^[\d,]+$/.test(c) && !r.employees) r.employees = c.replace(/,/g, '');
+        else if (vendor && !r.vendor) r.vendor = vendor;
         else if (/[A-Za-z .'-]+,\s*[A-Z]{2}\b/.test(c) && !r.location) r.location = c;
       }
       return r.name.length > 1 ? r : null;
@@ -3160,7 +3478,7 @@
   }
 
   const statusPill = (e) => e.status === 'finished'
-    ? `<span class="pill ${['meeting', 'replied'].includes(e.outcome) ? 'won' : ''}">${esc(FINISH_LABELS[e.outcome] || 'Finished')}</span>`
+    ? `<span class="pill ${['meeting', 'replied', 'referred'].includes(e.outcome) ? 'won' : ''}">${esc(FINISH_LABELS[e.outcome] || 'Finished')}</span>`
     : e.status === 'paused' ? `<span class="pill med" title="${esc(e.pausedAt ? `Paused ${relDays(e.pausedAt)}` : 'Paused')}">Paused${e.pauseReason ? ' · ' + esc(e.pauseReason.toLowerCase()) : ''}</span>`
     : isDue(e) ? `<span class="pill ${e.dueDate < today() ? 'overdue' : 'today'}">${e.dueDate < today() ? 'Overdue' : 'Due today'}</span>`
     : '<span class="pill active-pill">Active</span>';
@@ -3947,7 +4265,7 @@
         x.done++; r = true;
         if (isPositive(x.s, h.outcome)) { x.pos++; g = true; }
       }
-      if (['meeting', 'replied'].includes(e.outcome)) g = true;
+      if (['meeting', 'replied', 'referred'].includes(e.outcome)) g = true;
       reached += r ? 1 : 0; engaged += g ? 1 : 0;
     }
     return {
@@ -5891,6 +6209,8 @@
         ${field('Last touch date', `<input name="lastTouchDate" type="date" value="${esc(existing ? lastTouchDate(a) : '')}"><span class="small muted">Fills in from logged activity; set it for touches made outside the app.</span>`)}
         ${field('Last referral date', `<input name="lastReferralDate" type="date" value="${esc(existing ? lastReferralDate(a) : '')}"><span class="small muted">Updates when you link a referred account to this partner.</span>`)}
         ${field('Agreement', `<select name="agreementStatus">${AGREEMENT_STATUSES.map((x) => opt(x, x, a.agreementStatus || 'None')).join('')}</select>`)}
+        ${field('Agreement ends', `<input name="agreementEnd" type="date" value="${esc(a.agreementEnd || '')}">`)}
+        ${field('Tier', `<select name="tier"><option value="">Automatic${existing && a.type === 'partner' ? ` (now ${autoTier(a)})` : ''}</option>${['A', 'B', 'C'].map((k) => opt(k, `${k} · ${TIERS[k].name} (set by hand)`, a.tier || '')).join('')}</select>`)}
         ${field('Comp plan', `<select name="compPlanId">${compPlans().map((x) => opt(x.id, x.name, (planOf(a) || {}).id)).join('')}</select>`)}
         ${field('Owner', `<input name="owner" list="dl-owners" value="${esc(a.owner || '')}" placeholder="Who owns this partner"><datalist id="dl-owners">${[...new Set([...PARTNER_OWNERS, ...partners().map((x) => x.owner).filter(Boolean)])].map((x) => `<option value="${esc(x)}">`).join('')}</datalist>`)}
         <label class="row small" style="align-self:end"><input type="checkbox" name="nationalAgreement" style="width:auto" ${a.nationalAgreement ? 'checked' : ''}> National agreement</label>
@@ -5907,7 +6227,7 @@
       if (!data.name.trim()) return false;
       const { c_name, c_title, c_email, c_phone, ...fields } = data;
       fields.vendors = JSON.parse(fields.vendors || '[]');
-      if (fields.type !== 'partner') { for (const k of ['partnerType', 'lastTouchDate', 'lastReferralDate', 'agreementStatus', 'compPlanId', 'owner', 'nationalAgreement']) delete fields[k]; }
+      if (fields.type !== 'partner') { for (const k of ['partnerType', 'lastTouchDate', 'lastReferralDate', 'agreementStatus', 'agreementEnd', 'tier', 'compPlanId', 'owner', 'nationalAgreement']) delete fields[k]; }
       else fields.nationalAgreement = !!data.nationalAgreement;
       // Linking an account to a partner counts as a referral that day.
       if (fields.channelPartnerId && fields.channelPartnerId !== (existing || {}).channelPartnerId) fields.referredAt = today();
@@ -6254,6 +6574,20 @@
       case 'edit-contact': return contactForm(acct, acct.contacts.find((c) => c.id === cid));
       case 'open-contact': ui.focusContact = cid; return go(`account/${id}`);
       case 'ptab': ui.partnerTab = el.dataset.tab; return rerender();
+      case 'pt-quick': ui.ptQuick = el.classList.contains('pt-tile') && ui.ptQuick === el.dataset.q ? 'all' : el.dataset.q; ui.ptLimit = 0; return rerender();
+      case 'pt-sort': { const k = el.dataset.k; if (ui.ptSort === k) ui.ptDir = -(ui.ptDir || 1); else { ui.ptSort = k; ui.ptDir = 1; } return rerender(); }
+      case 'pt-more': ui.ptLimit = 100000; return rerender();
+      case 'pt-export': return partnersCsv();
+      case 'pt-enroll': {
+        const r = enrollTier(el.dataset.tier); save(); rerender();
+        return toast(r.n ? `${plural(r.n, 'partner')} enrolled in ${r.cad.name}${r.last && r.last !== today() ? ` · starts spread to ${fmtDate(r.last, { weekday: 'short', month: 'short', day: 'numeric' })}` : ''}${r.noContact ? ` · ${r.noContact} need a contact first` : ''}`
+          : r.noContact ? `${plural(r.noContact, 'partner')} need a contact first` : 'Everyone is already enrolled');
+      }
+      case 'pt-give': return giveForm(id, el.dataset.kind);
+      case 'pt-agenda': return copyText(callAgenda(acct), 'Call agenda copied');
+      case 'pt-qbr': return copyText(qbrText(acct), 'Partner review summary copied');
+      case 'pt-client-edit': { const c = (acct.clients || []).find((x) => x.id === el.dataset.client); return c ? clientEditForm(acct, c) : undefined; }
+      case 'pt-open-tab': ui.recordId = id; ui.partnerTab = el.dataset.tab; return go(`account/${id}`);
       case 'new-partner': return accountForm(null, { type: 'partner', stage: STAGES.partner[0] });
       case 'log-referral': return referralForm(id);
       case 'comp-calc': return compCalc({ dealId: el.dataset.deal, partnerId: el.dataset.pid });
@@ -6611,7 +6945,7 @@
       value: 22000, nextFollowUp: '', activities: [], keyDates: [],
     });
 
-    Object.assign(brightpath, { partnerType: 'Business Consultant', agreementStatus: 'Signed', owner: 'Me', compPlanId: 'cp-share',
+    Object.assign(brightpath, { partnerType: 'Business Consultant', agreementStatus: 'Signed', agreementEnd: addDays(t, 150), owner: 'Me', compPlanId: 'cp-share',
       resources: [{ id: uid(), label: 'Highspot partner page', url: 'https://www.highspot.com' }],
       clients: [
         { id: uid(), name: 'Pacific Coast Dental Group', location: 'San Jose, CA', employees: '64', ein: '', kind: 'client', accountId: '' },

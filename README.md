@@ -210,22 +210,52 @@ No install, no build step: open `index.html` in a browser.
   queue; checking one off logs the touch
 - Included in CSV export and import ("Stay in touch" column, primary contact)
 
-**Partners (your ecosystem)**: a light layer on partner accounts, not a separate PRM
-- **Partners page** (sidebar; on iPhone, Accounts | Contacts | Partners): active partners,
-  referrals in the last 90 days, referred open pipeline, estimated partner comp, a "needs
-  attention" list, and a card per partner with health, last touch, last referral, referred
-  pipeline, clients mapped and next step. Filter by type, stage, health and owner
-- **Health** (Healthy / Watch / At risk) from four signals: touched in 30 days, a referral in
-  90 days, agreement signed, at least two stakeholders. Hover it to see which signals are missing
-- **Partner page tabs**: Overview (the full record plus a strip with health, agreement, comp plan,
-  owner, next step) · People (stakeholder map with role, influence, Stay in touch cadence and
+**Partners (your ecosystem)**: a light layer on partner accounts, not a separate PRM. It measures
+value first, then spends your time by tier
+- **Tiers** (automatic; set one by hand under Edit → Partner details if you know better):
+  - **A · Producing**: referred a deal in the last 12 months. Touch monthly
+  - **B · Warm**: met or committed (or referred before), no referral in 12 months. Touch quarterly,
+    aiming for a first referral
+  - **C · Cold**: signed or imported, not met yet. Worked through the Activate cadence, never
+    re-engage tasks
+- **Partners page** (sidebar; on iPhone, Accounts | Contacts | Partners):
+  - Tier tiles as touch targets with a gap: "Tier A: 2 of 3 touched in 30 days", "Tier B: 1 of 2
+    in 90 days", "Tier C: 3 of 4 in Activate cadence · N steps this week", and referred pipeline
+    with est. comp. Click a tile to filter
+  - **Partner table**: tier, type, referrals (12 mo), referred pipeline, est. comp won / open,
+    given / got, last touch and next step (a task, or the cadence step they're on). Click any
+    column to sort (default: tier, then referrals). Quick filters: tier, past touch target,
+    agreement ending. Red = past the tier's touch target, getting without giving, or nothing
+    planned for an A/B partner. Export to CSV
+  - **Reciprocity**: given (green) vs received (gold) per partner, last 12 months, with one-tap
+    logging of a client intro, co-marketing, event invite, benchmark report or referral out. Each
+    is saved as an activity on the partner (it counts as a touch)
+  - **Client map**: a partner's clients worth raising (renewing in 90 days, on a competitor PEO, or
+    already a target), with vendor and renewal date. "Add" makes a co-sell prospect; **Copy call
+    agenda** puts their open referrals, renewals, competitor clients and what you've shared on the
+    clipboard
+  - **Agreements**: end dates with a 60-day warning
+- **Partner cadences**: "Enroll N in Activate" creates the Partner Activate cadence (6 steps over
+  3 weeks: intro email, call, LinkedIn, one-pager, booking call, benchmark offer) and enrolls each
+  cold partner's main contact, spread over workdays. Tier B gets a quarterly "Partner value
+  share" cadence the same way. People leave Activate once met or referring, and value share on the
+  first referral ("Sent a referral")
+- Health scoring (the same four signals for every partner) is gone; the tier and its touch target
+  replace it
+- **Partner page tabs**: Overview (the full record plus a strip with tier, touch target, given / got,
+  agreement and end date, comp plan, owner, next step) · People (stakeholder map with role, influence, Stay in touch cadence and
   who's overdue) · Accounts (what they referred, former referrals to resell, their clients) ·
   Pipeline & comp · Plan (playbook, co-sell plan, resource links such as your Highspot page,
   attachments)
-- **Partner fields**: partner type, agreement (None / In discussion / Signed / Expired), comp
-  plan, national agreement, owner, last touch and last referral dates
+- **Partner fields**: partner type, tier (automatic or set by hand), agreement (None / In
+  discussion / Signed / Expired) and end date, comp plan, national agreement, owner, last touch
+  and last referral dates
+- **Referral scorecard** (Pipeline & comp tab): referrals in 12 months, win rate, average won deal,
+  est. comp won / open, days from referral to close, given / got. "Copy for a partner review"
+  puts a ready summary on the clipboard
 - **Their clients**: paste a book of business (from Mployer's client summary or a spreadsheet);
-  name, location, employee count and EIN are picked up. Clients already in your CRM are flagged.
+  name, location, employee count, EIN, current vendor (e.g. Insperity) and renewal date (1/1/2027
+  or "Jan 1") are picked up; ✎ edits any client. Clients already in your CRM are flagged.
   Mark each as client (broker of record), co-sell target or former referral; "+ Prospect" creates
   a co-sell prospect linked to the partner
 - **+ Log referral**: company, contact and stage in one step; links the deal and the partner
@@ -237,10 +267,11 @@ No install, no build step: open `index.html` in a browser.
   month; $25 promo; OMS (enter your rates); Q4 $5,000 one-time bonus, counted on deals closing in
   its dates. Change a rate once and every estimate follows. Prospects get "Setup fee" and
   "Enrolled employees" fields (enrolled defaults to employees)
-- **Three automatic rules** (switch each off on the Partners page): a new partner gets the
+- **Four automatic rules** (switch each off on the Partners page): a new partner gets the
   playbook for its type as dated planner tasks (broker, advisor, or association/franchise/tech);
-  a partner from Engaged to Dormant with no touch in 45 days gets a "Re-engage" task (once); a
-  referred deal changing stage creates "Update the partner: deal moved to stage"
+  a Tier A partner with no touch in 30 days or Tier B in 90 gets a "Re-engage" task (once; Tier C
+  never does, and older open ones for Tier C are cleared); an agreement ending within 60 days gets
+  a renewal task; a referred deal changing stage creates "Update the partner: deal moved to stage"
 
 **Contacts**
 - Every contact across all accounts in one table: name, title, account, reach icons, stay-in-touch
