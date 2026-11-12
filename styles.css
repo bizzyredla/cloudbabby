@@ -1521,3 +1521,21 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   .hero-btn { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .kpi-icon.blue { background: #172238; color: #60a5fa; }
 }
+
+/* ----- Bbars OS logo ----- */
+.brand { display: inline-flex; align-items: center; gap: .55rem; color: var(--text); text-decoration: none; }
+.brand-mark { width: 32px; height: 32px; flex: 0 0 auto; border-radius: 8px; }
+.brand-word { font-weight: 800; letter-spacing: -0.035em; line-height: 1; }
+.brand-os {
+  display: inline-grid; place-items: center; font-size: .6em; font-weight: 800; letter-spacing: .02em; line-height: 1;
+  padding: .32em .5em; border-radius: 7px; background: #f2a541; color: #13221b; margin-left: -.1rem;
+}
+@media (min-width: 1000px) {
+  .side-brand { font-size: 1.55rem; padding: .1rem .45rem 1rem; color: var(--text); }
+  .side-brand .brand-mark { width: 36px; height: 36px; border-radius: 9px; }
+}
+@media (max-width: 999px) {
+  .top-brand { font-size: 1.25rem; }
+  .top-brand .brand-mark { width: 30px; height: 30px; }
+}
+@media (min-width: 1000px) { .top-brand { display: none; } }

@@ -8,16 +8,17 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="Mini CRM">
+  <meta name="apple-mobile-web-app-title" content="Bbars OS">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <title>Mini CRM</title>
+  <title>Bbars OS</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="bb-mark" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#123f2f"/><path d="M14 36a18 18 0 0 1 36 0z" fill="#f2a541"/><rect x="14" y="39.6" width="36" height="4" rx="2" fill="#fff"/><rect x="19" y="46.4" width="26" height="4" rx="2" fill="#fff"/><rect x="25" y="53.2" width="14" height="4" rx="2" fill="#fff"/></symbol></svg>
   <aside class="sidebar" aria-label="Main navigation">
-    <a class="brand side-brand" href="#dashboard"><span class="logo-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>mini crm<span class="brand-dot">.</span></a>
+    <a class="brand side-brand" href="#dashboard" aria-label="Bbars OS home"><svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#bb-mark"/></svg><span class="brand-word">Bbars</span><span class="brand-os">OS</span></a>
     <div class="side-label">Workspace</div>
     <nav class="tabs" id="tabs">
       <a href="#dashboard" data-view="dashboard"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>Overview</span></a>
@@ -42,7 +43,7 @@
   </aside>
 
   <header class="topbar">
-    <a class="brand top-brand" href="#dashboard"><span class="logo-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>mini crm<span class="brand-dot">.</span></a>
+    <a class="brand top-brand" href="#dashboard" aria-label="Bbars OS home"><svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#bb-mark"/></svg><span class="brand-word">Bbars</span><span class="brand-os">OS</span></a>
     <div class="crumbs"><span>Workspace</span><span class="sep">/</span><strong id="crumb-page">Overview</strong></div>
     <div class="topbar-actions">
       <button class="search-box" id="btn-search" type="button" title="Search (press /)" aria-label="Search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span class="sb-text">Search anything…</span><kbd class="sb-kbd">⌘K</kbd></button>

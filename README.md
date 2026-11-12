@@ -1,4 +1,4 @@
-# Mini CRM
+# Bbars OS
 
 A lightweight sales CRM for **partner** and **prospect** accounts, with a built-in **daily planner**.
 No install, no build step: open `index.html` in a browser.
@@ -273,7 +273,7 @@ No install, no build step: open `index.html` in a browser.
 
 ## Install on iPhone / iPad
 
-Mini CRM is an installable web app (PWA). Once it's served from an HTTPS address (for example
+Bbars OS is an installable web app (PWA). Once it's served from an HTTPS address (for example
 GitHub Pages or Netlify):
 
 1. Open the address in **Safari** on the iPhone.
@@ -298,7 +298,7 @@ Sync uses your own [Supabase](https://supabase.com) project (a hosted Postgres d
 
 1. Create a free project at supabase.com/dashboard.
 2. Open the project's **SQL Editor**, paste in [`supabase-setup.sql`](supabase-setup.sql) and run it once.
-3. In Mini CRM on each device, tap **☁ Set up sync** and enter the Project URL, the publishable
+3. In Bbars OS on each device, tap **☁ Set up sync** and enter the Project URL, the publishable
    (anon) key, and an email and password. Tick "create my account" the first time only.
 
 The app syncs a few seconds after each change, when it's reopened, every minute while it's open,

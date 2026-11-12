@@ -1,6 +1,6 @@
 {
-  "name": "Mini CRM",
-  "short_name": "Mini CRM",
+  "name": "Bbars OS",
+  "short_name": "Bbars OS",
   "description": "Partner & prospect accounts, follow-ups and a daily planner.",
   "start_url": "./index.html#dashboard",
   "scope": "./",

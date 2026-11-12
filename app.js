@@ -1,4 +1,4 @@
-/* Mini CRM — partner & prospect accounts with history, key dates and a daily planner.
+/* Bbars OS — partner & prospect accounts with history, key dates and a daily planner.
    All data lives in localStorage; use Export/Import for backups or moving between devices. */
 (() => {
   'use strict';
@@ -1662,7 +1662,7 @@
       
         </div>
       </div>
-      <footer class="ov-foot small muted"><span>Made for meaningful connections.</span><span>mini crm ✦ A little more organized.</span></footer>`;
+      <footer class="ov-foot small muted"><span>Made for meaningful connections.</span><span>Bbars OS ✦ A little more organized.</span></footer>`;
     bindChartTips();
   }
 
@@ -5677,7 +5677,7 @@
       state = normalize({ ...data, deleted: { ...state.deleted, ...(data.deleted || {}) } });
       save(); toast('Backup restored'); rerender();
     } catch (err) {
-      alert('That file is not a valid Mini CRM backup.');
+      alert('That file is not a valid Bbars OS backup.');
     }
   });
 
@@ -6235,7 +6235,7 @@
 
       if (!(localHasData && remoteHasData)) return finish(false);
       openModal('Cloud data found', `
-        <p>Your cloud account already has Mini CRM data, and this device has data too.</p>
+        <p>Your cloud account already has Bbars OS data, and this device has data too.</p>
         <label class="row"><input type="radio" name="mode" value="merge" checked style="width:auto">
           <span><strong>Merge both</strong>: keep everything from this device and the cloud. Right for a device that was already syncing.</span></label>
         <label class="row"><input type="radio" name="mode" value="cloud" style="width:auto">
@@ -6274,7 +6274,7 @@
   setInterval(checkNewDay, 60000);
   (async () => {
     if (!(await bootStorage())) {
-      $('#view').innerHTML = '<div class="empty">Could not open the saved data on this device. Close other Mini CRM tabs and reload. Nothing has been changed.</div>';
+      $('#view').innerHTML = '<div class="empty">Could not open the saved data on this device. Close other Bbars OS tabs and reload. Nothing has been changed.</div>';
       return;
     }
     await startCloud();
