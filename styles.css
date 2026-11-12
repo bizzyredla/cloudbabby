@@ -1394,3 +1394,130 @@ input, select, textarea { border-radius: 10px; }
   .cr-tr > :first-child { grid-column: 1 / -1; }
   .cr-th { display: none; }
 }
+
+/* ================= Theme v3: light, modern, sleek ================= */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f2f4f7;
+  --border: #e6e8ec;
+  --text: #101828;
+  --muted: #667085;
+  --accent: #12805c;
+  --accent-soft: #e7f6ef;
+  --on-accent: #ffffff;
+  --partner: #12805c;
+  --partner-soft: #e3f5ec;
+  --prospect: #6941c6;
+  --prospect-soft: #f2eefc;
+  --danger: #d92d20;
+  --danger-soft: #fef0ee;
+  --warn: #b54708;
+  --warn-soft: #fef4e6;
+  --peach: #c4320a;
+  --peach-soft: #fff1eb;
+  --ok: #079455;
+  --sidebar: #ffffff;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .04);
+  --shadow-hover: 0 4px 12px rgba(16, 24, 40, .08), 0 1px 3px rgba(16, 24, 40, .05);
+  --nav-overview: #4f46e5; --nav-accounts: #2563eb; --nav-contacts: #0891b2; --nav-partners: #7c3aed;
+  --nav-planner: #d97706; --nav-map: #059669; --nav-lists: #db2777; --nav-cadences: #ea580c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0e12;
+    --surface: #15181e;
+    --surface-2: #1c2028;
+    --border: #262b35;
+    --text: #eceff3;
+    --muted: #98a1b0;
+    --accent: #3ccb8f;
+    --accent-soft: #12291f;
+    --on-accent: #06150e;
+    --partner: #3ccb8f;
+    --partner-soft: #12291f;
+    --prospect: #a48afb;
+    --prospect-soft: #241c3d;
+    --danger: #f97066;
+    --danger-soft: #3b1a17;
+    --warn: #fdb022;
+    --warn-soft: #33240a;
+    --peach: #fb8c5f;
+    --peach-soft: #36200f;
+    --ok: #3ccb8f;
+    --sidebar: #111419;
+    --shadow: none;
+    --shadow-hover: 0 0 0 1px #313744;
+    --nav-overview: #818cf8; --nav-accounts: #60a5fa; --nav-contacts: #22d3ee; --nav-partners: #a78bfa;
+    --nav-planner: #fbbf24; --nav-map: #34d399; --nav-lists: #f472b6; --nav-cadences: #fb923c;
+  }
+}
+
+/* surfaces */
+.card { border: 1px solid var(--border); box-shadow: var(--shadow); }
+.kpi-card, .pt-card, .acard { transition: box-shadow .15s ease, border-color .15s ease, transform .15s ease; }
+a.kpi-card:hover, .pt-card:hover, .acard:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+.topbar { background: color-mix(in srgb, var(--surface) 80%, transparent); backdrop-filter: saturate(1.4) blur(14px); -webkit-backdrop-filter: saturate(1.4) blur(14px); }
+input, select, textarea { border-color: var(--border); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.btn { box-shadow: 0 1px 2px rgba(16, 24, 40, .08); }
+.btn.ghost { box-shadow: none; color: var(--text); }
+.btn.ghost:hover { background: var(--surface-2); border-color: var(--border); }
+.brand-dot { color: var(--accent); }
+
+/* colored icons: each section keeps its own hue */
+.tabs a[data-view=dashboard] { --hue: var(--nav-overview); }
+.tabs a[data-view=accounts] { --hue: var(--nav-accounts); }
+.tabs a[data-view=contacts] { --hue: var(--nav-contacts); }
+.tabs a[data-view=partners] { --hue: var(--nav-partners); }
+.tabs a[data-view=planner] { --hue: var(--nav-planner); }
+.tabs a[data-view=map] { --hue: var(--nav-map); }
+.tabs a[data-view=lists] { --hue: var(--nav-lists); }
+.tabs a[data-view=cadences] { --hue: var(--nav-cadences); }
+.tabs a .ic { color: var(--hue, currentColor); }
+
+/* desktop: light sidebar */
+@media (min-width: 1000px) {
+  .sidebar { background: var(--sidebar); color: var(--text); border-right: 1px solid var(--border); }
+  .side-brand { color: var(--text); }
+  .side-label { color: var(--muted); }
+  .sidebar .tabs a { color: color-mix(in srgb, var(--text) 82%, transparent); font-weight: 550; padding: .45rem .6rem; }
+  .sidebar .tabs a .ic { width: 28px; height: 28px; padding: 6px; border-radius: 8px; background: color-mix(in srgb, var(--hue) 12%, transparent); }
+  .sidebar .tabs a:hover { background: var(--surface-2); color: var(--text); }
+  .sidebar .tabs a.active { background: var(--surface-2); color: var(--text); font-weight: 650; box-shadow: inset 0 0 0 1px var(--border); }
+  .sidebar .tabs a.active .ic { background: var(--hue); color: #fff; }
+  .nav-count { background: var(--surface-2); color: var(--muted); }
+  .nav-count.due { background: var(--warn-soft); color: var(--warn); }
+  .tabs a.active .nav-count { background: var(--surface); color: var(--muted); }
+  .tabs a.active .nav-count.due { background: var(--warn-soft); color: var(--warn); }
+  .side-promo { border: 1px solid var(--border); background: linear-gradient(160deg, var(--accent-soft), var(--surface) 75%); }
+  .side-promo-ic { color: var(--accent); }
+  .side-promo strong { color: var(--text); }
+  .side-promo p { color: var(--muted); }
+  .side-promo a { color: var(--accent); }
+  .side-foot { border-top: 1px solid var(--border); }
+  .side-link { color: var(--muted); }
+  .side-link:hover { background: var(--surface-2); color: var(--text); }
+  .side-status { color: var(--muted); }
+  .side-status i { background: var(--ok); }
+}
+/* phones: colored icons in the tab bar, soft pill for the active tab */
+@media (max-width: 999px) {
+  .tabs a.active, .tabs a.alt-active { background: color-mix(in srgb, var(--hue) 12%, transparent); color: var(--text); }
+}
+
+/* hero and tints */
+.hero { background: linear-gradient(120deg, #e9f7f0 0%, #f3f6ff 100%); border-color: #dceee5; color: var(--accent); }
+.hero h2 { color: var(--text); }
+.hero p { color: #475467; }
+.hero .eyebrow { color: var(--accent); }
+.hero-btn { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.kpi-icon.blue { background: #eff4ff; color: #2563eb; }
+@media (prefers-color-scheme: dark) {
+  .hero { background: linear-gradient(120deg, #10231b 0%, #161a26 100%); border-color: #22332b; }
+  .hero h2 { color: var(--text); }
+  .hero p { color: #b4bcc8; }
+  .hero-btn { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .kpi-icon.blue { background: #172238; color: #60a5fa; }
+}

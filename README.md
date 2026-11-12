@@ -234,9 +234,12 @@ No install, no build step: open `index.html` in a browser.
   active accounts with no next step (no follow-up and nobody in a cadence)
 
 **Look and feel**
-- Forest-green theme with warm neutrals, in light and dark mode (follows the device setting)
-- Desktop: a sidebar with page counts (accounts, cadence steps due), sync status and settings.
-  iPhone: a bottom tab bar
+- Light, modern theme: a cool light-grey background, white cards with hairline borders and soft
+  shadows, and an emerald accent. Dark mode uses neutral charcoal (follows the device setting)
+- Each section has its own icon color (Overview indigo, Accounts blue, Contacts cyan, Partners
+  violet, Planner amber, Map green, Lists pink, Cadences orange)
+- Desktop: a light sidebar with page counts (accounts, cadence steps due), sync status and
+  settings. iPhone: a bottom tab bar with the same colored icons
 - Uses the device's built-in system font (San Francisco on iPhone/Mac, Segoe UI on Windows), so
   nothing is downloaded and text works offline
 
