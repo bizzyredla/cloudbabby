@@ -140,12 +140,23 @@ No install, no build step: open `index.html` in a browser.
 - **Copy summary**: a plain-text recap to paste into an email; **Export activities (CSV)**
 
 **Map & route planner**
-- **Accounts map**: every account with an address is pinned (purple = prospect, green = partner,
-  orange ring = follow-up or revisit due). Filter by type, vendor or saved list. **Near me**
-  lists the closest accounts for drop-in visits. Tap a pin to open the account, add it to
-  today's route, or get directions
-- Addresses are found automatically (OpenStreetMap). If one can't be found, fix the address or
-  **Drop pin** on the map by hand
+- **Accounts map**: every account with an address is pinned. **Color pins by** last touch (green
+  within 30 days, amber 30–60, red 60+ or never: the red pins are your prospecting plan), by
+  stage, or by type; an orange ring means a follow-up or revisit is due. Filter by type, vendor,
+  saved view or territory. **Near me** lists the closest accounts for drop-in visits
+- Tap a pin to open the account, add it to today's route, **Log visit** (outcome, who you met,
+  notes, next follow-up and a photo of their business card, saved to the account's attachments;
+  it counts on today's plan and ticks the route stop), see who's **Nearby**, or get directions
+- **Nearby** (from a pin or the account page): accounts within 1, 2, 5 or 10 miles with their last
+  touch, one tap to add each to today's route, or "add this + the 3 closest"
+- **Territories**: draw zones on the map (Westside, South Bay, DTLA) and pick the weekdays you're
+  usually there. On those days the route planner suggests the zone's accounts that are due or
+  haven't been touched in 30+ days ("Wednesday is Westside · Add these 6"). Synced
+- **Saved routes**: save a day's stops as a named route ("Westside loop") and load it onto any
+  day; it re-optimizes for that day. Synced
+- Addresses are looked up when you save an account (and again whenever the map opens). The map
+  says how many accounts have no location or are pinned only to a city, with a Fix list: correct
+  the address or **Drop pin** by hand
 - **Route planner** for any day: stops come in automatically from that day's planner Visits and
   Revisits, due revisit dates and cadence Visit steps. Add or remove stops as needed. The route
   re-optimizes itself whenever stops change, using real drive times (OSRM), from your home base

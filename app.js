@@ -229,10 +229,10 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor })); } catch (e) { /* ignore */ }
   };
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], deleted: {} }; }
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
@@ -255,6 +255,8 @@
     st.accounts.forEach(migrateAccount);
     if (!Array.isArray(st.compPlans)) st.compPlans = [];
     if (!Array.isArray(st.categories)) st.categories = [];
+    if (!Array.isArray(st.territories)) st.territories = [];
+    if (!Array.isArray(st.routeTemplates)) st.routeTemplates = [];
     if (!st.compPlans.length) st.compPlans = defaultCompPlans().filter((x) => !(st.deleted || {})['cp:' + x.id]);
     // Planner rows used to store only the account name; link each to its account where the name is unique.
     const byName = new Map();
@@ -285,7 +287,7 @@
   let booted = false;
   // Device-only sync bookkeeping: records waiting to upload, and how far we have read the cloud.
   const local = { dirty: new Set(), cursor: 0, user: '', seen: {} };
-  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:']];
+  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:']];
 
   function loadLegacy() {
     try {
@@ -3203,6 +3205,7 @@
             <button class="btn ghost" data-act="new-task" data-id="${a.id}">+ Plan task</button>
             ${researchMenu(a)}
             <button class="btn ghost" data-act="acct-addlist" data-id="${a.id}" title="Add to a hand-picked list">+ List</button>
+            ${hasGeo(a) ? `<button class="btn ghost" data-act="acct-nearby" data-id="${a.id}" title="Who else is close by">Nearby</button>` : ''}
             <button class="btn ghost" data-act="edit-account" data-id="${a.id}">Edit</button>
           </div>
         </div>
@@ -5567,7 +5570,8 @@
     const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' } });
     if (!res.ok) throw new Error(`Address lookup failed (${res.status})`);
     const [hit] = await res.json();
-    return hit ? { lat: Number(hit.lat), lng: Number(hit.lon) } : null;
+    const coarse = ['city', 'town', 'village', 'hamlet', 'municipality', 'county', 'state', 'postcode', 'suburb', 'neighbourhood', 'quarter', 'region'];
+    return hit ? { lat: Number(hit.lat), lng: Number(hit.lon), ...(coarse.includes(hit.addresstype) ? { approx: true } : {}) } : null;
   }
 
   /** Find coordinates for accounts with a new or changed address, one per second, while the map is open. */
@@ -5636,10 +5640,11 @@
   function mountMap() {
     const keep = mapState.keep;
     const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-    const map = L.map('map', { zoomControl: true, attributionControl: true });
+    const map = L.map('map', { zoomControl: true, attributionControl: true, doubleClickZoom: !mapState.drawing });
     addBaseTiles(map, dark);
     if (keep) map.setView(keep.c, keep.z); else map.setView(CA_CENTER, 6);
     map.on('click', (e) => {
+      if (mapState.drawing) { drawClick(e); return; }
       if (!mapState.placing) return;
       const a = getAccount(mapState.placing);
       mapState.placing = null;
@@ -5655,12 +5660,201 @@
 
   function rerenderMap() { if (location.hash.startsWith('#map')) rerender(); }
 
+  // ----- pins that mean something: colour by last touch, stage or type -----
+  const MAP_COLORS = { touch: 'Last touch', stage: 'Stage', type: 'Type' };
+  const TOUCH_BANDS = [[30, '#2f9e44', 'Touched in 30 days'], [60, '#f08c00', '30–60 days'], [Infinity, '#e03131', '60+ days or never']];
+  const STAGE_COLORS = {
+    'S1 – Discovery Scheduled': '#a5d8ff', 'S2 – Qualified Opportunity': '#74c0fc', 'S3 – Solution & Quote Development': '#339af0',
+    'S4 – Proposal Presented': '#1c7ed6', 'S5 – Decision / Negotiation': '#1864ab', 'Closed Won': '#2f9e44', 'Closed Lost': '#868e96', Nurture: '#be4bdb', Revisit: '#f08c00',
+  };
+  const PARTNER_PIN = '#0ca678';
+  function pinColor(a) {
+    const mode = MAP_COLORS[ui.mapColor] ? ui.mapColor : 'touch';
+    if (mode === 'type') return a.type === 'partner' ? '#0f8a6a' : '#8a4bd6';
+    if (mode === 'stage') return a.type === 'partner' ? PARTNER_PIN : STAGE_COLORS[a.stage] || '#868e96';
+    if (isClosedStage(a.stage)) return '#adb5bd';
+    const d = lastTouchDate(a);
+    const n = d ? daysBetween(d, today()) : Infinity;
+    return TOUCH_BANDS.find(([max]) => n < max || (max === Infinity))[1];
+  }
+  function pinLegend() {
+    const mode = MAP_COLORS[ui.mapColor] ? ui.mapColor : 'touch';
+    const item = (c, l) => `<span><i style="background:${c}"></i>${esc(l)}</span>`;
+    const rows = mode === 'type' ? [item('#8a4bd6', 'Prospect'), item('#0f8a6a', 'Partner')]
+      : mode === 'stage' ? [...Object.entries(STAGE_COLORS).map(([s, c]) => item(c, stageShort(s))), item(PARTNER_PIN, 'Partner')]
+        : [...TOUCH_BANDS.map(([, c, l]) => item(c, l)), item('#adb5bd', 'Closed')];
+    return `<div class="legend small">${rows.join('')}<span><i class="due"></i>Due now</span></div>`;
+  }
+
+  // ----- nearby: who else is close to this account -----
+  function nearbyAccounts(a, radius) {
+    if (!hasGeo(a)) return [];
+    return state.accounts.filter((x) => x !== a && hasGeo(x)).map((x) => ({ a: x, d: miles(ll(a), ll(x)) }))
+      .filter((x) => x.d <= radius).sort((x, y) => x.d - y.d);
+  }
+  function nearbyForm(a, radius = 2) {
+    if (!hasGeo(a)) { toast(`${a.name} isn't on the map yet. Add an address or drop a pin.`); return; }
+    const list = nearbyAccounts(a, radius);
+    const onRoute = new Set(routeStops(today()).map((s) => s.a.id));
+    openModal(`Near ${a.name}`, `
+      <div class="row">${[1, 2, 5, 10].map((r) => `<button type="button" class="btn sm ${r === radius ? '' : 'ghost'}" data-radius="${r}">${r} mi</button>`).join('')}</div>
+      <p class="small muted" style="margin:0">${plural(list.length, 'account')} within ${radius} miles. Turn one meeting into a three-stop trip.</p>
+      ${list.length ? `<div class="cc-people">${list.slice(0, 25).map(({ a: x, d }) => {
+        const lt = lastTouchDate(x);
+        return `<div class="cc-person nb-row">
+          <span class="nb-dot" style="background:${pinColor(x)}"></span>
+          <span class="grow"><strong>${esc(x.name)}</strong> <span class="small muted">· ${fmtMiles(d)} · ${esc(stageShort(x.stage))} · ${lt ? `touched ${esc(relDays(lt))}` : 'never touched'}</span></span>
+          ${onRoute.has(x.id) ? '<span class="small muted">On today\'s route</span>' : `<button type="button" class="btn sm ghost" data-nb-add="${x.id}">+ Today's route</button>`}
+        </div>`;
+      }).join('')}</div>` : '<div class="empty">Nobody else within this distance.</div>'}
+      ${list.length ? `<button type="button" class="btn sm" id="nb-all">Add ${esc(a.name)} + the ${Math.min(list.length, 3)} closest to today's route</button>` : ''}`, () => {}, 'Close', { wide: true });
+    modalForm.querySelector('.modal-actions [data-close]').remove();
+    $$('[data-radius]', modalForm).forEach((b) => b.addEventListener('click', () => nearbyForm(a, Number(b.dataset.radius))));
+    $$('[data-nb-add]', modalForm).forEach((b) => b.addEventListener('click', () => { addRouteStop(today(), b.dataset.nbAdd); b.outerHTML = '<span class="small muted">Added</span>'; }));
+    const all = $('#nb-all');
+    if (all) all.addEventListener('click', () => {
+      const r = getRoute(today());
+      const ids = [a.id, ...list.slice(0, 3).map((x) => x.a.id)].filter((id) => !r.extra.includes(id));
+      setRoute(today(), { extra: [...r.extra, ...ids], removed: r.removed.filter((x) => !ids.includes(x)) });
+      modal.close(); toast(`${plural(ids.length, 'stop')} added to today's route`); rerender();
+    });
+  }
+
+  // ----- territories: zones you draw once; days of the week they belong to -----
+  const TERR_COLORS = ['#e8590c', '#1c7ed6', '#2f9e44', '#ae3ec9', '#f08c00', '#0c8599', '#c2255c'];
+  const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  /** Ray casting: is [lat, lng] inside the polygon? */
+  function inPolygon(pt, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [yi, xi] = poly[i]; const [yj, xj] = poly[j];
+      if ((yi > pt[0]) !== (yj > pt[0]) && pt[1] < ((xj - xi) * (pt[0] - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  const territoryOf = (a) => (hasGeo(a) ? (state.territories || []).find((t) => inPolygon(ll(a), t.points)) || null : null);
+  const inTerritory = (t, a) => hasGeo(a) && inPolygon(ll(a), t.points);
+  function drawTerritories(layer) {
+    for (const t of state.territories || []) {
+      L.polygon(t.points, { color: t.color, weight: 2, dashArray: '6 6', fillColor: t.color, fillOpacity: 0.06, interactive: !mapState.drawing && !mapState.placing })
+        .bindTooltip(`${esc(t.name)}${(t.days || []).length ? ` · ${t.days.map((d) => WEEKDAYS[d - 1]).join(', ')}` : ''}`, { sticky: true }).addTo(layer);
+    }
+  }
+  function territoryForm(existing, points) {
+    const t = existing || { name: '', color: TERR_COLORS[(state.territories || []).length % TERR_COLORS.length], days: [], points };
+    openModal(existing ? `Territory · ${t.name}` : 'New territory', `
+      <div class="grid-2">
+        ${field('Name *', `<input name="name" required value="${esc(t.name)}" placeholder="e.g. Westside, South Bay, DTLA">`)}
+        ${field('Color', `<select name="color">${TERR_COLORS.map((c, i) => opt(c, ['Orange', 'Blue', 'Green', 'Purple', 'Gold', 'Teal', 'Pink'][i], t.color)).join('')}</select>`)}
+      </div>
+      <div class="field"><span>Days you're usually there (the route planner suggests its accounts those days)</span>
+        <div class="row">${WEEKDAYS.map((d, i) => `<label class="row small"><input type="checkbox" name="days" value="${i + 1}" style="width:auto" ${(t.days || []).includes(i + 1) ? 'checked' : ''}> ${d}</label>`).join('')}</div></div>
+      <p class="small muted" style="margin:0">${plural(state.accounts.filter((a) => hasGeo(a) && inPolygon(ll(a), t.points)).length, 'mapped account')} inside.</p>
+      ${existing ? '<button type="button" class="btn sm danger" id="terr-del">Delete territory</button>' : ''}`, (data, fd) => {
+      if (!data.name.trim()) return false;
+      const fields = { name: data.name.trim(), color: data.color, days: fd.getAll('days').map(Number) };
+      if (existing) Object.assign(existing, fields);
+      else (state.territories ||= []).push({ id: uid(), ...fields, points });
+      mapState.drawing = null;
+      toast(existing ? 'Territory saved' : `${fields.name} added`);
+    }, 'Save territory');
+    const del = $('#terr-del');
+    if (del) del.addEventListener('click', () => {
+      if (!confirm(`Delete ${t.name}?`)) return;
+      state.territories = state.territories.filter((x) => x !== existing); modal.close(); save(); rerender();
+    });
+  }
+  function drawClick(e) {
+    const dr = mapState.drawing;
+    dr.points.push([e.latlng.lat, e.latlng.lng]);
+    if (dr.shape) mapState.map.removeLayer(dr.shape);
+    dr.shape = (dr.points.length > 2 ? L.polygon : L.polyline)(dr.points, { color: '#e8590c', weight: 2, dashArray: '4 6' }).addTo(mapState.map);
+    L.circleMarker(e.latlng, { radius: 4, color: '#e8590c', weight: 2, fillOpacity: 1 }).addTo(mapState.map);
+    const n = $('#draw-n'); if (n) n.textContent = dr.points.length;
+    const fin = $('#draw-done'); if (fin) fin.disabled = dr.points.length < 3;
+  }
+  /** Accounts in a territory worth a stop: no touch in 30+ days, or a revisit or follow-up due. */
+  function territorySuggestions(t, d, exclude) {
+    return state.accounts.filter((a) => inTerritory(t, a) && !exclude.has(a.id) && !isClosedStage(a.stage))
+      .map((a) => { const lt = lastTouchDate(a); return { a, n: lt ? daysBetween(lt, d) : 9999, due: (a.revisitDate && a.revisitDate <= d) || (a.nextFollowUp && a.nextFollowUp <= d) }; })
+      .filter((x) => x.due || x.n >= 30).sort((x, y) => (y.due - x.due) || y.n - x.n);
+  }
+
+  // ----- saved routes -----
+  function saveRouteTemplate(d) {
+    const r = getRoute(d);
+    const ids = routeStops(d).map((s) => s.a.id);
+    if (!ids.length) { toast('Add stops first'); return; }
+    const name = (prompt('Name this route, e.g. "Westside loop":') || '').trim();
+    if (!name) return;
+    (state.routeTemplates ||= []).push({ id: uid(), name, ids, start: r.start, roundTrip: r.roundTrip, visitMins: r.visitMins, lastRun: d });
+    save(); rerender(); toast(`Saved "${name}"`);
+  }
+  function loadRouteTemplate(d, id) {
+    const tpl = (state.routeTemplates || []).find((x) => x.id === id);
+    if (!tpl) return;
+    const r = getRoute(d);
+    const ids = tpl.ids.filter((x) => getAccount(x));
+    setRoute(d, { extra: [...new Set([...r.extra, ...ids])], removed: r.removed.filter((x) => !ids.includes(x)), start: tpl.start, roundTrip: tpl.roundTrip, visitMins: tpl.visitMins, optKey: '' });
+    tpl.lastRun = d; save();
+    toast(`${tpl.name}: ${plural(ids.length, 'stop')} loaded`); rerender();
+  }
+
+  // ----- log a visit from the pin -----
+  const VISIT_OUTCOMES = ['Met the decision maker', 'Met someone else', 'Dropped off materials', 'Nobody available', 'Not a fit'];
+  function visitLogForm(a) {
+    const d = today();
+    openModal(`Log visit · ${a.name}`, `
+      <div class="grid-2">
+        ${field('Outcome', `<select name="outcome">${VISIT_OUTCOMES.map((o) => opt(o, o, VISIT_OUTCOMES[0])).join('')}</select>`)}
+        ${field('Who', `<select name="contactId"><option value="">—</option>${a.contacts.filter(isActiveContact).map((c) => opt(c.id, `${c.name}${c.role ? ` (${c.role})` : ''}`, (primaryContact(a) || {}).id)).join('')}</select>`)}
+        ${field('Notes', '<textarea name="notes" rows="2" placeholder="What you learned, who to ask for next time…"></textarea>', 'span-2')}
+        ${field('Next follow-up', `<input name="next" type="date" value="${shiftDays(d, 3, true)}">`)}
+        ${field('Business card or photo', `<input name="photo" type="file" accept="image/*" capture="environment">${cloudOn() ? '' : '<span class="small muted">Set up cloud sync to keep photos with the account.</span>'}`)}
+      </div>`, (data, fd) => {
+      const now = new Date().toISOString();
+      const act = { id: uid(), date: d, kind: 'Visit', summary: `Visit: ${data.outcome}`, notes: data.notes, contactId: data.contactId || '', createdAt: now };
+      a.activities.push(act);
+      // Count it on today's plan (and tick the route stop) without logging it twice.
+      const plan = getPlan(d, true);
+      const sec = a.revisitDate && a.revisitDate <= d ? 'revisits' : 'visits';
+      const row = plan[sec].find((rw) => (rowAccount(rw) || {}).id === a.id);
+      if (row) Object.assign(row, { done: true, activityId: act.id, kind: 'Visit' });
+      else addPlanTouch(d, sec, { name: accountLabel(a), accountId: a.id, kind: 'Visit', note: data.outcome, done: true, activityId: act.id });
+      if (sec === 'revisits') { a.revisitDate = ''; a.revisitNote = ''; }
+      if (data.next) a.nextFollowUp = data.next;
+      touch(a);
+      const photo = fd.get('photo');
+      if (photo && photo.size && cloudOn()) setTimeout(() => addFiles(a.id, [new File([photo], `Business card ${a.name} ${d}.${(photo.name.split('.').pop() || 'jpg')}`, { type: photo.type })]), 50);
+      toast(`${a.name}: visit logged${photo && photo.size && !cloudOn() ? ' (photo not kept: sync is off)' : ''}`);
+    }, 'Log visit', { wide: true });
+  }
+
+  /** Look up a new or changed address right after saving, so accounts don't silently miss the map. */
+  function geocodeSoon(id) {
+    if (Date.now() < (mapState.geoPausedUntil || 0)) return;
+    setTimeout(async () => {
+      const a = getAccount(id);
+      if (!a || !needsGeo(a)) return;
+      const q = geoQuery(a);
+      try {
+        const hit = await geocode(q);
+        const b = getAccount(id);
+        if (!b || geoQuery(b) !== q) return;
+        b.geo = hit ? { ...hit, q } : { q, miss: true };
+        touch(b); save();
+        if (!hit) toast(`${b.name}: address not found on the map. Check it, or drop a pin on the Map.`);
+      } catch (e) { /* offline: the map tries again when it opens */ }
+    }, 400);
+  }
+
   // ----- accounts map -----
   const mapFilter = () => {
     const f = ui.mapFilter;
     const list = f.list ? resolveList(f.list) : null;
     const ids = list ? new Set(listAccounts(list).map((a) => a.id)) : null;
-    return state.accounts.filter((a) => (f.type === 'all' || a.type === f.type) && (f.vendor === 'all' || a.vendors.includes(f.vendor)) && (!ids || ids.has(a.id)));
+    const terr = f.terr && (state.territories || []).find((t) => t.id === f.terr);
+    return state.accounts.filter((a) => (f.type === 'all' || a.type === f.type) && (f.vendor === 'all' || a.vendors.includes(f.vendor)) && (!ids || ids.has(a.id)) && (!terr || inTerritory(terr, a)));
   };
 
   function accountPopup(a) {
@@ -5668,12 +5862,15 @@
     return `<div class="map-pop">
       <strong>${esc(a.name)}</strong> ${typePill(a)}
       <div class="small muted">${esc(a.stage)}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</div>
-      ${geoQuery(a) ? `<div class="small">${esc(geoQuery(a))}</div>` : ''}
+      ${geoQuery(a) ? `<div class="small">${esc(geoQuery(a))}${a.geo && a.geo.approx ? ' <span class="pill med" title="Pinned to the city, not the street address">approx.</span>' : ''}</div>` : ''}
+      <div class="small muted">${(() => { const lt = lastTouchDate(a); return lt ? `Last touch ${esc(relDays(lt))}` : 'Never touched'; })()}</div>
       ${p ? `<div class="small">${esc(p.name)}${p.phone ? ` · <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : ''}</div>` : ''}
       ${a.revisitDate ? `<div class="small">Revisit ${dueChip(a.revisitDate)}</div>` : ''}
       <div class="row map-pop-actions">
         <a class="btn sm" href="#account/${a.id}">Open</a>
         <button type="button" class="btn sm ghost" data-pop="route" data-id="${a.id}">+ Today's route</button>
+        <button type="button" class="btn sm ghost" data-pop="visit" data-id="${a.id}">Log visit</button>
+        <button type="button" class="btn sm ghost" data-pop="near" data-id="${a.id}">Nearby</button>
         <a class="btn sm ghost" href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>
       </div>
     </div>`;
@@ -5685,8 +5882,8 @@
     const due = (a.revisitDate && a.revisitDate <= today()) || (a.nextFollowUp && a.nextFollowUp <= today());
     const m = L.circleMarker(ll(a), {
       radius: 8, weight: due ? 3 : 2, color: due ? '#e8590c' : '#fff', fillOpacity: 0.95,
-      fillColor: a.type === 'partner' ? '#0f8a6a' : '#8a4bd6',
-    }).bindPopup(accountPopup(a), { minWidth: 220 }).bindTooltip(esc(a.name), { direction: 'top', offset: [0, -6] }).addTo(mapState.layer);
+      fillColor: pinColor(a),
+    }).bindPopup(accountPopup(a), { minWidth: 240 }).bindTooltip(esc(a.name), { direction: 'top', offset: [0, -6] }).addTo(mapState.layer);
     mapState.markers.set(a.id, m);
   }
 
@@ -5698,6 +5895,8 @@
         addRouteStop(today(), b.dataset.id);
         b.textContent = '✓ On today\'s route'; b.disabled = true;
       }));
+      $$('[data-pop=visit]', el).forEach((b) => b.addEventListener('click', () => { map.closePopup(); visitLogForm(getAccount(b.dataset.id)); }));
+      $$('[data-pop=near]', el).forEach((b) => b.addEventListener('click', () => { map.closePopup(); nearbyForm(getAccount(b.dataset.id)); }));
     });
   }
 
@@ -5705,6 +5904,9 @@
     const accts = mapFilter();
     const mapped = accts.filter(hasGeo);
     const missing = accts.filter((a) => !hasGeo(a));
+    const approx = mapped.filter((a) => a.geo.approx && !a.geo.manual);
+    const terrs = state.territories || [];
+    const dr = mapState.drawing;
     const near = mapState.me ? mapped.map((a) => ({ a, d: miles(mapState.me, ll(a)) })).sort((x, y) => x.d - y.d).slice(0, 12) : null;
     const f = ui.mapFilter;
     $('#view').innerHTML = `
@@ -5714,13 +5916,24 @@
           <div class="filters">
             <select id="mf-type" aria-label="Type">${opt('all', 'All types', f.type)}${opt('prospect', 'Prospects', f.type)}${opt('partner', 'Partners', f.type)}</select>
             <select id="mf-vendor" aria-label="Vendor"><option value="all">All vendors</option>${allVendors().map((v) => opt(v, v, f.vendor)).join('')}</select>
-            <select id="mf-list" aria-label="List"><option value="">All accounts</option>${state.lists.map((l) => opt(l.id, l.name, f.list)).join('')}</select>
+            <select id="mf-list" aria-label="Saved view"><option value="">All accounts</option>${state.lists.map((l) => opt(l.id, l.name, f.list)).join('')}</select>
+            ${terrs.length ? `<select id="mf-terr" aria-label="Territory"><option value="">All territories</option>${terrs.map((t) => opt(t.id, t.name, f.terr || '')).join('')}</select>` : ''}
+            <select id="mf-color" aria-label="Color pins by">${Object.entries(MAP_COLORS).map(([k, l]) => opt(k, `Color: ${l}`, MAP_COLORS[ui.mapColor] ? ui.mapColor : 'touch')).join('')}</select>
           </div>
+          ${missing.length || approx.length ? `<div class="geo-flag small"><b>${missing.length ? `${plural(missing.length, 'account')} ${missing.length === 1 ? 'has' : 'have'} no map location` : ''}${missing.length && approx.length ? ' · ' : ''}${approx.length ? `${approx.length} pinned only to a city` : ''}</b> <button type="button" class="link-btn small" data-act="map-fix">Fix</button></div>` : ''}
           <div class="row spread">
             <span class="small muted">${mapped.length} of ${accts.length} on the map</span>
             <button type="button" class="btn sm ghost" data-act="map-near">📍 Near me</button>
           </div>
-          <div class="legend small"><span><i style="background:#8a4bd6"></i>Prospect</span><span><i style="background:#0f8a6a"></i>Partner</span><span><i class="due"></i>Due now</span></div>
+          ${pinLegend()}
+          <div class="terr-box">
+            <div class="row spread"><h3 style="margin:0">Territories</h3>${dr ? '' : '<button type="button" class="btn sm ghost" data-act="map-draw">+ Draw a zone</button>'}</div>
+            ${dr ? `<div class="place-hint">Click the map to outline the zone (<b id="draw-n">${dr.points.length}</b> points). <button type="button" class="btn sm" id="draw-done" data-act="draw-done" ${dr.points.length < 3 ? 'disabled' : ''}>Finish</button> <button type="button" class="btn sm ghost" data-act="draw-cancel">Cancel</button></div>` : ''}
+            ${terrs.length ? `<div class="side-list">${terrs.map((t) => `<div class="side-item terr-item"><span class="terr-sw" style="background:${t.color}"></span><strong>${esc(t.name)}</strong>
+              <span class="small muted">${plural(state.accounts.filter((a) => inTerritory(t, a)).length, 'account')}${(t.days || []).length ? ` · ${t.days.map((x) => WEEKDAYS[x - 1]).join(', ')}` : ''}</span>
+              <button type="button" class="icon-btn" data-act="terr-edit" data-tid="${t.id}" title="Edit ${esc(t.name)}" aria-label="Edit ${esc(t.name)}">✎</button></div>`).join('')}</div>`
+              : dr ? '' : '<div class="small muted">Outline the areas you work (Westside, South Bay, DTLA) and the days you\'re there. The route planner then suggests who to see.</div>'}
+          </div>
           <div id="locate-status">${Date.now() < (mapState.geoPausedUntil || 0) && accts.some(needsGeo) ? `
             <div class="place-hint">Address lookup is unavailable right now (offline or the service is busy).
               <button type="button" class="link-btn" data-act="map-geo-retry">Retry</button></div>` : ''}</div>
@@ -5743,6 +5956,17 @@
                   <button type="button" class="btn sm ghost" data-act="map-place" data-id="${a.id}">Drop pin</button>
                 </span>
               </div>`).join('')}</div>` : ''}
+          ${approx.length ? `
+            <details class="approx-box" ${ui.mapFix ? 'open' : ''}><summary class="small"><b>Pinned only to a city (${approx.length})</b></summary>
+            <div class="side-list">${approx.map((a) => `
+              <div class="side-item">
+                <a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a>
+                <span class="small muted">${esc(geoQuery(a))}</span>
+                <span class="row" style="gap:.25rem">
+                  <button type="button" class="btn sm ghost" data-act="edit-account" data-id="${a.id}">Address</button>
+                  <button type="button" class="btn sm ghost" data-act="map-place" data-id="${a.id}">Drop pin</button>
+                </span>
+              </div>`).join('')}</div></details>` : ''}
           ${mapState.placing ? `<div class="place-hint">Tap the map where <strong>${esc((getAccount(mapState.placing) || {}).name || '')}</strong> is located.</div>` : ''}
         </aside>
         <div class="card map-card"><div id="map" class="map ${mapState.placing ? 'placing' : ''}"></div></div>
@@ -5750,10 +5974,15 @@
     $('#mf-type').addEventListener('change', (e) => { ui.mapFilter.type = e.target.value; rerender(); });
     $('#mf-vendor').addEventListener('change', (e) => { ui.mapFilter.vendor = e.target.value; rerender(); });
     $('#mf-list').addEventListener('change', (e) => { ui.mapFilter.list = e.target.value; rerender(); });
+    if ($('#mf-terr')) $('#mf-terr').addEventListener('change', (e) => { ui.mapFilter.terr = e.target.value; rerender(); });
+    $('#mf-color').addEventListener('change', (e) => { ui.mapColor = e.target.value; savePrefs(); rerender(); });
+    if (ui.mapFix) { ui.mapFix = false; const el = $('.map-side h3 + .side-list, .approx-box'); if (el) el.scrollIntoView({ block: 'center' }); }
     loadLeaflet().then(() => {
       if (mapState.view !== 'accounts' || !$('#map')) return;
       const { map, restored } = mountMap();
       wirePopups(map);
+      drawTerritories(mapState.layer);
+      if (dr && dr.points.length) { dr.shape = null; const pts = dr.points; dr.points = []; pts.forEach((x) => drawClick({ latlng: { lat: x[0], lng: x[1] } })); }
       mapped.forEach(addAccountMarker);
       if (mapState.me) L.circleMarker(mapState.me, { radius: 7, color: '#fff', weight: 3, fillColor: '#2f6b52', fillOpacity: 1 }).bindTooltip('You are here').addTo(mapState.layer);
       if (!restored && mapped.length) map.fitBounds(L.latLngBounds(mapped.map(ll)).pad(0.15), { maxZoom: 12, animate: false });
@@ -5959,6 +6188,11 @@
     const mappedStops = stops.filter((s) => hasGeo(s.a));
     const addable = state.accounts.filter((a) => !stops.some((s) => s.a.id === a.id)).sort((x, y) => x.name.localeCompare(y.name));
     const homeOk = !!ui.home;
+    const wd = fromISO(d).getDay();
+    const onDay = (state.territories || []).filter((t) => (t.days || []).includes(wd));
+    const taken = new Set(stops.map((s) => s.a.id));
+    const sugg = onDay.map((t) => ({ t, list: territorySuggestions(t, d, taken).slice(0, 6) })).filter((x) => x.list.length);
+    const tpls = state.routeTemplates || [];
     $('#view').innerHTML = `
       ${mapHead('route')}
       <div class="map-layout">
@@ -6001,8 +6235,19 @@
               </li>`;
             }).join('') || '<div class="empty">No visits planned for this day. Add stops below, or put accounts in the planner\'s Visits / Revisits.</div>'}
           </ol>
+          ${sugg.map(({ t, list }) => `<div class="terr-sugg" style="--c:${t.color}">
+            <div class="row spread"><b>${esc(fmtDate(d, { weekday: 'long' }))} is ${esc(t.name)}</b><button type="button" class="btn sm" data-act="route-add-many" data-ids="${list.map((x) => x.a.id).join(',')}">Add these ${list.length}</button></div>
+            <div class="small muted">Due or not touched in 30+ days: ${list.map((x) => esc(x.a.name)).join(', ')}</div>
+          </div>`).join('')}
           <div class="row">
             <select id="route-add" style="flex:1"><option value="">+ Add a stop…</option>${addable.map((a) => `<option value="${a.id}">${esc(a.name)}${hasGeo(a) ? '' : ' (no address)'}</option>`).join('')}</select>
+          </div>
+          <div class="saved-routes">
+            <div class="row spread"><h3 style="margin:0">Saved routes</h3>${stops.length ? '<button type="button" class="btn sm ghost" data-act="route-save">Save this route</button>' : ''}</div>
+            ${tpls.length ? `<div class="side-list">${tpls.map((x) => `<div class="side-item"><strong>${esc(x.name)}</strong>
+              <span class="small muted">${plural(x.ids.length, 'stop')}${x.lastRun ? ` · last run ${esc(fmtDate(x.lastRun, { month: 'short', day: 'numeric' }))}` : ''}</span>
+              <span class="row" style="gap:.25rem"><button type="button" class="btn sm ghost" data-act="route-load" data-tid="${x.id}">Load</button><button type="button" class="icon-btn" data-act="route-tpl-del" data-tid="${x.id}" title="Delete ${esc(x.name)}" aria-label="Delete ${esc(x.name)}">✕</button></span></div>`).join('')}</div>`
+              : '<div class="small muted">Save a loop you run often (a monthly Westside loop) and load it onto any day.</div>'}
           </div>
         </aside>
         <div class="card map-card"><div id="map" class="map"></div></div>
@@ -6028,6 +6273,7 @@
       if (run !== mapState.runId || !$('#map')) return;
       const { map, restored } = mountMap();
       const pts = mappedStops.map((s) => ll(s.a));
+      drawTerritories(mapState.layer);
       if (start) L.marker(start, { icon: L.divIcon({ className: 'home-pin', html: '⌂', iconSize: [26, 26] }) }).bindTooltip('Start').addTo(mapState.layer);
       mappedStops.forEach((s, i) => {
         const v = visitedRow(d, s.a);
@@ -6752,6 +6998,7 @@
       if (existing) {
         logStageChange(existing, existing.stage, fields.stage);
         Object.assign(existing, fields); touch(existing);
+        geocodeSoon(existing.id);
         toast('Account updated');
       } else {
         const now = new Date().toISOString();
@@ -6759,6 +7006,7 @@
           ? [{ id: uid(), name: c_name || c_email || c_phone, title: c_title, email: c_email, phone: c_phone, role: '', notes: '', status: 'Active', primary: true }] : [];
         const acct = { id: uid(), ...fields, contacts, activities: [], keyDates: [], createdAt: now, updatedAt: now };
         state.accounts.push(acct);
+        geocodeSoon(acct.id);
         if (acct.type === 'partner' && ruleOn('onboard')) applyPlaybook(acct); // rule 1: onboarding playbook
         location.hash = `account/${acct.id}`;
         toast('Account created');
@@ -7022,6 +7270,24 @@
         return go(`account/${id}`);
       case 'back': return ui.navs > 0 ? history.back() : go('accounts');
       case 'set-view': ui.accountView = el.dataset.mode; savePrefs(); return rerender();
+      case 'acct-nearby': return nearbyForm(acct);
+      case 'map-fix': ui.mapFix = true; return rerender();
+      case 'map-draw': mapState.drawing = { points: [] }; mapState.placing = null; return rerender();
+      case 'draw-cancel': mapState.drawing = null; return rerender();
+      case 'draw-done': if (mapState.drawing && mapState.drawing.points.length >= 3) territoryForm(null, mapState.drawing.points.slice()); return undefined;
+      case 'terr-edit': { const t = (state.territories || []).find((x) => x.id === el.dataset.tid); return t ? territoryForm(t) : undefined; }
+      case 'route-save': return saveRouteTemplate(ui.routeDate);
+      case 'route-load': return loadRouteTemplate(ui.routeDate, el.dataset.tid);
+      case 'route-tpl-del': {
+        const x = (state.routeTemplates || []).find((y) => y.id === el.dataset.tid);
+        if (x && confirm(`Delete the saved route "${x.name}"?`)) { state.routeTemplates = state.routeTemplates.filter((y) => y !== x); save(); rerender(); }
+        return undefined;
+      }
+      case 'route-add-many': {
+        const d = ui.routeDate; const r = getRoute(d); const ids = el.dataset.ids.split(',').filter((x) => x && !r.extra.includes(x));
+        setRoute(d, { extra: [...r.extra, ...ids], removed: r.removed.filter((x) => !ids.includes(x)) });
+        toast(`${plural(ids.length, 'stop')} added`); return rerender();
+      }
       case 'board-type': ui.boardType = el.dataset.type; savePrefs(); return rerender();
       case 'sort':
         if (ui.sort === el.dataset.key) ui.sortDir = -ui.sortDir; else { ui.sort = el.dataset.key; ui.sortDir = 1; }
