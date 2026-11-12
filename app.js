@@ -4,6 +4,9 @@
   'use strict';
 
   const STORAGE_KEY = 'minicrm.v1';
+  // Mapbox public token (URL-restricted) for address lookup, drive times and route lines.
+  // Leave it empty to use the free OpenStreetMap services (Nominatim and OSRM) instead.
+  const MAPBOX_TOKEN = 'pk.eyJ1IjoiYml6enlyZWRsYSIsImEiOiJjbXdlM3Z0cHUwMmVjMnhvbW01dXBjYjFrIn0.aaxd3Ax1nSRl_34_zARgJQ';
 
   const STAGES = {
     prospect: ['S1 – Discovery Scheduled', 'S2 – Qualified Opportunity', 'S3 – Solution & Quote Development', 'S4 – Proposal Presented', 'S5 – Decision / Negotiation', 'Closed Won', 'Closed Lost', 'Nurture', 'Revisit'],
@@ -5527,9 +5530,11 @@
   }
 
   // ---------- map & route planner ----------
-  // Leaflet (bundled in vendor/) draws the map; OpenStreetMap's Nominatim finds coordinates for
-  // addresses (free, at most one lookup per second); the public OSRM server gives drive times and
-  // road routes. Every network step has a fallback so the page still works if a service is down.
+  // Leaflet (bundled in vendor/) draws the map with OpenStreetMap tiles. Mapbox finds coordinates
+  // for addresses (permanent geocoding, so they can be saved on the account), drive times (Matrix)
+  // and road routes (Directions). If MAPBOX_TOKEN is empty or a Mapbox call fails, OpenStreetMap's
+  // Nominatim and the public OSRM server are used instead, and straight lines after that, so the
+  // page still works if a service is down.
   const CA_CENTER = [37.2, -119.5];
   const AVG_MPH = 35;
   const mapState = { map: null, view: null, keep: null, runId: 0, locating: null, me: null, placing: null, markers: new Map(), legsCache: new Map() };
@@ -5567,6 +5572,23 @@
   }
 
   async function geocode(q) {
+    if (MAPBOX_TOKEN) {
+      try { return await geocodeMapbox(q); } catch (e) { /* fall back to Nominatim below */ }
+    }
+    return geocodeNominatim(q);
+  }
+
+  async function geocodeMapbox(q) {
+    const res = await fetch(`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(q)}&country=us&limit=1&permanent=true&access_token=${MAPBOX_TOKEN}`);
+    if (!res.ok) throw new Error(`Mapbox address lookup failed (${res.status})`);
+    const [hit] = (await res.json()).features || [];
+    if (!hit) return null;
+    const [lng, lat] = hit.geometry.coordinates;
+    const coarse = ['place', 'locality', 'neighborhood', 'district', 'postcode', 'region', 'country'];
+    return { lat: Number(lat), lng: Number(lng), ...(coarse.includes((hit.properties || {}).feature_type) ? { approx: true } : {}) };
+  }
+
+  async function geocodeNominatim(q) {
     const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' } });
     if (!res.ok) throw new Error(`Address lookup failed (${res.status})`);
     const [hit] = await res.json();
@@ -6075,8 +6097,18 @@
     });
   }
 
-  /** Drive-time matrix (seconds) between points: OSRM if reachable, else straight-line distance at an average speed. */
+  /** Drive-time matrix (seconds) between points: Mapbox Matrix, else OSRM, else straight-line distance at an average speed. */
   async function durationMatrix(points) {
+    if (MAPBOX_TOKEN && points.length <= 25) { // the Matrix API takes up to 25 points
+      try {
+        const coords = points.map((p) => `${p[1]},${p[0]}`).join(';');
+        const res = await fetch(`https://api.mapbox.com/directions-matrix/v1/mapbox/driving/${coords}?annotations=duration&access_token=${MAPBOX_TOKEN}`);
+        if (!res.ok) throw new Error();
+        const j = await res.json();
+        if (j.code !== 'Ok' || j.durations.some((row) => row.some((x) => x === null))) throw new Error();
+        return { m: j.durations, estimated: false };
+      } catch (e) { /* fall back to OSRM below */ }
+    }
     try {
       const coords = points.map((p) => `${p[1]},${p[0]}`).join(';');
       const res = await fetch(`https://router.project-osrm.org/table/v1/driving/${coords}?annotations=duration`);
@@ -6147,11 +6179,22 @@
     rerender();
   }
 
-  /** Road legs for the route in order: OSRM route if reachable, else straight lines with estimated times. */
+  /** Road legs for the route in order: Mapbox Directions, else OSRM, else straight lines with estimated times. */
   async function routeLegs(points) {
     const key = points.map((p) => p.map((x) => x.toFixed(5)).join(',')).join('|');
     if (mapState.legsCache.has(key)) return mapState.legsCache.get(key);
     let out;
+    if (MAPBOX_TOKEN && points.length <= 25) { // Directions takes up to 25 waypoints
+      try {
+        const coords = points.map((p) => `${p[1]},${p[0]}`).join(';');
+        const res = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?overview=full&geometries=geojson&access_token=${MAPBOX_TOKEN}`);
+        if (!res.ok) throw new Error();
+        const j = await res.json();
+        if (j.code !== 'Ok' || !j.routes.length) throw new Error();
+        out = { legs: j.routes[0].legs.map((l) => ({ sec: l.duration, mi: l.distance / 1609.34 })), line: j.routes[0].geometry.coordinates.map(([x, y]) => [y, x]), estimated: false };
+      } catch (e) { out = null; /* fall back to OSRM below */ }
+    }
+    if (out) { mapState.legsCache.set(key, out); return out; }
     try {
       const coords = points.map((p) => `${p[1]},${p[0]}`).join(';');
       const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
