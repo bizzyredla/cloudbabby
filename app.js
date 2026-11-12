@@ -86,6 +86,17 @@
     'Payroll / HR Technology', 'Business Consultant', 'Private Equity', 'Association / Franchise'];
   const PARTNER_TAGS = ['EB-Small-Target', 'EB-Small-Engaged', 'EB-Small-Active', 'EB-Large-Target', 'EB-Large-Engaged', 'EB-Large-Active',
     'AgcyProd-EB-Cold', 'AgcyProd-EB-Warm', 'AgcyProd-EB-Active'];
+  // Broker comp defaults. Editable in Partners > Comp rates; fixed ids so every device seeds the same rows.
+  const defaultCompPlans = () => {
+    const y = new Date().getFullYear();
+    return [
+      { id: 'cp-share', name: 'Revenue share: 25% of admin + setup fees', adminPct: 25, setupPct: 25, pepm: 0, months: 12 },
+      { id: 'cp-pepm10', name: '$10 per enrolled employee / month', adminPct: 0, setupPct: 0, pepm: 10, months: 12 },
+      { id: 'cp-pepm25', name: 'Promo: $25 per enrolled employee / month', adminPct: 0, setupPct: 0, pepm: 25, months: 12 },
+      { id: 'cp-oms', name: 'OMS (set your rates)', adminPct: 0, setupPct: 0, pepm: 0, months: 12 },
+      { id: 'cp-q4bonus', kind: 'bonus', name: 'Q4 one-time bonus', bonus: 5000, from: `${y}-10-01`, to: `${y}-12-31` },
+    ];
+  };
   const LEAD_SOURCES = ['Referral', 'Partner / broker', 'Inbound', 'Cold outreach', 'Event', 'Existing client', 'Other'];
 
   // Cadence step types: how each looks, what it logs as, which daily-plan section it counts toward.
@@ -218,10 +229,10 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules })); } catch (e) { /* ignore */ }
   };
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], deleted: {} }; }
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
@@ -242,6 +253,8 @@
   function normalize(data) {
     const st = { ...emptyState(), ...data };
     st.accounts.forEach(migrateAccount);
+    if (!Array.isArray(st.compPlans)) st.compPlans = [];
+    if (!st.compPlans.length) st.compPlans = defaultCompPlans().filter((x) => !(st.deleted || {})['cp:' + x.id]);
     // Planner rows used to store only the account name; link each to its account where the name is unique.
     const byName = new Map();
     for (const a of st.accounts) { const k = (a.name || '').trim().toLowerCase(); byName.set(k, byName.has(k) ? null : a.id); }
@@ -271,7 +284,7 @@
   let booted = false;
   // Device-only sync bookkeeping: records waiting to upload, and how far we have read the cloud.
   const local = { dirty: new Set(), cursor: 0, user: '', seen: {} };
-  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:']];
+  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:']];
 
   function loadLegacy() {
     try {
@@ -721,9 +734,10 @@
   }
 
   // ---------- contacts ----------
-  const peopleSwitch = (mode) => `<div class="seg" role="group" aria-label="Accounts or contacts">
+  const peopleSwitch = (mode) => `<div class="seg" role="group" aria-label="Accounts, contacts or partners">
       <a class="${mode === 'accounts' ? 'active' : ''}" href="#accounts" role="button">Accounts</a>
       <a class="${mode === 'contacts' ? 'active' : ''}" href="#contacts" role="button">Contacts</a>
+      <a class="${mode === 'partners' ? 'active' : ''}" href="#partners" role="button">Partners</a>
     </div>`;
   const CONTACT_FILTERS = { all: 'All contacts', stay: 'Stay in touch', due: 'Due now', quiet: 'No contact in 90+ days' };
   const CONTACT_SORTS = { next: 'Next due', name: 'Name', account: 'Account', last: 'Last contacted' };
@@ -849,15 +863,559 @@
     });
   }
 
+  // ---------- partners (ecosystem) ----------
+  // A thin layer on partner accounts: health, stakeholders, their clients, referred pipeline with
+  // estimated broker comp, a dated playbook and three automatic rules. No portal, no payouts.
+  const PARTNER_OWNERS = ['Me', 'Christa', 'Han', 'Blake'];
+  const AGREEMENT_STATUSES = ['None', 'In discussion', 'Signed', 'Expired'];
+  const INFLUENCE = ['High', 'Medium', 'Low'];
+  const CLIENT_KINDS = { client: 'Client (broker of record)', target: 'Co-sell target', former: 'Former referral' };
+  const RESELL_STAGES = ['Closed Lost', 'Nurture', 'Revisit'];
+  const PLAYBOOKS = {
+    broker: { name: 'Broker playbook', steps: [
+      [0, 'Intro meeting: partnership overview and how referrals work'],
+      [7, 'Send the comp overview and run a what-if with the calculator'],
+      [14, 'Agreement signed and appointment confirmed'],
+      [21, 'Book review: map their clients and pick 3 co-sell targets'],
+      [30, 'Joint call or co-sell plan on the first target'],
+      [60, 'Check in on the first referral; share a success story'],
+      [90, 'Quarterly review: pipeline, wins, next targets'],
+    ] },
+    advisor: { name: 'Advisor playbook (CPA, attorney, banker, consultant)', steps: [
+      [0, 'Intro meeting: which of their clients fit a PEO'],
+      [7, 'Send the client-fit one-pager and referral process'],
+      [21, 'Lunch & learn or short training for their team'],
+      [30, 'Review 3 client fits together'],
+      [60, 'Check in on the first referral'],
+      [90, 'Quarterly update: product news, use cases, success stories'],
+    ] },
+    network: { name: 'Association, franchise & tech playbook', steps: [
+      [0, 'Intro meeting: member or customer profile'],
+      [14, 'Agree on a member offer and co-marketing plan'],
+      [30, 'Run a webinar or event for their members'],
+      [60, 'Review leads and referrals'],
+      [90, 'Quarterly review'],
+    ] },
+  };
+  const playbookFor = (p) => (/Association|Payroll/.test(p.partnerType || '') ? 'network'
+    : /CPA|Attorney|Banker|HR Consultant|Business Consultant|Private Equity/.test(p.partnerType || '') ? 'advisor' : 'broker');
+
+  const partners = () => state.accounts.filter((a) => a.type === 'partner');
+  const referredBy = (p) => state.accounts.filter((x) => x.channelPartnerId === p.id);
+  const partnerClients = (p) => p.clients || [];
+
+  // ----- comp estimates -----
+  /** The comp rates table; a brand-new or erased workspace starts from the editable defaults. */
+  const compRows = () => {
+    if (!Array.isArray(state.compPlans) || !state.compPlans.length) state.compPlans = defaultCompPlans();
+    return state.compPlans;
+  };
+  const compPlans = () => compRows().filter((x) => x.kind !== 'bonus');
+  const compBonuses = () => compRows().filter((x) => x.kind === 'bonus');
+  const planOf = (p) => compRows().find((x) => x.id === (p && p.compPlanId) && x.kind !== 'bonus') || compPlans()[0] || null;
+  /** What a deal brings in for comp: enrolled employees (or headcount), annual admin fees, setup fee. */
+  const dealInputs = (a) => ({ enrolled: Number(a.enrolled || a.employees) || 0, adminFees: Number(a.adminFees) || 0, setupFee: Number(a.setupFee) || 0, closeDate: a.closeDate || '' });
+  /** Year-one estimate for one plan. Bonuses apply when the close date falls in their window, or when forced. */
+  function compEstimate(plan, inp, includeBonus) {
+    if (!plan) return { admin: 0, setup: 0, pepm: 0, bonus: 0, total: 0 };
+    const admin = ((Number(plan.adminPct) || 0) / 100) * inp.adminFees;
+    const setup = ((Number(plan.setupPct) || 0) / 100) * inp.setupFee;
+    const pepm = (Number(plan.pepm) || 0) * inp.enrolled * (Number(plan.months) || 12);
+    const bonus = compBonuses().filter((b) => (includeBonus === undefined ? inp.closeDate && inp.closeDate >= b.from && inp.closeDate <= b.to : includeBonus))
+      .reduce((n, b) => n + (Number(b.bonus) || 0), 0);
+    return { admin, setup, pepm, bonus, total: admin + setup + pepm + bonus };
+  }
+  const dealComp = (deal) => compEstimate(planOf(getAccount(deal.channelPartnerId)), dealInputs(deal)).total;
+  const est = (n) => `${money(Math.round(n))}`;
+
+  // ----- health: four signals -----
+  function partnerHealth(p) {
+    const t = today();
+    const lt = lastTouchDate(p);
+    const ref = lastReferralDate(p);
+    const people = p.contacts.filter((c) => !c.status || c.status === 'Active');
+    const signals = [
+      { ok: !!lt && daysBetween(lt, t) <= 30, good: 'Touched in the last 30 days', bad: lt ? `No touch in ${daysBetween(lt, t)} days` : 'Never touched' },
+      { ok: !!ref && daysBetween(ref, t) <= 90, good: 'Referral in the last 90 days', bad: ref ? 'No referral in 90+ days' : 'No referrals yet' },
+      { ok: p.agreementStatus === 'Signed', good: 'Agreement signed', bad: p.agreementStatus === 'Expired' ? 'Agreement expired' : 'No signed agreement' },
+      { ok: people.length >= 2, good: `${people.length} stakeholders mapped`, bad: people.length ? 'Only 1 stakeholder' : 'No stakeholders' },
+    ];
+    const score = signals.filter((s) => s.ok).length;
+    const level = score >= 3 ? 'good' : score === 2 ? 'warn' : 'bad';
+    return { score, level, label: { good: 'Healthy', warn: 'Watch', bad: 'At risk' }[level], signals };
+  }
+  const healthDot = (h) => `<span class="health ${h.level}" title="${esc(h.signals.map((s) => (s.ok ? '✓ ' + s.good : '✗ ' + s.bad)).join('\n'))}"><i></i>${h.label}</span>`;
+
+  const nextStep = (p) => state.tasks.filter((x) => x.accountId === p.id && !x.done).sort((x, y) => x.date.localeCompare(y.date))[0] || null;
+
+  // ----- rules -----
+  const RULE_LABELS = {
+    onboard: ['New partner → onboarding playbook', 'Dated steps for the partner type go into the planner.'],
+    quiet: ['Quiet partner → re-engage task', 'Engaged through Dormant partners with no touch in 45 days.'],
+    update: ['Referred deal changes stage → update the partner', 'A task to tell the partner what moved.'],
+  };
+  const ruleOn = (k) => (ui.partnerRules || {})[k] !== false;
+
+  function applyPlaybook(p, key = playbookFor(p), start = today()) {
+    const pb = PLAYBOOKS[key];
+    pb.steps.forEach(([day, title], i) => {
+      state.tasks.push({ id: uid(), date: nextWorkday(addDays(start, day)), time: '', title, accountId: p.id, priority: i === 0 ? 'high' : 'med',
+        notes: `${pb.name} · step ${i + 1} of ${pb.steps.length}`, done: false, playbook: key });
+    });
+    p.playbook = key; touch(p);
+  }
+
+  /** Daily check: a re-engage task for each quiet partner (once, until done). */
+  function runPartnerRules() {
+    if (!ruleOn('quiet')) return false;
+    const t = today();
+    let made = false;
+    for (const p of partners()) {
+      if (!['Engaged', 'Met', 'Committed', 'Producing', 'Dormant'].includes(p.stage)) continue;
+      const lt = lastTouchDate(p);
+      if (lt && daysBetween(lt, t) < 45) continue;
+      if (state.tasks.some((x) => x.accountId === p.id && x.rule === 'reengage' && !x.done)) continue;
+      state.tasks.push({ id: uid(), date: t, time: '', title: `Re-engage ${p.name}`, accountId: p.id, priority: 'med', done: false, rule: 'reengage',
+        notes: `${lt ? `Last touch ${relDays(lt)}.` : 'No touch logged yet.'} Share a product update, a success story or a client idea.` });
+      made = true;
+    }
+    return made;
+  }
+
+  /** Rule 3: a referred deal moved; remind yourself to tell the partner (one open task per deal). */
+  function partnerUpdateTask(deal, to) {
+    const p = deal.channelPartnerId && getAccount(deal.channelPartnerId);
+    if (!p || !ruleOn('update')) return;
+    const title = `Update ${p.name}: ${deal.name} moved to ${to}`;
+    const open = state.tasks.find((x) => x.rule === 'update' && x.dealId === deal.id && !x.done);
+    if (open) Object.assign(open, { title, date: today() });
+    else state.tasks.push({ id: uid(), date: today(), time: '', title, accountId: p.id, dealId: deal.id, priority: 'med', done: false, rule: 'update', notes: '' });
+  }
+
+  // ----- the Partners page -----
+  function renderPartners() {
+    const all = partners();
+    const t = today();
+    const q = (ui.ptSearch || '').trim().toLowerCase();
+    const rows = all.map((p) => ({ p, h: partnerHealth(p), refs: referredBy(p) })).filter(({ p, h }) => {
+      if (ui.ptType && ui.ptType !== 'all' && p.partnerType !== ui.ptType) return false;
+      if (ui.ptStage && ui.ptStage !== 'all' && p.stage !== ui.ptStage) return false;
+      if (ui.ptHealth && ui.ptHealth !== 'all' && h.level !== ui.ptHealth) return false;
+      if (ui.ptOwner && ui.ptOwner !== 'all' && (p.owner || '') !== ui.ptOwner) return false;
+      return !q || haystack(p).includes(q);
+    }).sort((x, y) => ({ bad: 0, warn: 1, good: 2 }[x.h.level] - { bad: 0, warn: 1, good: 2 }[y.h.level]) || x.p.name.localeCompare(y.p.name));
+    const referred = state.accounts.filter((x) => x.channelPartnerId && getAccount(x.channelPartnerId));
+    const recent = referred.filter((x) => x.referredAt && daysBetween(x.referredAt, t) <= 90).length;
+    const open = referred.filter(isOpenDeal);
+    const openValue = open.reduce((n, x) => n + (Number(x.value) || 0), 0);
+    const openComp = open.reduce((n, x) => n + dealComp(x), 0);
+    const active = all.filter((p) => ['Engaged', 'Met', 'Committed', 'Producing'].includes(p.stage)).length;
+    const owners = [...new Set([...PARTNER_OWNERS, ...all.map((p) => p.owner).filter(Boolean)])];
+    const attention = all.map((p) => ({ p, h: partnerHealth(p) })).filter(({ p, h }) => h.level !== 'good' && p.stage !== 'Closed' && p.stage !== 'Target').slice(0, 6);
+
+    $('#view').innerHTML = `
+      <div class="page-head">
+        <div class="row" style="gap:.85rem"><h1>Partners <span class="muted small">(${all.length})</span></h1>${peopleSwitch('partners')}</div>
+        <div class="row">
+          <button class="btn ghost" data-act="comp-calc">Calculator</button>
+          <button class="btn ghost" data-act="comp-rates">Comp rates</button>
+          <button class="btn ghost" data-act="log-referral">+ Log referral</button>
+          <button class="btn" data-act="new-partner">+ New partner</button>
+        </div>
+      </div>
+      <div class="kpi-grid4 pt-kpis">
+        <div class="card kpi-card"><span class="kpi-label">Active partners</span><div class="kpi-value">${active}</div><div class="kpi-sub">Engaged through Producing · ${all.length} total</div></div>
+        <div class="card kpi-card"><span class="kpi-label">Referrals, last 90 days</span><div class="kpi-value">${recent}</div><div class="kpi-sub">${plural(referred.length, 'referral')} all time</div></div>
+        <div class="card kpi-card"><span class="kpi-label">Referred open pipeline</span><div class="kpi-value">${money(openValue)}</div><div class="kpi-sub">${plural(open.length, 'deal')} in S1–S5</div></div>
+        <div class="card kpi-card"><span class="kpi-label">Est. partner comp (open)</span><div class="kpi-value">${est(openComp)}</div><div class="kpi-sub">Year one · estimate, not a payout</div></div>
+      </div>
+      ${attention.length ? `<div class="card pt-attention">
+        <div class="section-head"><h2 style="margin:0">Needs a little attention</h2><span class="small muted">Health is from last touch, referrals, agreement and stakeholders</span></div>
+        <ul class="list">${attention.map(({ p, h }) => `<li>
+          ${healthDot(h)}
+          <div class="grow"><a class="title" href="#account/${p.id}">${esc(p.name)}</a><div class="small muted">${esc(h.signals.filter((s) => !s.ok).map((s) => s.bad).join(' · '))}</div></div>
+          <button class="btn sm ghost" data-act="log" data-id="${p.id}">Log touch</button>
+        </li>`).join('')}</ul>
+      </div>` : ''}
+      <div class="filters">
+        <input type="search" id="pt-search" placeholder="Search partners, people, notes…" value="${esc(ui.ptSearch || '')}">
+        <select id="pt-type" aria-label="Partner type"><option value="all">All partner types</option>${PARTNER_TYPES.map((x) => `<option ${ui.ptType === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        <select id="pt-stage" aria-label="Stage"><option value="all">All stages</option>${STAGES.partner.map((x) => `<option ${ui.ptStage === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        <select id="pt-health" aria-label="Health"><option value="all">Any health</option>${[['good', 'Healthy'], ['warn', 'Watch'], ['bad', 'At risk']].map(([k, l]) => `<option value="${k}" ${ui.ptHealth === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <select id="pt-owner" aria-label="Owner"><option value="all">Any owner</option>${owners.map((x) => `<option ${ui.ptOwner === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      </div>
+      ${rows.length ? `<div class="pt-grid">${rows.map(({ p, h, refs }) => {
+        const o = refs.filter(isOpenDeal);
+        const ns = nextStep(p);
+        const lt = lastTouchDate(p); const ref = lastReferralDate(p);
+        return `<div class="card pt-card" data-act="open-account" data-id="${p.id}" role="link" tabindex="0">
+          <div class="row spread" style="flex-wrap:nowrap;align-items:flex-start">
+            <div style="min-width:0"><strong class="ellipsis" style="display:block">${esc(p.name)}</strong><div class="small muted">${esc(p.partnerType || 'Partner')} · ${esc(p.stage)}${p.owner ? ' · ' + esc(p.owner) : ''}</div></div>
+            ${healthDot(h)}
+          </div>
+          <div class="pt-stats">
+            <div><span>Last touch</span>${lt ? esc(relDays(lt)) : 'never'}</div>
+            <div><span>Last referral</span>${ref ? esc(relDays(ref)) : 'none'}</div>
+            <div><span>Referred open</span>${o.length ? `${o.length} · ${money(o.reduce((n, x) => n + (Number(x.value) || 0), 0))}` : '—'}</div>
+            <div><span>Clients mapped</span>${partnerClients(p).length || '—'}</div>
+          </div>
+          <div class="small ${ns && ns.date < t ? 'pt-late' : 'muted'} ellipsis">${ns ? `Next: ${esc(ns.title)} · ${esc(relDays(ns.date))}` : 'No next step planned'}</div>
+        </div>`;
+      }).join('')}</div>` : `<div class="card empty-soft">${all.length ? 'No partners match these filters.' : 'No partners yet. Add a broker, CPA or other referral partner to start.'}</div>`}
+      <div class="card pt-rules">
+        <h3 style="margin:0 0 .5rem">Automatic rules</h3>
+        ${Object.entries(RULE_LABELS).map(([k, [name, sub]]) => `<label class="row pt-rule"><input type="checkbox" data-rule="${k}" ${ruleOn(k) ? 'checked' : ''} style="width:auto"><span><b>${esc(name)}</b><br><span class="small muted">${esc(sub)}</span></span></label>`).join('')}
+      </div>`;
+    const bind = (sel, key) => $(sel).addEventListener('change', (e) => { ui[key] = e.target.value; renderPartners(); });
+    bind('#pt-type', 'ptType'); bind('#pt-stage', 'ptStage'); bind('#pt-health', 'ptHealth'); bind('#pt-owner', 'ptOwner');
+    $('#pt-search').addEventListener('input', (e) => {
+      ui.ptSearch = e.target.value; clearTimeout(ui.searchTimer);
+      ui.searchTimer = setTimeout(() => { if (!$('#pt-search')) return; const pos = $('#pt-search').selectionStart; renderPartners(); const el = $('#pt-search'); el.focus(); el.setSelectionRange(pos, pos); }, 160);
+    });
+    $$('[data-rule]').forEach((cb) => cb.addEventListener('change', () => {
+      ui.partnerRules = { ...(ui.partnerRules || {}), [cb.dataset.rule]: cb.checked }; savePrefs();
+      toast(`${RULE_LABELS[cb.dataset.rule][0]}: ${cb.checked ? 'on' : 'off'}`);
+    }));
+  }
+
+  // ----- partner page: summary strip and tabs -----
+  const PARTNER_TABS = { overview: 'Overview', people: 'People', accounts: 'Accounts', pipeline: 'Pipeline & comp', plan: 'Plan' };
+  function partnerStrip(a) {
+    const h = partnerHealth(a);
+    const ns = nextStep(a);
+    const plan = planOf(a);
+    return `
+      <div class="pt-strip">
+        <div><span>Health</span>${healthDot(h)}</div>
+        <div><span>Agreement</span>${esc(a.agreementStatus || 'None')}${a.nationalAgreement ? ' <span class="pill">National</span>' : ''}</div>
+        <div><span>Comp plan</span>${plan ? esc(plan.name) : '—'}</div>
+        <div><span>Owner</span>${esc(a.owner || '—')}</div>
+        <div class="pt-next"><span>Next step</span>${ns ? `${esc(ns.title)} <span class="small muted">${esc(relDays(ns.date))}</span>` : '<span class="muted">None planned</span>'}</div>
+      </div>
+      <div class="seg pt-tabs" role="tablist">${Object.entries(PARTNER_TABS).map(([k, l]) => `<button type="button" role="tab" class="${(ui.partnerTab || 'overview') === k ? 'active' : ''}" data-act="ptab" data-tab="${k}">${l}</button>`).join('')}</div>`;
+  }
+
+  function partnerTabBody(a, tab) {
+    if (tab === 'people') return partnerPeople(a);
+    if (tab === 'accounts') return partnerAccounts(a);
+    if (tab === 'pipeline') return partnerPipeline(a);
+    if (tab === 'plan') return partnerPlan(a);
+    return '';
+  }
+
+  function partnerPeople(a) {
+    const t = today();
+    const people = [...a.contacts].sort((x, y) => INFLUENCE.indexOf(x.influence || 'Low') - INFLUENCE.indexOf(y.influence || 'Low'));
+    const active = people.filter((c) => !c.status || c.status === 'Active');
+    const overdue = active.filter((c) => { const s = stayInfo(a, c); return s && s.next < t; });
+    const roles = new Set(active.map((c) => c.role).filter(Boolean));
+    return `
+      <div class="row spread"><div class="small muted">${plural(active.length, 'stakeholder')} · ${overdue.length ? `<span class="pill overdue">${overdue.length} overdue on cadence</span>` : 'nobody overdue'}${roles.has('Decision maker') ? '' : ' · <span class="pt-late">no decision maker mapped</span>'}</div>
+        <button class="btn sm ghost" data-act="new-contact" data-id="${a.id}">+ Add person</button></div>
+      ${people.length ? `<div class="pt-people">${people.map((c) => {
+        const s = stayInfo(a, c);
+        const last = lastContacted(a, c);
+        return `<div class="pt-person ${c.status && c.status !== 'Active' ? 'inactive' : ''}" data-contact="${c.id}">
+          <span class="avatar sm">${esc(initials(c.name))}</span>
+          <div class="grow" style="min-width:0">
+            <strong>${esc(c.name)}</strong>${c.primary ? ' <span class="pill primary">Primary</span>' : ''}
+            <div class="small muted">${esc([c.title, c.role].filter(Boolean).join(' · ')) || '&nbsp;'}</div>
+          </div>
+          <label class="pt-infl small">Influence <select data-influence data-id="${a.id}" data-cid="${c.id}">${['', ...INFLUENCE].map((x) => `<option value="${x}" ${(c.influence || '') === x ? 'selected' : ''}>${x || '—'}</option>`).join('')}</select></label>
+          <div class="pt-cad">${c.status && c.status !== 'Active' ? `<span class="pill overdue">${esc(c.status)}</span>` : staySelect(a, c, true)}</div>
+          <div class="small pt-last">${last ? `Last ${esc(relDays(last))}` : '<span class="muted">Never contacted</span>'}${s && s.next < t ? ` · <span class="pill overdue">${esc(stayWhen(s.next))}</span>` : s ? ` · <span class="muted">next ${esc(shortDate(s.next))}</span>` : ''}</div>
+          ${s ? `<div class="row sit-acts">${stayActions(a, c)}</div>` : '<span></span>'}
+        </div>`;
+      }).join('')}</div>` : '<div class="empty">No people yet. Map the owner, producers and account managers so you stay in touch with everyone.</div>'}
+      <p class="small muted" style="margin:0">Cadence uses Stay in touch: pick how often to reach each person; they show up on the Overview and planner when due.</p>`;
+  }
+
+  function partnerAccounts(a) {
+    const refs = referredBy(a);
+    const current = refs.filter((x) => !RESELL_STAGES.includes(x.stage));
+    const former = refs.filter((x) => RESELL_STAGES.includes(x.stage));
+    const clients = partnerClients(a);
+    const inCrm = clients.filter((c) => clientAccount(c));
+    const row = (x) => `<li>
+        <div class="grow"><a class="title" href="#account/${x.id}">${esc(x.name)}</a>
+          <div class="small muted">${esc(x.stage)}${x.value ? ' · ' + money(x.value) : ''}${x.referredAt ? ' · referred ' + esc(relDays(x.referredAt)) : ''}${x.location ? ' · ' + esc(x.location) : ''}</div></div>
+        ${isOpenDeal(x) ? `<span class="small muted">Est. comp</span> <b>${est(dealComp(x))}</b>` : ''}
+      </li>`;
+    return `
+      <div class="row spread"><h3 style="margin:0">Referred by ${esc(a.name)} <span class="muted small">(${current.length})</span></h3><button class="btn sm" data-act="log-referral" data-id="${a.id}">+ Log referral</button></div>
+      ${current.length ? `<ul class="list">${current.map(row).join('')}</ul>` : '<div class="empty">No referrals yet. Log one when they send you a lead.</div>'}
+
+      <div class="row spread"><h3 style="margin:0">Former referrals to resell <span class="muted small">(${former.length + clients.filter((c) => c.kind === 'former').length})</span></h3></div>
+      ${former.length || clients.some((c) => c.kind === 'former') ? `<ul class="list">${former.map((x) => `<li>
+          <div class="grow"><a class="title" href="#account/${x.id}">${esc(x.name)}</a><div class="small muted">${esc(x.stage)}${x.value ? ' · ' + money(x.value) : ''}${x.vendors.length ? ' · on ' + esc(x.vendors.join(', ')) : ''}${x.vendorRenewal ? ' · renews ' + esc(fmtDate(x.vendorRenewal)) : ''}</div></div>
+          <button class="btn sm ghost" data-act="resell-task" data-id="${x.id}" data-pid="${a.id}">Plan resell</button>
+        </li>`).join('')}${clients.filter((c) => c.kind === 'former').map((c) => clientRow(a, c)).join('')}</ul>` : '<div class="empty">Deals they referred that went Closed Lost, Nurture or Revisit show here, ready to resell.</div>'}
+
+      <div class="row spread"><h3 style="margin:0">Their clients <span class="muted small">(${clients.filter((c) => c.kind !== 'former').length}${inCrm.length ? ` · ${inCrm.length} already in your CRM` : ''})</span></h3><button class="btn sm ghost" data-act="add-clients" data-id="${a.id}">+ Add clients</button></div>
+      ${clients.some((c) => c.kind !== 'former') ? `<ul class="list">${clients.filter((c) => c.kind !== 'former').sort((x, y) => (x.kind === 'target' ? 0 : 1) - (y.kind === 'target' ? 0 : 1) || (Number(y.employees) || 0) - (Number(x.employees) || 0)).map((c) => clientRow(a, c)).join('')}</ul>`
+        : '<div class="empty">Paste their book of business (from Mployer or a spreadsheet) to see which clients overlap with your accounts and pick co-sell targets.</div>'}`;
+  }
+
+  const clientAccount = (c) => (c.accountId && getAccount(c.accountId)) || findAccountByText(c.name);
+  function clientRow(p, c) {
+    const acct = clientAccount(c);
+    return `<li>
+      <div class="grow">
+        ${acct ? `<a class="title" href="#account/${acct.id}">${esc(c.name)}</a>` : `<span class="title">${esc(c.name)}</span>`}
+        <div class="small muted">${[c.location, c.employees ? `${c.employees} employees` : '', c.ein ? `EIN ${c.ein}` : ''].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</div>
+      </div>
+      ${acct ? `<span class="pill" title="Already in your CRM">In CRM · ${esc(stageShort(acct.stage))}</span>` : ''}
+      <select class="pt-kind" data-client-kind data-id="${p.id}" data-client="${c.id}" aria-label="Relationship">${Object.entries(CLIENT_KINDS).map(([k, l]) => opt(k, l, c.kind)).join('')}</select>
+      ${acct ? '' : `<button class="btn sm ghost" data-act="client-prospect" data-id="${p.id}" data-client="${c.id}" title="Create a prospect account for this client">+ Prospect</button>`}
+      <button class="icon-btn" data-act="client-remove" data-id="${p.id}" data-client="${c.id}" title="Remove">✕</button>
+    </li>`;
+  }
+
+  function partnerPipeline(a) {
+    const plan = planOf(a);
+    const refs = referredBy(a);
+    const open = refs.filter(isOpenDeal).sort((x, y) => (x.closeDate || '9').localeCompare(y.closeDate || '9'));
+    const won = refs.filter((x) => x.stage === 'Closed Won');
+    const comp = (x) => compEstimate(plan, dealInputs(x));
+    const openTotal = open.reduce((n, x) => n + comp(x).total, 0);
+    const wonTotal = won.reduce((n, x) => n + comp(x).total, 0);
+    const table = (list) => `<div class="pt-table">
+      <div class="pt-tr pt-th"><span>Deal</span><span>Stage</span><span>Close</span><span>Enrolled</span><span>Admin fees</span><span>Est. year one</span><span></span></div>
+      ${list.map((x) => { const c = comp(x); const inp = dealInputs(x); return `<div class="pt-tr">
+        <span><a href="#account/${x.id}">${esc(x.name)}</a></span><span class="small">${esc(stageShort(x.stage))}</span><span>${dueChip(x.closeDate)}</span>
+        <span>${inp.enrolled || '<span class="muted">—</span>'}</span><span>${inp.adminFees ? money(inp.adminFees) : '<span class="muted">—</span>'}</span>
+        <span><b>${est(c.total)}</b>${c.bonus ? ' <span class="pill">+bonus</span>' : ''}</span>
+        <span><button class="btn sm ghost" data-act="comp-calc" data-deal="${x.id}">Calculator</button></span>
+      </div>`; }).join('')}</div>`;
+    return `
+      <div class="row spread">
+        <label class="row small">Comp plan <select data-comp-plan data-id="${a.id}">${compPlans().map((x) => opt(x.id, x.name, plan && plan.id)).join('')}</select></label>
+        <div class="row"><button class="btn sm ghost" data-act="comp-rates">Comp rates</button><button class="btn sm ghost" data-act="comp-calc" data-pid="${a.id}">What-if calculator</button></div>
+      </div>
+      <div class="cad-stats">
+        <div><b>${open.length}</b><span>Open referred deals</span></div>
+        <div><b>${money(open.reduce((n, x) => n + (Number(x.value) || 0), 0))}</b><span>Open pipeline</span></div>
+        <div class="good"><b>${est(openTotal)}</b><span>Est. comp, open</span></div>
+        <div><b>${won.length}</b><span>Won</span></div>
+        <div><b>${est(wonTotal)}</b><span>Est. comp, won</span></div>
+      </div>
+      <h3 style="margin:.25rem 0 0">Open (S1–S5)</h3>
+      ${open.length ? table(open) : '<div class="empty">No open referred deals.</div>'}
+      ${won.length ? `<h3 style="margin:.25rem 0 0">Closed Won</h3>${table(won)}` : ''}
+      <p class="small muted" style="margin:0">Estimates from your comp rates using each deal's enrolled employees (or headcount), annual admin fees and setup fee. Not a payout statement.</p>`;
+  }
+
+  function partnerPlan(a) {
+    const steps = state.tasks.filter((x) => x.accountId === a.id && x.playbook).sort((x, y) => x.date.localeCompare(y.date));
+    const done = steps.filter((x) => x.done).length;
+    const t = today();
+    const resources = a.resources || [];
+    return `
+      <div class="row spread">
+        <h3 style="margin:0">${a.playbook && PLAYBOOKS[a.playbook] ? esc(PLAYBOOKS[a.playbook].name) : 'Playbook'} ${steps.length ? `<span class="muted small">${done} of ${steps.length} done</span>` : ''}</h3>
+        <div class="row">
+          <select id="pb-pick" aria-label="Playbook">${Object.entries(PLAYBOOKS).map(([k, pb]) => opt(k, pb.name, a.playbook || playbookFor(a))).join('')}</select>
+          <button class="btn sm ${steps.length ? 'ghost' : ''}" data-act="apply-playbook" data-id="${a.id}">${steps.length ? 'Add steps again' : 'Start playbook'}</button>
+        </div>
+      </div>
+      ${steps.length ? `<div class="progress"><div style="width:${Math.round((done / steps.length) * 100)}%"></div></div>
+      <ul class="list pt-steps">${steps.map((x) => `<li class="${x.done ? 'done' : ''}">
+          <input type="checkbox" data-step="${x.id}" ${x.done ? 'checked' : ''} aria-label="Done" style="width:auto">
+          <div class="grow"><div class="title">${esc(x.title)}</div><div class="small muted">${esc(fmtDate(x.date))} · ${x.done ? 'done' : esc(relDays(x.date))}</div></div>
+          ${!x.done && x.date < t ? '<span class="pill overdue">late</span>' : ''}
+        </li>`).join('')}</ul>` : '<div class="empty">Start a playbook to get dated steps for this partner type. They also show in your daily planner.</div>'}
+
+      <h3 style="margin:.5rem 0 0">Co-sell plan</h3>
+      <textarea id="pt-cosell" rows="4" placeholder="Who you're targeting together, the pitch, events, timelines…">${esc(a.coSellPlan || '')}</textarea>
+
+      <div class="row spread"><h3 style="margin:.5rem 0 0">Resources</h3><button class="btn sm ghost" data-act="add-resource" data-id="${a.id}">+ Add link</button></div>
+      ${resources.length ? `<ul class="list">${resources.map((r) => `<li><span class="grow"><a href="${esc(extUrl(r.url))}" target="_blank" rel="noopener">${esc(r.label || r.url)}</a></span><button class="icon-btn" data-act="del-resource" data-id="${a.id}" data-rid="${r.id}" title="Remove">✕</button></li>`).join('')}</ul>`
+        : '<div class="empty">Links you share with this partner: your Highspot page, comp overview, one-pagers, webinar recordings.</div>'}
+      ${filesSection(a)}`;
+  }
+
+  // ----- forms -----
+  /** Quick capture: a partner sends a lead. Creates the prospect, linked to the partner and the person who sent it. */
+  function referralForm(partnerId) {
+    const ps = partners().sort((x, y) => x.name.localeCompare(y.name));
+    if (!ps.length) { toast('Add a partner first'); return; }
+    const p0 = getAccount(partnerId) || ps[0];
+    openModal('Log a referral', `
+      <div class="grid-2">
+        ${field('Referred by', `<select name="partnerId" id="rf-partner">${ps.map((x) => opt(x.id, x.name, p0.id)).join('')}</select>`)}
+        ${field('Their contact', '<select name="channelContactId" id="rf-pcontact"></select>')}
+        ${field('Company *', '<input name="name" required>')}
+        ${field('Employees', '<input name="employees" type="number" min="0">')}
+        ${field('Contact name', '<input name="c_name">')}
+        ${field('Title', '<input name="c_title">')}
+        ${field('Email', '<input name="c_email" type="email" autocapitalize="off">')}
+        ${field('Phone', '<input name="c_phone" type="tel">')}
+        ${field('Stage', `<select name="stage">${STAGES.prospect.map((s) => opt(s, s, STAGES.prospect[0])).join('')}</select>`)}
+        ${field('Next follow-up', `<input name="nextFollowUp" type="date" value="${nextWorkday(addDays(today(), 1))}">`)}
+        ${field('Notes', '<textarea name="notes" rows="2" placeholder="What they said about the company, timing, current vendor…"></textarea>', 'span-2')}
+      </div>`, (data) => {
+      if (!data.name.trim()) return false;
+      const p = getAccount(data.partnerId);
+      const now = new Date().toISOString();
+      const contacts = data.c_name || data.c_email || data.c_phone
+        ? [{ id: uid(), name: data.c_name || data.c_email || data.c_phone, title: data.c_title, email: data.c_email, phone: data.c_phone, role: '', notes: '', status: 'Active', primary: true }] : [];
+      const acct = migrateAccount({ id: uid(), name: data.name.trim(), type: 'prospect', stage: data.stage, employees: data.employees, notes: data.notes, tags: '', vendors: [],
+        leadSource: 'Partner / broker', channelPartnerId: p.id, channelContactId: data.channelContactId || '', referredAt: today(), nextFollowUp: data.nextFollowUp,
+        contacts, activities: [{ id: uid(), date: today(), kind: 'Note', summary: `Referred by ${p.name}`, notes: data.notes, createdAt: now }], keyDates: [], createdAt: now, updatedAt: now });
+      state.accounts.push(acct);
+      p.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Referral: ${acct.name}`, notes: '', contactId: data.channelContactId || '', createdAt: now });
+      touch(p);
+      toast(`Referral logged: ${acct.name}`);
+    }, 'Log referral', { wide: true });
+    const fill = () => {
+      const p = getAccount($('#rf-partner').value);
+      $('#rf-pcontact').innerHTML = `<option value="">—</option>${p ? p.contacts.map((c) => opt(c.id, c.name, (p.contacts.find((x) => x.primary) || {}).id)).join('') : ''}`;
+    };
+    $('#rf-partner').addEventListener('change', fill); fill();
+  }
+
+  /** Paste a book of business: one client per line (tab or comma separated: name, location, employees, EIN in any order after the name). */
+  function addClientsForm(p) {
+    openModal(`Add clients · ${p.name}`, `
+      <p class="small muted" style="margin:0">Paste rows from Mployer's client summary or a spreadsheet: one company per line. The first column is the name; the app also picks up a location (City, ST), an employee count and an EIN.</p>
+      ${field('Clients', '<textarea name="rows" rows="9" placeholder="PALIGROUP M…\tLos Angeles, CA\t603\nINTEGRATED DATA SERVICES\tHenderson, NV\t297"></textarea>')}
+      ${field('Relationship', `<select name="kind">${Object.entries(CLIENT_KINDS).map(([k, l]) => opt(k, l, 'client')).join('')}</select>`)}
+      <div class="small" id="ac-preview"></div>`, (data) => {
+      const rows = parseClientRows(data.rows);
+      if (!rows.length) { toast('Paste at least one company'); return false; }
+      p.clients = p.clients || [];
+      const have = new Set(p.clients.map((c) => c.name.trim().toLowerCase()));
+      let added = 0;
+      for (const r of rows) {
+        if (have.has(r.name.toLowerCase())) continue;
+        const acct = findAccountByText(r.name);
+        p.clients.push({ id: uid(), ...r, kind: data.kind, accountId: acct ? acct.id : '', addedAt: new Date().toISOString() });
+        have.add(r.name.toLowerCase()); added++;
+      }
+      touch(p);
+      toast(`${plural(added, 'client')} added${rows.length - added ? ` · ${rows.length - added} already listed` : ''}`);
+    }, 'Add clients', { wide: true });
+    const ta = $('[name=rows]', modalForm);
+    ta.addEventListener('input', () => {
+      const rows = parseClientRows(ta.value);
+      const overlap = rows.filter((r) => findAccountByText(r.name)).length;
+      $('#ac-preview').textContent = rows.length ? `${plural(rows.length, 'company', 'companies')} found${overlap ? ` · ${overlap} already in your CRM` : ''}` : '';
+    });
+  }
+
+  function parseClientRows(text) {
+    return String(text || '').split(/\r?\n/).map((line) => {
+      const cells = (line.includes('\t') ? line.split('\t') : line.split(/,(?=\s*\S)(?![^"]*"\s*$)/)).map((x) => x.replace(/^"|"$/g, '').trim()).filter(Boolean);
+      if (!cells.length) return null;
+      const r = { name: cells[0], location: '', employees: '', ein: '' };
+      if (/^employer|^company|^name$/i.test(r.name)) return null; // header row
+      for (const c of cells.slice(1)) {
+        if (/^\d{2}-\d{7}$/.test(c)) r.ein = c;
+        else if (/^[\d,]+$/.test(c) && !r.employees) r.employees = c.replace(/,/g, '');
+        else if (/[A-Za-z .'-]+,\s*[A-Z]{2}\b/.test(c) && !r.location) r.location = c;
+      }
+      return r.name.length > 1 ? r : null;
+    }).filter(Boolean);
+  }
+
+  /** Editable comp rates: plans (percent of fees and per-employee-per-month) and dated one-time bonuses. */
+  function compRatesForm() {
+    const plans = compPlans(); const bonuses = compBonuses();
+    openModal('Broker comp rates', `
+      <p class="small muted" style="margin:0">These drive every estimate. Change a rate here when a promo starts or ends: nothing else needs to change.</p>
+      <div class="cr-table">
+        <div class="cr-tr cr-th"><span>Plan</span><span>% of admin fees</span><span>% of setup fee</span><span>$ per enrolled / mo</span><span>Months</span><span></span></div>
+        ${plans.map((x) => `<div class="cr-tr" data-plan="${x.id}">
+          <input name="pn_${x.id}" value="${esc(x.name)}" aria-label="Plan name">
+          <input name="pa_${x.id}" type="number" step="any" min="0" value="${esc(x.adminPct ?? 0)}" aria-label="% of admin fees">
+          <input name="ps_${x.id}" type="number" step="any" min="0" value="${esc(x.setupPct ?? 0)}" aria-label="% of setup fee">
+          <input name="pp_${x.id}" type="number" step="any" min="0" value="${esc(x.pepm ?? 0)}" aria-label="$ per enrolled per month">
+          <input name="pm_${x.id}" type="number" step="1" min="1" value="${esc(x.months ?? 12)}" aria-label="Months">
+          <label class="small cr-del"><input type="checkbox" name="pd_${x.id}" style="width:auto"> delete</label>
+        </div>`).join('')}
+      </div>
+      <button type="button" class="btn sm ghost" id="cr-add-plan">+ Add plan</button>
+      <div class="cr-table">
+        <div class="cr-tr cr-th cr-b"><span>One-time bonus</span><span>Amount ($)</span><span>From</span><span>To</span><span></span></div>
+        ${bonuses.map((x) => `<div class="cr-tr cr-b">
+          <input name="bn_${x.id}" value="${esc(x.name)}" aria-label="Bonus name">
+          <input name="ba_${x.id}" type="number" step="any" min="0" value="${esc(x.bonus ?? 0)}" aria-label="Amount">
+          <input name="bf_${x.id}" type="date" value="${esc(x.from || '')}" aria-label="From">
+          <input name="bt_${x.id}" type="date" value="${esc(x.to || '')}" aria-label="To">
+          <label class="small cr-del"><input type="checkbox" name="bd_${x.id}" style="width:auto"> delete</label>
+        </div>`).join('')}
+      </div>
+      <button type="button" class="btn sm ghost" id="cr-add-bonus">+ Add bonus</button>
+      <p class="small muted" style="margin:0">A bonus counts on deals whose expected close falls between its dates. Every figure in the app is an estimate, not a payout statement.</p>`, (data) => {
+      const next = [];
+      for (const x of compRows()) {
+        if (x.kind === 'bonus') {
+          if (data['bd_' + x.id]) continue;
+          next.push({ ...x, name: data['bn_' + x.id] || x.name, bonus: Number(data['ba_' + x.id]) || 0, from: data['bf_' + x.id] || '', to: data['bt_' + x.id] || '' });
+        } else {
+          if (data['pd_' + x.id]) continue;
+          next.push({ ...x, name: data['pn_' + x.id] || x.name, adminPct: Number(data['pa_' + x.id]) || 0, setupPct: Number(data['ps_' + x.id]) || 0, pepm: Number(data['pp_' + x.id]) || 0, months: Number(data['pm_' + x.id]) || 12 });
+        }
+      }
+      state.compPlans = next;
+      toast('Comp rates saved');
+    }, 'Save rates', { wide: true });
+    $('#cr-add-plan').addEventListener('click', () => { modal.close(); state.compPlans.push({ id: uid(), name: 'New plan', adminPct: 0, setupPct: 0, pepm: 0, months: 12 }); save(); compRatesForm(); });
+    $('#cr-add-bonus').addEventListener('click', () => { modal.close(); const y = today().slice(0, 4); state.compPlans.push({ id: uid(), kind: 'bonus', name: 'New bonus', bonus: 0, from: `${y}-01-01`, to: `${y}-12-31` }); save(); compRatesForm(); });
+  }
+
+  /** What-if calculator: every plan side by side. From a deal it fills in that deal's numbers. */
+  function compCalc({ dealId, partnerId } = {}) {
+    const deal = dealId && getAccount(dealId);
+    const p = getAccount(partnerId || (deal && deal.channelPartnerId));
+    const inp = deal ? dealInputs(deal) : { enrolled: 25, adminFees: 0, setupFee: 0, closeDate: '' };
+    const autoBonus = compBonuses().some((b) => inp.closeDate && inp.closeDate >= b.from && inp.closeDate <= b.to);
+    const chosen = planOf(p);
+    openModal(deal ? `Comp estimate · ${deal.name}` : 'Broker comp calculator', `
+      ${deal ? `<p class="small muted" style="margin:0">${p ? `Referred by ${esc(p.name)} · ` : ''}${esc(deal.stage)}${deal.closeDate ? ' · closes ' + esc(fmtDate(deal.closeDate)) : ''}</p>` : '<p class="small muted" style="margin:0">Run a what-if live with a broker or CPA.</p>'}
+      <div class="grid-3">
+        ${field('Enrolled employees', `<input name="enrolled" id="cc-enr" type="number" min="0" value="${inp.enrolled || ''}">`)}
+        ${field('Annual admin fees ($)', `<input name="adminFees" id="cc-admin" type="number" min="0" step="any" value="${inp.adminFees || ''}">`)}
+        ${field('Setup fee ($)', `<input name="setupFee" id="cc-setup" type="number" min="0" step="any" value="${inp.setupFee || ''}">`)}
+      </div>
+      ${compBonuses().length ? `<label class="row small"><input type="checkbox" id="cc-bonus" style="width:auto" ${autoBonus ? 'checked' : ''}> Include ${esc(compBonuses().map((b) => `${b.name} (${money(b.bonus)})`).join(', '))}</label>` : ''}
+      <div id="cc-out"></div>
+      <p class="small muted" style="margin:0">Estimate only, from your comp rates. Not a payout statement.</p>
+      <div class="row"><button type="button" class="btn sm ghost" id="cc-rates">Edit comp rates</button></div>`, (data) => {
+      if (!deal) return;
+      Object.assign(deal, { enrolled: data.enrolled, adminFees: data.adminFees, setupFee: data.setupFee });
+      touch(deal); toast('Saved to the deal');
+    }, deal ? 'Save numbers to deal' : 'Done', { wide: true });
+    const draw = () => {
+      const v = { enrolled: Number($('#cc-enr').value) || 0, adminFees: Number($('#cc-admin').value) || 0, setupFee: Number($('#cc-setup').value) || 0 };
+      const bonus = $('#cc-bonus') ? $('#cc-bonus').checked : false;
+      const rows = compPlans().map((pl) => ({ pl, c: compEstimate(pl, v, bonus) }));
+      const best = Math.max(0, ...rows.map((r) => r.c.total));
+      const p10 = rows.find((r) => r.pl.id === 'cp-pepm10'); const p25 = rows.find((r) => r.pl.id === 'cp-pepm25');
+      $('#cc-out').innerHTML = `<div class="cc-table">
+        <div class="cc-tr cc-th"><span>Plan</span><span>Admin fees</span><span>Setup</span><span>Per employee</span><span>Bonus</span><span>Year one</span></div>
+        ${rows.map(({ pl, c }) => `<div class="cc-tr ${chosen && pl.id === chosen.id ? 'mine' : ''}">
+          <span>${esc(pl.name)}${chosen && pl.id === chosen.id ? ' <span class="pill">this partner</span>' : ''}</span>
+          <span>${est(c.admin)}</span><span>${est(c.setup)}</span><span>${est(c.pepm)}</span><span>${est(c.bonus)}</span>
+          <span><b>${est(c.total)}</b>${c.total && c.total === best ? ' ★' : ''}</span>
+        </div>`).join('')}
+      </div>${p10 && p25 && v.enrolled ? `<div class="small" style="margin-top:.4rem">Promo vs standard per-employee: <b>+${est(p25.c.pepm - p10.c.pepm)}</b> in year one for ${v.enrolled} enrolled.</div>` : ''}`;
+    };
+    ['#cc-enr', '#cc-admin', '#cc-setup', '#cc-bonus'].forEach((s) => { const el = $(s); if (el) el.addEventListener('input', draw); });
+    $('#cc-rates').addEventListener('click', () => { modal.close(); compRatesForm(); });
+    draw();
+  }
+
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession, partners: renderPartners };
   const TAB_FOR = { account: 'accounts', report: 'dashboard', session: 'cadences' };
 
   function route() {
     let [name, arg] = location.hash.replace('#', '').split('/');
     if (name === 'accounts' && arg) name = 'account'; // older links to an account record
     const view = views[name] ? name : 'dashboard';
-    if (view === 'account') ui.recordId = arg;
+    if (view === 'account') { if (ui.recordId !== arg) ui.partnerTab = 'overview'; ui.recordId = arg; }
+    if (ui.rulesDay !== today()) { ui.rulesDay = today(); if (runPartnerRules()) save(); } // quiet-partner check, once a day
     if (view === 'planner' && arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)) ui.plannerDate = arg;
     if (view === 'lists' && arg) ui.listId = decodeURIComponent(arg);
     if (view === 'cadences' && arg) ui.cadenceId = arg;
@@ -874,8 +1432,9 @@
     if (ui.lastView !== view) ui.showAll = false;
     ui.lastView = view;
     $$('#tabs a').forEach((a) => {
-      a.classList.toggle('active', a.dataset.view === (TAB_FOR[view] || view));
-      a.classList.toggle('alt-active', view === 'contacts' && a.dataset.view === 'accounts'); // phone tab bar has no Contacts tab
+      const tabFor = view === 'account' && (getAccount(ui.recordId) || {}).type === 'partner' ? 'partners' : (TAB_FOR[view] || view);
+      a.classList.toggle('active', a.dataset.view === tabFor);
+      a.classList.toggle('alt-active', ['contacts', 'partners'].includes(view) && a.dataset.view === 'accounts'); // phone tab bar has no Contacts / Partners tab
     });
     updateChrome(view);
     views[view]();
@@ -888,7 +1447,7 @@
     }
   }
   const rerender = () => route();
-  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', session: 'Session', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude' };
+  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', partners: 'Partners', session: 'Session', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude' };
   /** Breadcrumb and sidebar counts. */
   function updateChrome(view) {
     $('#crumb-page').textContent = CRUMBS[view] || 'Overview';
@@ -1113,7 +1672,7 @@
       `This permanently deletes all ${state.accounts.length} accounts, tasks, planner days, lists and cadences` +
       `${cloudOn() ? ' on this device AND every synced device' : ' on this device'}.\n\nExport a backup first if you might need it.\n\nType DELETE to confirm.`);
     if ((typed || '').trim().toUpperCase() !== 'DELETE') { if (typed !== null) toast('Nothing was deleted'); return; }
-    state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = []; state.flows = [];
+    state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = []; state.flows = []; state.compPlans = defaultCompPlans();
     ui.listId = null;
     research = { target: '', hint: '', list: '', flows: ['hq', 'dm', 'hr'], custom: '', pasted: '' }; saveResearch();
     session = null; saveSession();
@@ -1282,6 +1841,7 @@
   function logStageChange(a, from, to) {
     if (!from || !to || from === to) return;
     a.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Stage changed: ${from} → ${to}`, notes: '', createdAt: new Date().toISOString() });
+    if (a.channelPartnerId) partnerUpdateTask(a, to); // rule 3
     setTimeout(() => afterStageChange(a, to), 80); // once the current dialog has closed
   }
 
@@ -1410,7 +1970,17 @@
       </div>`;
   }
 
+  /** Partners get a summary strip and tabs; Overview is the full record, the other tabs replace its body. */
   function accountDetail(a) {
+    const html = accountDetailFull(a);
+    if (a.type !== 'partner') return html;
+    const cut = html.indexOf('<!--ptab-->');
+    const tab = PARTNER_TABS[ui.partnerTab] ? ui.partnerTab : 'overview';
+    if (tab === 'overview') return html;
+    return `${html.slice(0, cut)}<div class="pt-body stack">${partnerTabBody(a, tab)}</div></div>`;
+  }
+
+  function accountDetailFull(a) {
     const t = today();
     const history = [...a.activities].sort((x, y) => y.date.localeCompare(x.date) || (y.createdAt || '').localeCompare(x.createdAt || ''));
     const keyDates = [...a.keyDates].sort((x, y) => x.date.localeCompare(y.date));
@@ -1432,6 +2002,7 @@
             <button class="btn ghost" data-act="edit-account" data-id="${a.id}">Edit</button>
           </div>
         </div>
+        ${a.type === 'partner' ? partnerStrip(a) : ''}<!--ptab-->
 
         <div class="facts">
           ${a.type === 'prospect' || a.vendors.length ? `<div class="span-all"><span>Current vendors</span>${a.vendors.length ? vendorPills(a) : '—'}</div>` : ''}
@@ -1452,8 +2023,10 @@
             const pa = a.channelPartnerId && getAccount(a.channelPartnerId);
             if (!pa) return '';
             const pc = a.channelContactId && pa.contacts.find((c) => c.id === a.channelContactId);
-            return `<div class="span-all"><span>Channel partner</span><a href="#account/${pa.id}">${esc(pa.name)}</a>${pc ? ` · ${esc(pc.name)}${pc.phone ? ` · <a href="tel:${esc(pc.phone)}">${esc(pc.phone)}</a>` : ''}${pc.email ? ` · <a href="mailto:${esc(pc.email)}">${esc(pc.email)}</a>` : ''}` : ''}</div>`;
+            const cc = isOpenDeal(a) || a.stage === 'Closed Won' ? dealComp(a) : 0;
+            return `<div class="span-all"><span>Channel partner</span>${cc ? `<span class="pt-est" title="Year-one estimate from your comp rates">Est. comp ${est(cc)} <button type="button" class="link-btn small" data-act="comp-calc" data-deal="${a.id}">calculator</button></span>` : ''}<a href="#account/${pa.id}">${esc(pa.name)}</a>${pc ? ` · ${esc(pc.name)}${pc.phone ? ` · <a href="tel:${esc(pc.phone)}">${esc(pc.phone)}</a>` : ''}${pc.email ? ` · <a href="mailto:${esc(pc.email)}">${esc(pc.email)}</a>` : ''}` : ''}</div>`;
           })()}
+          ${(() => { const cp = a.coSellPartnerId && getAccount(a.coSellPartnerId); return cp ? `<div class="span-all"><span>Co-sell with</span><a href="#account/${cp.id}">${esc(cp.name)}</a> <span class="small muted">(their client)</span></div>` : ''; })()}
           <div><span>Next follow-up</span>${a.nextFollowUp ? `<span class="pill ${dueClass(a.nextFollowUp)}">${fmtDate(a.nextFollowUp)}</span> <span class="small muted">${relDays(a.nextFollowUp)}</span>` : '—'}</div>
           <div><span>Next revisit</span>${a.revisitDate ? `<span class="pill ${dueClass(a.revisitDate)}">${fmtDate(a.revisitDate)}</span> <span class="small muted">${relDays(a.revisitDate)}</span>${a.revisitNote ? `<div class="small muted">${esc(a.revisitNote)}</div>` : ''}` : '—'}</div>
           <div><span>Last touch</span>${(() => {
@@ -4433,8 +5006,8 @@
   const accountOptions = (cur) => `<option value="">— none —</option>` +
     [...state.accounts].sort((a, b) => a.name.localeCompare(b.name)).map((a) => opt(a.id, a.name, cur)).join('');
 
-  function accountForm(existing) {
-    const a = existing || { type: 'prospect', stage: STAGES.prospect[0] };
+  function accountForm(existing, preset = {}) {
+    const a = existing || { type: 'prospect', stage: STAGES.prospect[0], ...preset };
     openModal(existing ? 'Edit account' : 'New account', `
       <fieldset class="form-sec"><legend>Company</legend><div class="grid-3">
         ${field('Account name *', `<input name="name" required value="${esc(a.name)}">`)}
@@ -4444,6 +5017,8 @@
         ${field('Employees', `<input name="employees" type="number" min="0" value="${esc(a.employees)}">`)}
         ${field(a.type === 'partner' ? 'Annual value ($)' : 'Deal value ($)', `<input name="value" type="number" min="0" step="any" value="${esc(a.value)}">`)}
         ${field('Admin fees ($)', `<input name="adminFees" type="number" min="0" step="any" value="${esc(a.adminFees)}">`, 'only-prospect')}
+        ${field('Setup fee ($)', `<input name="setupFee" type="number" min="0" step="any" value="${esc(a.setupFee)}">`, 'only-prospect')}
+        ${field('Enrolled employees', `<input name="enrolled" type="number" min="0" value="${esc(a.enrolled)}" placeholder="Defaults to employees">`, 'only-prospect')}
         ${field('Website', `<input name="website" value="${esc(a.website)}" autocapitalize="off" placeholder="company.com">`)}
         ${field('Company LinkedIn', `<input name="linkedin" value="${esc(a.linkedin)}" autocapitalize="off" placeholder="linkedin.com/company/…">`)}
         ${field('Street address', `<input name="address" value="${esc(a.address)}" placeholder="e.g. 1200 J St" autocomplete="street-address">`)}
@@ -4472,6 +5047,10 @@
         ${field('Partner type', `<select name="partnerType"><option value="">—</option>${PARTNER_TYPES.map((x) => opt(x, x, a.partnerType)).join('')}${a.partnerType && !PARTNER_TYPES.includes(a.partnerType) ? opt(a.partnerType, a.partnerType, a.partnerType) : ''}</select>`)}
         ${field('Last touch date', `<input name="lastTouchDate" type="date" value="${esc(existing ? lastTouchDate(a) : '')}"><span class="small muted">Fills in from logged activity; set it for touches made outside the app.</span>`)}
         ${field('Last referral date', `<input name="lastReferralDate" type="date" value="${esc(existing ? lastReferralDate(a) : '')}"><span class="small muted">Updates when you link a referred account to this partner.</span>`)}
+        ${field('Agreement', `<select name="agreementStatus">${AGREEMENT_STATUSES.map((x) => opt(x, x, a.agreementStatus || 'None')).join('')}</select>`)}
+        ${field('Comp plan', `<select name="compPlanId">${compPlans().map((x) => opt(x.id, x.name, (planOf(a) || {}).id)).join('')}</select>`)}
+        ${field('Owner', `<input name="owner" list="dl-owners" value="${esc(a.owner || '')}" placeholder="Who owns this partner"><datalist id="dl-owners">${[...new Set([...PARTNER_OWNERS, ...partners().map((x) => x.owner).filter(Boolean)])].map((x) => `<option value="${esc(x)}">`).join('')}</datalist>`)}
+        <label class="row small" style="align-self:end"><input type="checkbox" name="nationalAgreement" style="width:auto" ${a.nationalAgreement ? 'checked' : ''}> National agreement</label>
       </div></fieldset>
       ${a.type === 'partner' && existing ? '' : `
       <fieldset class="form-sec only-prospect"><legend>Channel partner</legend><div class="grid-2">
@@ -4485,7 +5064,8 @@
       if (!data.name.trim()) return false;
       const { c_name, c_title, c_email, c_phone, ...fields } = data;
       fields.vendors = JSON.parse(fields.vendors || '[]');
-      if (fields.type !== 'partner') { delete fields.partnerType; delete fields.lastTouchDate; delete fields.lastReferralDate; }
+      if (fields.type !== 'partner') { for (const k of ['partnerType', 'lastTouchDate', 'lastReferralDate', 'agreementStatus', 'compPlanId', 'owner', 'nationalAgreement']) delete fields[k]; }
+      else fields.nationalAgreement = !!data.nationalAgreement;
       // Linking an account to a partner counts as a referral that day.
       if (fields.channelPartnerId && fields.channelPartnerId !== (existing || {}).channelPartnerId) fields.referredAt = today();
       if (!fields.channelPartnerId && existing && existing.channelPartnerId) fields.referredAt = '';
@@ -4501,6 +5081,7 @@
           ? [{ id: uid(), name: c_name || c_email || c_phone, title: c_title, email: c_email, phone: c_phone, role: '', notes: '', status: 'Active', primary: true }] : [];
         const acct = { id: uid(), ...fields, contacts, activities: [], keyDates: [], createdAt: now, updatedAt: now };
         state.accounts.push(acct);
+        if (acct.type === 'partner' && ruleOn('onboard')) applyPlaybook(acct); // rule 1: onboarding playbook
         location.hash = `account/${acct.id}`;
         toast('Account created');
       }
@@ -4702,6 +5283,23 @@
   }
 
   // ---------- actions ----------
+  // Partner page widgets: influence, client relationship, comp plan, playbook steps, co-sell plan.
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    const a = el.dataset && el.dataset.id && getAccount(el.dataset.id);
+    if (el.matches('[data-influence]') && a) {
+      const c = a.contacts.find((x) => x.id === el.dataset.cid); if (c) { c.influence = el.value; touch(a); save(); }
+    } else if (el.matches('[data-client-kind]') && a) {
+      const c = (a.clients || []).find((x) => x.id === el.dataset.client); if (c) { c.kind = el.value; touch(a); save(); rerender(); }
+    } else if (el.matches('[data-comp-plan]') && a) {
+      a.compPlanId = el.value; touch(a); save(); rerender();
+    } else if (el.matches('[data-step]')) {
+      const task = state.tasks.find((x) => x.id === el.dataset.step); if (task) { task.done = el.checked; save(); rerender(); }
+    } else if (el.id === 'pt-cosell') {
+      const pa = getAccount(ui.recordId); if (pa) { pa.coSellPlan = el.value; touch(pa); save(); toast('Co-sell plan saved'); }
+    }
+  });
+
   // Stay-in-touch interval dropdowns (contact cards and the Contacts page).
   document.addEventListener('change', (e) => {
     const sel = e.target.closest('select[data-sit]');
@@ -4799,6 +5397,42 @@
       case 'new-contact': return contactForm(acct);
       case 'edit-contact': return contactForm(acct, acct.contacts.find((c) => c.id === cid));
       case 'open-contact': ui.focusContact = cid; return go(`account/${id}`);
+      case 'ptab': ui.partnerTab = el.dataset.tab; return rerender();
+      case 'new-partner': return accountForm(null, { type: 'partner', stage: STAGES.partner[0] });
+      case 'log-referral': return referralForm(id);
+      case 'comp-calc': return compCalc({ dealId: el.dataset.deal, partnerId: el.dataset.pid });
+      case 'comp-rates': return compRatesForm();
+      case 'add-clients': return addClientsForm(acct);
+      case 'client-remove': {
+        acct.clients = (acct.clients || []).filter((c) => c.id !== el.dataset.client); touch(acct); save(); return rerender();
+      }
+      case 'client-prospect': {
+        const c = (acct.clients || []).find((x) => x.id === el.dataset.client);
+        if (!c) return;
+        const now = new Date().toISOString();
+        const np = migrateAccount({ id: uid(), name: c.name, type: 'prospect', stage: STAGES.prospect[0], location: c.location || '', employees: c.employees || '', tags: 'co-sell', notes: `Client of ${acct.name}.`,
+          coSellPartnerId: acct.id, leadSource: 'Partner / broker', vendors: [], contacts: [], activities: [], keyDates: [], createdAt: now, updatedAt: now });
+        state.accounts.push(np);
+        Object.assign(c, { accountId: np.id, kind: 'target' }); touch(acct); save(); rerender();
+        return toast(`${np.name} added as a prospect (co-sell with ${acct.name})`);
+      }
+      case 'resell-task': {
+        const pa = getAccount(el.dataset.pid);
+        state.tasks.push({ id: uid(), date: today(), time: '', title: `Resell: ${acct.name}${pa ? ` (referred by ${pa.name})` : ''}`, accountId: acct.id, priority: 'med', notes: '', done: false });
+        save(); return toast('Added to today’s planner');
+      }
+      case 'apply-playbook': {
+        const key = ($('#pb-pick') || {}).value || playbookFor(acct);
+        applyPlaybook(acct, key); save(); rerender();
+        return toast(`${PLAYBOOKS[key].name}: ${plural(PLAYBOOKS[key].steps.length, 'step')} added to your planner`);
+      }
+      case 'add-resource':
+        return openModal(`Add a resource · ${acct.name}`, `<div class="grid-2">${field('Label', '<input name="label" placeholder="e.g. Highspot partner page">')}${field('Link *', '<input name="url" required placeholder="https://…" autocapitalize="off">')}</div>`, (data) => {
+          if (!data.url.trim()) return false;
+          acct.resources = [...(acct.resources || []), { id: uid(), label: data.label.trim(), url: data.url.trim() }]; touch(acct);
+        }, 'Add link');
+      case 'del-resource':
+        acct.resources = (acct.resources || []).filter((r) => r.id !== el.dataset.rid); touch(acct); save(); return rerender();
       case 'sit-log': {
         const c = acct.contacts.find((x) => x.id === cid);
         return activityForm(acct, null, { kind: channelKind(c), contactId: c.id, summary: `Stay in touch: ${c.name}` });
@@ -5086,8 +5720,15 @@
       value: 22000, nextFollowUp: '', activities: [], keyDates: [],
     });
 
-    Object.assign(brightpath, { partnerType: 'Business Consultant' });
-    Object.assign(summit, { partnerType: 'Payroll / HR Technology' });
+    Object.assign(brightpath, { partnerType: 'Business Consultant', agreementStatus: 'Signed', owner: 'Me', compPlanId: 'cp-share',
+      resources: [{ id: uid(), label: 'Highspot partner page', url: 'https://www.highspot.com' }],
+      clients: [
+        { id: uid(), name: 'Pacific Coast Dental Group', location: 'San Jose, CA', employees: '64', ein: '', kind: 'client', accountId: '' },
+        { id: uid(), name: 'Golden State Logistics', location: 'Stockton, CA', employees: '140', ein: '', kind: 'target', accountId: '' },
+        { id: uid(), name: 'Northwind Logistics', location: 'Sacramento, CA', employees: '120', ein: '', kind: 'client', accountId: '' },
+      ] });
+    Object.assign(summit, { partnerType: 'Payroll / HR Technology', agreementStatus: 'In discussion', owner: 'Me', compPlanId: 'cp-pepm10' });
+    Object.assign(northwind, { adminFees: 14400, setupFee: 1500, enrolled: 110 });
     Object.assign(northwind, { channelPartnerId: brightpath.id, referredAt: addDays(t, -40) });
     [northwind, brightpath, helix, summit, oak].forEach(migrateAccount);
     const contact = (name, title, role, email = '', phone = '') => ({ id: uid(), name, title, role, email, phone, notes: '', primary: false });

@@ -183,6 +183,38 @@ No install, no build step: open `index.html` in a browser.
   calls/emails/LinkedIn rows; checking one off logs the touch
 - Included in CSV export and import ("Stay in touch" column, primary contact)
 
+**Partners (your ecosystem)**: a light layer on partner accounts, not a separate PRM
+- **Partners page** (sidebar; on iPhone, Accounts | Contacts | Partners): active partners,
+  referrals in the last 90 days, referred open pipeline, estimated partner comp, a "needs
+  attention" list, and a card per partner with health, last touch, last referral, referred
+  pipeline, clients mapped and next step. Filter by type, stage, health and owner
+- **Health** (Healthy / Watch / At risk) from four signals: touched in 30 days, a referral in
+  90 days, agreement signed, at least two stakeholders. Hover it to see which signals are missing
+- **Partner page tabs**: Overview (the full record plus a strip with health, agreement, comp plan,
+  owner, next step) · People (stakeholder map with role, influence, Stay in touch cadence and
+  who's overdue) · Accounts (what they referred, former referrals to resell, their clients) ·
+  Pipeline & comp · Plan (playbook, co-sell plan, resource links such as your Highspot page,
+  attachments)
+- **Partner fields**: partner type, agreement (None / In discussion / Signed / Expired), comp
+  plan, national agreement, owner, last touch and last referral dates
+- **Their clients**: paste a book of business (from Mployer's client summary or a spreadsheet);
+  name, location, employee count and EIN are picked up. Clients already in your CRM are flagged.
+  Mark each as client (broker of record), co-sell target or former referral; "+ Prospect" creates
+  a co-sell prospect linked to the partner
+- **+ Log referral**: company, contact and stage in one step; links the deal and the partner
+  contact who sent it, and updates the partner's last referral
+- **Comp calculator**: enrolled employees, annual admin fees and setup fee, compared across every
+  plan side by side (including the $10 vs $25 per-employee difference). Opens prefilled from a
+  referred deal and can save the numbers back. Every figure is labelled an estimate
+- **Comp rates** (editable, synced): 25% of admin + setup fees; $10 per enrolled employee per
+  month; $25 promo; OMS (enter your rates); Q4 $5,000 one-time bonus, counted on deals closing in
+  its dates. Change a rate once and every estimate follows. Prospects get "Setup fee" and
+  "Enrolled employees" fields (enrolled defaults to employees)
+- **Three automatic rules** (switch each off on the Partners page): a new partner gets the
+  playbook for its type as dated planner tasks (broker, advisor, or association/franchise/tech);
+  a partner from Engaged to Dormant with no touch in 45 days gets a "Re-engage" task (once); a
+  referred deal changing stage creates "Update the partner: deal moved to stage"
+
 **Contacts**
 - Every contact across all accounts in one table: name, title, account, reach icons, stay-in-touch
   frequency, last contacted and next due
