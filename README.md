@@ -297,11 +297,28 @@ value first, then spends your time by tier
   a renewal task; a referred deal changing stage creates "Update the partner: deal moved to stage"
 
 **Contacts**
-- Every contact across all accounts in one table: name, title, account, reach icons, stay-in-touch
-  frequency, last contacted and next due
-- Search; filter by stay in touch, due now, partners/prospects or no contact in 90+ days; sort by
-  next due, name, account or last contacted
-- Change the frequency inline, or select several people and set them all at once
+- Every contact across all accounts in one table: name and title, account, **role**, call / email /
+  LinkedIn buttons (LinkedIn searches by name and company when no profile is saved), stay-in-touch
+  frequency, **last touch with that person** and next due
+- Tabs: All, Decision makers, Champions, No role, Stay-in-touch due, Left / inactive. Search, type
+  filter and sort (next due, name, account, last touch, role)
+- **Roles**: Decision maker, Champion, Finance, HR, Influencer, Gatekeeper, Operations, Executive.
+  Change a role right in the row. Decision makers and champions with no touch in 30+ days on a live
+  deal show red
+- **Single-threaded deals**: open deals where you've reached one person or nobody, with touches per
+  person ("Cesiah 4×, Dimitry 0×"). **No decision maker mapped**: open deals with nobody marked
+  Decision maker (an owner, founder or CEO counts) and a one-tap "+ Add contact"
+- The account page shows the **buying committee** (Decision maker, Champion, Finance, HR: ✓ or ○)
+  and flags "No decision maker mapped" or "Single-threaded: only Dana reached". Each contact card has
+  call / email / LinkedIn buttons and its own last touch
+- **Statuses**: Active, Left company, Do not contact, Bounced (a bounced cadence email sets it).
+  Anyone inactive leaves their cadences and stay-in-touch reminders
+- **Left company → "Where did they go?"**: type the new company and title. The person is added there
+  (a new prospect if it isn't in your CRM yet, tagged former-champion, lead source "Former
+  contact", with a follow-up in 2 workdays), keeping their role, LinkedIn and notes. Their old card
+  says "now at …"
+- **Bulk actions** on ticked contacts: add to a cadence (spread over workdays), set role, set stay in
+  touch, set status, tag their accounts, export (ZoomInfo / Apollo-ready columns)
 - Desktop: sidebar item with a due count. iPhone: the Accounts | Contacts switch on the Accounts page
 
 **Overview (dashboard)**

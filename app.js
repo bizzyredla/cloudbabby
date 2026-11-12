@@ -77,8 +77,8 @@
     'ADP Workforce Now', 'Paycor', 'Paylocity', 'Paycom', 'Deel',
   ];
   const NO_VENDOR = 'None / in-house';
-  const CONTACT_ROLES = ['Decision maker', 'Champion', 'Influencer', 'HR', 'Finance', 'Operations', 'Executive', 'Other'];
-  const CONTACT_STATUSES = ['Active', 'Left company', 'Do not contact'];
+  const CONTACT_ROLES = ['Decision maker', 'Champion', 'Finance', 'HR', 'Influencer', 'Gatekeeper', 'Operations', 'Executive', 'Other'];
+  const CONTACT_STATUSES = ['Active', 'Left company', 'Do not contact', 'Bounced'];
   const CHANNELS = ['Email', 'Phone', 'Mobile / text', 'LinkedIn', 'In person'];
   const TIMEZONES = ['Eastern', 'Central', 'Mountain', 'Pacific', 'Alaska', 'Hawaii'];
   // Channel (partner) accounts: what kind of referral source they are, and ready-made tags.
@@ -725,26 +725,108 @@
       <a class="${mode === 'contacts' ? 'active' : ''}" href="#contacts" role="button">Contacts</a>
       <a class="${mode === 'partners' ? 'active' : ''}" href="#partners" role="button">Partners</a>
     </div>`;
-  const CONTACT_FILTERS = { all: 'All contacts', stay: 'Stay in touch', due: 'Due now', quiet: 'No contact in 90+ days' };
-  const CONTACT_SORTS = { next: 'Next due', name: 'Name', account: 'Account', last: 'Last contacted' };
+  const CONTACT_FILTERS = { all: 'All', dm: 'Decision makers', champ: 'Champions', norole: 'No role', due: 'Stay-in-touch due', stay: 'Stay in touch', quiet: 'No contact in 90+ days', left: 'Left / inactive' };
+  const CONTACT_SORTS = { next: 'Next due', name: 'Name', account: 'Account', last: 'Last touch', role: 'Role' };
+  const ROLE_CLASS = { 'Decision maker': 'dm', Champion: 'champ', Finance: 'fin', HR: 'hr', Influencer: 'infl', Gatekeeper: 'gate' };
+  const rolePill = (r) => (r ? `<span class="role-pill ${ROLE_CLASS[r] || ''}">${esc(r)}</span>` : '');
+  const isActiveContact = (c) => !c.status || c.status === 'Active';
+  /** The roles that make up a 5–150 employee buying committee. */
+  const COMMITTEE = ['Decision maker', 'Champion', 'Finance', 'HR'];
+  function committee(a) {
+    const active = a.contacts.filter(isActiveContact);
+    const has = (r) => active.some((c) => c.role === r);
+    // An owner, president or CEO with no role set still counts as the decision maker.
+    const dm = has('Decision maker') || active.some((c) => !c.role && /owner|founder|ceo|president/i.test(c.title || ''));
+    return { dm, roles: Object.fromEntries(COMMITTEE.map((r) => [r, r === 'Decision maker' ? dm : has(r)])) };
+  }
+  /** Who you've actually reached at an account: touches per active contact (notes don't count). */
+  function threading(a) {
+    const counts = new Map(a.contacts.filter(isActiveContact).map((c) => [c.id, 0]));
+    for (const h of a.activities) if (h.kind !== 'Note' && counts.has(h.contactId)) counts.set(h.contactId, counts.get(h.contactId) + 1);
+    const people = a.contacts.filter(isActiveContact).map((c) => ({ c, n: counts.get(c.id) || 0 })).sort((x, y) => y.n - x.n);
+    return { people, reached: people.filter((x) => x.n).length };
+  }
+  /** Open deals where you've reached one person or nobody. */
+  const singleThreaded = () => state.accounts.filter((a) => a.type === 'prospect' && isOpenDeal(a)).map((a) => ({ a, t: threading(a) }))
+    .filter(({ t }) => t.reached <= 1).sort((x, y) => (Number(y.a.value) || 0) - (Number(x.a.value) || 0));
+  const noDecisionMaker = () => state.accounts.filter((a) => a.type === 'prospect' && isOpenDeal(a) && !committee(a).dm);
+
+  /** Call, email and LinkedIn as buttons (LinkedIn searches when no profile is saved). */
+  const contactReach = (c, a) => `<span class="ct-reach2">
+      ${c.phone || c.mobile ? `<a class="reach-btn" href="tel:${esc(c.phone || c.mobile)}" title="Call ${esc(c.phone || c.mobile)}" aria-label="Call ${esc(c.name)}">☎</a>` : '<span class="reach-btn off" title="No phone">☎</span>'}
+      ${c.email ? `<a class="reach-btn" href="mailto:${esc(c.email)}" title="${esc(c.email)}" aria-label="Email ${esc(c.name)}">✉</a>` : '<span class="reach-btn off" title="No email">✉</span>'}
+      <a class="reach-btn li ${c.linkedin ? '' : 'find'}" href="${esc(c.linkedin ? extUrl(c.linkedin) : liPeopleSearch(c.name, a.name))}" target="_blank" rel="noopener" title="${c.linkedin ? 'Open LinkedIn profile' : 'Find on LinkedIn'}" aria-label="LinkedIn for ${esc(c.name)}">in</a>
+    </span>`;
+
+  /** Status changes: inactive people leave cadences; "Left company" asks where they went. */
+  function setContactStatus(a, c, status) {
+    const was = c.status || 'Active';
+    if (was === status) return;
+    c.status = status;
+    if (status !== 'Active') for (const p of enrollmentsFor(c.id)) finishEnrollment(p.e, 'bad');
+    if (status !== 'Active' && c.stayInTouch) setStay(a, c, '');
+    a.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `${c.name}: ${status}`, notes: '', contactId: c.id, createdAt: new Date().toISOString() });
+    touch(a);
+    if (status === 'Left company') setTimeout(() => leftCompanyForm(a, c), 60);
+  }
+
+  /** A champion who moves is a new prospect: follow them to the new company. */
+  function leftCompanyForm(a, c) {
+    openModal(`Where did ${c.name} go?`, `
+      <p class="small muted" style="margin:0">${esc(c.name)}${c.role ? ` (${esc(c.role.toLowerCase())})` : ''} left ${esc(a.name)}. Someone who knows you at a new company is a warm lead.</p>
+      <div class="grid-2">
+        ${field('New company', `<input name="company" list="dl-lc-accts" placeholder="Company name"><datalist id="dl-lc-accts">${state.accounts.filter((x) => x !== a).map((x) => `<option value="${esc(x.name)}">`).join('')}</datalist>`)}
+        ${field('New title', `<input name="title" value="${esc(c.title || '')}">`)}
+        ${field('Email at the new company', '<input name="email" type="email" autocapitalize="off">')}
+        ${field('Mobile', `<input name="mobile" value="${esc(c.mobile || '')}">`)}
+      </div>
+      <label class="row small"><input type="checkbox" name="followup" checked style="width:auto"> Follow up in 2 workdays</label>`, (data) => {
+      const name = data.company.trim();
+      if (!name) { toast('Type the new company, or choose Skip'); return false; }
+      const now = new Date().toISOString();
+      let b = findAccountByText(name) || findAccountByName(name);
+      const created = !b;
+      if (!b) {
+        b = migrateAccount({ id: uid(), name, type: 'prospect', stage: STAGES.prospect[0], leadSource: 'Former contact', notes: `${c.name} moved here from ${a.name}.`, tags: 'former-champion', vendors: [], contacts: [], activities: [], keyDates: [], createdAt: now, updatedAt: now });
+        state.accounts.push(b);
+      }
+      const nc = { id: uid(), name: c.name, title: data.title, email: data.email, phone: '', mobile: data.mobile, linkedin: c.linkedin || '', role: c.role === 'Champion' ? 'Champion' : '', notes: `Was ${c.title || 'a contact'} at ${a.name}.${c.notes ? `\n${c.notes}` : ''}`, status: 'Active', channel: c.channel || '', timezone: c.timezone || '', primary: !b.contacts.length, movedFrom: a.id };
+      b.contacts.push(nc);
+      b.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `${c.name} joined from ${a.name}`, notes: '', contactId: nc.id, createdAt: now });
+      if (data.followup && !b.nextFollowUp) b.nextFollowUp = shiftDays(today(), 2, true);
+      c.movedTo = b.id;
+      a.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `${c.name} moved to ${b.name}`, notes: '', contactId: c.id, createdAt: now });
+      touch(a); touch(b);
+      toast(created ? `${b.name} added as a prospect with ${c.name}` : `${c.name} added to ${b.name}`);
+    }, 'Follow them');
+    $('.modal-actions [data-close]', modalForm).textContent = 'Skip';
+  }
 
   function contactRows() {
     const t = today();
     const q = ui.contactSearch.trim().toLowerCase();
+    const f = CONTACT_FILTERS[ui.contactFilter] ? ui.contactFilter : 'all';
     const rows = state.accounts.flatMap((a) => a.contacts.map((c) => ({ a, c, s: stayInfo(a, c), last: lastContacted(a, c) })))
       .filter(({ a, c, s, last }) => {
         if (ui.contactType !== 'all' && a.type !== ui.contactType) return false;
-        if (ui.contactFilter === 'stay' && !s) return false;
-        if (ui.contactFilter === 'due' && !(s && s.next <= t)) return false;
-        if (ui.contactFilter === 'quiet' && last && daysBetween(last, t) < 90) return false;
+        const active = isActiveContact(c);
+        if (f === 'left' ? active : f !== 'all' && f !== 'quiet' && !active) return false;
+        if (f === 'dm' && c.role !== 'Decision maker') return false;
+        if (f === 'champ' && c.role !== 'Champion') return false;
+        if (f === 'norole' && c.role) return false;
+        if (f === 'stay' && !s) return false;
+        if (f === 'due' && !(s && s.next <= t)) return false;
+        if (f === 'quiet' && (!active || (last && daysBetween(last, t) < 90))) return false;
         return !q || [c.name, c.title, c.role, c.email, c.phone, c.mobile, a.name].join(' ').toLowerCase().includes(q);
       });
     const byName = (x, y) => x.c.name.localeCompare(y.c.name);
+    const roleIdx = (c) => { const i = CONTACT_ROLES.indexOf(c.role); return i === -1 ? 99 : i; };
     const sorts = {
       next: (x, y) => (x.s ? x.s.next : FAR).localeCompare(y.s ? y.s.next : FAR) || byName(x, y),
       name: byName,
       account: (x, y) => x.a.name.localeCompare(y.a.name) || byName(x, y),
       last: (x, y) => (x.last || '').localeCompare(y.last || '') || byName(x, y),
+      role: (x, y) => roleIdx(x.c) - roleIdx(y.c) || byName(x, y),
     };
     return rows.sort(sorts[ui.contactSort] || sorts.next);
   }
@@ -752,22 +834,28 @@
   function renderContacts() {
     const t = today();
     const rows = contactRows();
-    const total = state.accounts.reduce((n, a) => n + a.contacts.length, 0);
-    const due = stayDue(t).length;
+    const all = state.accounts.flatMap((a) => a.contacts.map((c) => ({ a, c })));
+    const total = all.length;
     const shown = rows.slice(0, ui.contactLimit);
-    const reach = (c, a) => `<span class="ct-reach">
-        ${c.email ? `<a href="mailto:${esc(c.email)}" title="${esc(c.email)}" aria-label="Email ${esc(c.name)}">✉</a>` : ''}
-        ${c.phone || c.mobile ? `<a href="tel:${esc(c.phone || c.mobile)}" title="${esc(c.phone || c.mobile)}" aria-label="Call ${esc(c.name)}">☎</a>` : ''}
-        ${contactLinkIcons(c, a)}
-      </span>`;
+    const f = CONTACT_FILTERS[ui.contactFilter] ? ui.contactFilter : 'all';
+    const counts = {
+      all: total, dm: all.filter((x) => isActiveContact(x.c) && x.c.role === 'Decision maker').length, champ: all.filter((x) => isActiveContact(x.c) && x.c.role === 'Champion').length,
+      norole: all.filter((x) => isActiveContact(x.c) && !x.c.role).length, due: stayDue(t).length, left: all.filter((x) => !isActiveContact(x.c)).length,
+    };
+    const st = singleThreaded();
+    const nodm = noDecisionMaker();
+    const tabs = ['all', 'dm', 'champ', 'norole', 'due', 'left'];
     $('#view').innerHTML = `
       <div class="page-head">
-        <div class="row" style="gap:.85rem"><h1>Contacts <span class="muted small">(${rows.length})</span></h1>${peopleSwitch('contacts')}</div>
-        <div class="row">${due ? `<button class="btn ghost" data-act="ct-filter" data-f="due">${plural(due, 'reminder')} due</button>` : ''}</div>
+        <div>
+          <div class="row" style="gap:.85rem"><h1>Contacts <span class="muted small">(${rows.length})</span></h1>${peopleSwitch('contacts')}</div>
+          <div class="muted small">Roles, last touch per person, and who you haven't reached yet.</div>
+        </div>
       </div>
+      <div class="view-tabs">${tabs.map((k) => `<button type="button" class="q-tab ${f === k ? 'active' : ''}" data-act="ct-filter" data-f="${k}">${esc(CONTACT_FILTERS[k])} <span>${counts[k]}</span></button>`).join('')}</div>
       <div class="filters">
         <input type="search" id="ct-search" placeholder="Search name, title, email, account…" value="${esc(ui.contactSearch)}">
-        <select id="ct-filter" aria-label="Show">${Object.entries(CONTACT_FILTERS).map(([k, l]) => `<option value="${k}" ${ui.contactFilter === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <select id="ct-filter" aria-label="Show">${Object.entries(CONTACT_FILTERS).map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <select id="ct-type" aria-label="Type">
           <option value="all">Partners & prospects</option>
           <option value="partner" ${ui.contactType === 'partner' ? 'selected' : ''}>Partners</option>
@@ -777,36 +865,62 @@
       </div>
       <div class="bulk-bar card" id="ct-bulk" hidden>
         <strong id="ct-bulk-n"></strong>
+        <button type="button" class="btn sm" id="ct-bulk-cad">Add to cadence</button>
+        <label class="row small">Role <select id="ct-bulk-role"><option value="">Set role…</option>${CONTACT_ROLES.map((r) => `<option>${esc(r)}</option>`).join('')}<option value="__none">Clear role</option></select></label>
         <label class="row small">Stay in touch <select id="ct-bulk-sit"><option value="">Off</option>${STAY.map((x) => `<option value="${x.key}">${x.label}</option>`).join('')}</select></label>
-        <button type="button" class="btn sm" id="ct-bulk-apply">Apply</button>
+        <button type="button" class="btn sm ghost" id="ct-bulk-apply">Apply</button>
+        <label class="row small">Status <select id="ct-bulk-status"><option value="">Set status…</option>${CONTACT_STATUSES.map((x) => `<option>${esc(x)}</option>`).join('')}</select></label>
+        <button type="button" class="btn sm ghost" id="ct-bulk-tag">Tag their accounts</button>
+        <button type="button" class="btn sm ghost" id="ct-bulk-csv">Export</button>
         <button type="button" class="btn sm ghost" id="ct-bulk-clear">Clear</button>
       </div>
       ${rows.length ? `
       <div class="card ct-table">
         <div class="ct-row ct-headrow">
           <input type="checkbox" id="ct-all" aria-label="Select all shown">
-          <span>Name</span><span>Account</span><span>Reach</span><span>Stay in touch</span><span>Last contacted</span><span>Next due</span><span></span>
+          <span>Name</span><span>Account</span><span>Role</span><span>Reach</span><span>Stay in touch</span><span>Last touch</span><span>Next due</span><span></span>
         </div>
-        ${shown.map(({ a, c, s, last }) => `
-        <div class="ct-row ${c.status && c.status !== 'Active' ? 'inactive' : ''}">
+        ${shown.map(({ a, c, s, last }) => {
+          const active = isActiveContact(c);
+          const lateTouch = active && isLive(a) && (!last || daysBetween(last, t) > 30) && ['Decision maker', 'Champion'].includes(c.role);
+          return `
+        <div class="ct-row ${active ? '' : 'inactive'}">
           <input type="checkbox" class="ct-pick" data-id="${a.id}" data-cid="${c.id}" aria-label="Select ${esc(c.name)}">
           <div class="ct-name">
             <span class="avatar sm" aria-hidden="true">${esc(initials(c.name))}</span>
             <div class="grow">
               <button type="button" class="link-btn title" data-act="open-contact" data-id="${a.id}" data-cid="${c.id}">${esc(c.name)}</button>${c.primary ? ' <span class="pill primary">Primary</span>' : ''}${c.flag ? ` <span class="pill overdue" title="${esc(c.flag)}">⚠</span>` : ''}
-              <div class="small muted ellipsis">${esc([c.title, c.role].filter(Boolean).join(' · ')) || '&nbsp;'}</div>
+              <div class="small muted ellipsis">${esc(c.title || '') || '&nbsp;'}</div>
             </div>
           </div>
           <div class="ct-acct small"><a href="#account/${a.id}">${esc(a.name)}</a> <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span></div>
-          ${reach(c, a)}
-          <div class="ct-sit">${c.status && c.status !== 'Active' ? `<span class="pill overdue">${esc(c.status)}</span>` : staySelect(a, c, true)}</div>
-          <div class="ct-last small"><span class="ct-lbl">Last contacted </span>${last ? esc(relDays(last)) : '<span class="muted">Never</span>'}</div>
+          <div class="ct-role"><select class="role-sel ${ROLE_CLASS[c.role] || (c.role ? 'other' : 'none')}" data-ct-role data-id="${a.id}" data-cid="${c.id}" aria-label="Role for ${esc(c.name)}"><option value="">No role</option>${CONTACT_ROLES.map((r) => opt(r, r, c.role || '')).join('')}</select></div>
+          ${contactReach(c, a)}
+          <div class="ct-sit">${active ? staySelect(a, c, true) : `<select class="status-sel" data-ct-status data-id="${a.id}" data-cid="${c.id}" aria-label="Status for ${esc(c.name)}">${CONTACT_STATUSES.map((x) => opt(x, x, c.status)).join('')}</select>`}</div>
+          <div class="ct-last small ${lateTouch ? 'pt-late' : ''}"><span class="ct-lbl">Last touch </span>${last ? esc(relDays(last)) : '<span class="muted">Never</span>'}</div>
           <div class="ct-next small"><span class="ct-lbl">Next </span>${s ? `<span class="pill ${dueClass(s.next)}">${esc(s.next <= t ? stayWhen(s.next) : shortDate(s.next))}</span>` : '<span class="muted">—</span>'}</div>
-          <div class="ct-act row">${s ? stayActions(a, c) : ''}</div>
-        </div>`).join('')}
+          <div class="ct-act row">${s ? stayActions(a, c) : active ? `<button type="button" class="btn sm ghost" data-act="sit-log" data-id="${a.id}" data-cid="${c.id}">Log touch</button>` : c.movedTo && getAccount(c.movedTo) ? `<a class="small" href="#account/${c.movedTo}">Now at ${esc(getAccount(c.movedTo).name)}</a>` : c.status === 'Left company' ? `<button type="button" class="btn sm ghost" data-act="ct-follow" data-id="${a.id}" data-cid="${c.id}">Where did they go?</button>` : ''}</div>
+        </div>`;
+        }).join('')}
       </div>
       ${rows.length > shown.length ? `<button class="btn ghost" data-act="ct-more" style="width:100%;margin-top:.75rem">Show more (${rows.length - shown.length} more)</button>` : ''}`
-      : `<div class="card empty-soft">${total ? 'No contacts match these filters.' : 'No contacts yet. Add people from an account page, or import a spreadsheet.'}</div>`}`;
+      : `<div class="card empty-soft">${total ? 'No contacts match these filters.' : 'No contacts yet. Add people from an account page, or import a spreadsheet.'}</div>`}
+      ${st.length || nodm.length ? `<div class="ct-lower">
+        <div class="card">
+          <div class="section-head" style="margin-bottom:.2rem"><h2 style="margin:0">Single-threaded deals</h2><span class="pill ${st.length ? 'overdue' : ''}">${st.length} of ${state.accounts.filter((a) => a.type === 'prospect' && isOpenDeal(a)).length} open deals</span></div>
+          <p class="small muted" style="margin:0 0 .5rem">Open deals where you've reached one person or nobody. Add the owner, HR and finance before the deal depends on one inbox.</p>
+          ${st.length ? `<ul class="list">${st.slice(0, 8).map(({ a, t: th }) => `<li>
+            <a class="title grow" href="#account/${a.id}">${esc(a.name)}</a>
+            <span class="small muted ellipsis" style="max-width:55%">${th.people.length ? esc(th.people.slice(0, 3).map((x) => `${x.c.name.split(' ')[0]} ${x.n}×`).join(', ')) : 'No contacts yet'}</span>
+            <span class="small pt-late">${th.reached ? '1 reached' : 'nobody reached'}</span>
+          </li>`).join('')}</ul>` : '<div class="empty">Every open deal has two or more people reached.</div>'}
+        </div>
+        <div class="card">
+          <div class="section-head" style="margin-bottom:.2rem"><h2 style="margin:0">No decision maker mapped</h2><span class="pill ${nodm.length ? 'overdue' : ''}">${nodm.length}</span></div>
+          <p class="small muted" style="margin:0 0 .5rem">Open deals with nobody marked Decision maker (an owner, founder or CEO counts).</p>
+          ${nodm.length ? `<ul class="list">${nodm.slice(0, 8).map((a) => `<li><a class="title grow" href="#account/${a.id}">${esc(a.name)}</a><span class="small muted">${plural(a.contacts.filter(isActiveContact).length, 'contact')}</span><button type="button" class="btn sm ghost" data-act="new-contact" data-id="${a.id}">+ Add contact</button></li>`).join('')}</ul>` : '<div class="empty">Every open deal has a decision maker.</div>'}
+        </div>
+      </div>` : ''}`;
 
     const redraw = () => renderContacts();
     $('#ct-search').addEventListener('input', (e) => {
@@ -823,30 +937,96 @@
     $('#ct-type').addEventListener('change', (e) => { ui.contactType = e.target.value; ui.contactLimit = 200; redraw(); });
     $('#ct-sort').addEventListener('change', (e) => { ui.contactSort = e.target.value; redraw(); });
 
-    const picks = () => $$('.ct-pick:checked');
+    const picks = () => $$('.ct-pick:checked').map((cb) => { const a = getAccount(cb.dataset.id); const c = a && a.contacts.find((x) => x.id === cb.dataset.cid); return c ? { a, c } : null; }).filter(Boolean);
     const syncBulk = () => {
-      const n = picks().length;
+      const n = $$('.ct-pick:checked').length;
       $('#ct-bulk').hidden = !n;
       $('#ct-bulk-n').textContent = `${n} selected`;
-      const all = $('#ct-all');
-      if (all) { const boxes = $$('.ct-pick'); all.checked = n > 0 && n === boxes.length; all.indeterminate = n > 0 && n < boxes.length; }
+      const allBox = $('#ct-all');
+      if (allBox) { const boxes = $$('.ct-pick'); allBox.checked = n > 0 && n === boxes.length; allBox.indeterminate = n > 0 && n < boxes.length; }
     };
     $$('.ct-pick').forEach((cb) => cb.addEventListener('change', syncBulk));
-    const all = $('#ct-all');
-    if (all) all.addEventListener('change', (e) => { $$('.ct-pick').forEach((cb) => { cb.checked = e.target.checked; }); syncBulk(); });
+    const allBox = $('#ct-all');
+    if (allBox) allBox.addEventListener('change', (e) => { $$('.ct-pick').forEach((cb) => { cb.checked = e.target.checked; }); syncBulk(); });
     $('#ct-bulk-clear').addEventListener('click', () => { $$('.ct-pick').forEach((cb) => { cb.checked = false; }); syncBulk(); });
     $('#ct-bulk-apply').addEventListener('click', () => {
       const key = $('#ct-bulk-sit').value;
       let n = 0;
-      for (const cb of picks()) {
-        const a = getAccount(cb.dataset.id);
-        const c = a && a.contacts.find((x) => x.id === cb.dataset.cid);
-        if (!c || (c.status && c.status !== 'Active')) continue;
-        setStay(a, c, key); n++;
-      }
+      for (const { a, c } of picks()) { if (!isActiveContact(c)) continue; setStay(a, c, key); n++; }
       save(); redraw();
       toast(key ? `${plural(n, 'contact')} set to ${stayDef(key).label.toLowerCase()}` : `Stay in touch off for ${plural(n, 'contact')}`);
     });
+    $('#ct-bulk-role').addEventListener('change', (e) => {
+      const role = e.target.value === '__none' ? '' : e.target.value;
+      if (!e.target.value) return;
+      const list = picks();
+      for (const { a, c } of list) { c.role = role; touch(a); }
+      save(); redraw(); toast(`${plural(list.length, 'contact')} ${role ? `set to ${role}` : 'cleared'}`);
+    });
+    $('#ct-bulk-status').addEventListener('change', (e) => {
+      const status = e.target.value;
+      if (!status) return;
+      const list = picks();
+      for (const { a, c } of list) setContactStatus(a, c, status);
+      save(); redraw(); toast(`${plural(list.length, 'contact')} marked ${status}`);
+    });
+    $('#ct-bulk-tag').addEventListener('click', () => {
+      const tag = (prompt('Tag to add to these contacts\' accounts:') || '').trim().replace(/^#/, '');
+      if (!tag) return;
+      const accts = [...new Set(picks().map((x) => x.a))];
+      for (const a of accts) if (!tagList(a).some((x) => x.toLowerCase() === tag.toLowerCase())) { a.tags = [...tagList(a), tag].join(', '); touch(a); }
+      save(); redraw(); toast(`#${tag} added to ${plural(accts.length, 'account')}`);
+    });
+    $('#ct-bulk-csv').addEventListener('click', () => contactsCsvRows(picks()));
+    $('#ct-bulk-cad').addEventListener('click', () => enrollPeopleForm(picks()));
+  }
+
+  /** Enroll picked people in a cadence, spread over workdays if it's a big batch. */
+  function enrollPeopleForm(people) {
+    if (!state.cadences.length) { toast('Create a cadence first'); return; }
+    const okPeople = people.filter((x) => isActiveContact(x.c));
+    openModal(`Add ${plural(okPeople.length, 'person', 'people')} to a cadence`, `
+      ${okPeople.length < people.length ? `<p class="small muted" style="margin:0">${plural(people.length - okPeople.length, 'inactive contact')} left out.</p>` : ''}
+      <div class="grid-2">
+        ${field('Cadence', `<select name="cad">${state.cadences.map((c) => opt(c.id, c.name, ui.cadenceId)).join('')}</select>`)}
+        ${field('Start', `<input name="start" type="date" value="${today()}">`)}
+      </div>
+      <label class="row small"><input type="checkbox" name="spread" checked style="width:auto"> Spread start dates, up to <input type="number" name="perDay" min="1" value="${Number(ui.enrollPerDay) || 8}" style="width:4.2rem;display:inline-block"> new people a workday</label>`, (data) => {
+      const cad = cadenceById(data.cad);
+      const inCad = new Set(state.enrollments.filter((e) => e.cadenceId === cad.id && e.status !== 'finished').map((e) => e.contactId));
+      const list = okPeople.filter((x) => !inCad.has(x.c.id));
+      if (!list.length) { toast('Everyone picked is already in that cadence'); return false; }
+      const perDay = Math.max(1, Number(data.perDay) || 8);
+      const dated = data.spread && list.length > perDay ? staggerStarts(list, data.start || today(), perDay) : list.map((x) => ({ ...x, date: data.start || today() }));
+      for (const x of dated) enroll(cad, x.a, x.c, x.date);
+      toast(`${plural(dated.length, 'person', 'people')} added to ${cad.name}${okPeople.length - list.length ? ` · ${okPeople.length - list.length} already in it` : ''}`);
+    }, 'Add to cadence');
+  }
+
+  /** Buying committee and threading for an account page's Contacts section. */
+  function committeeLine(a) {
+    if (a.type !== 'prospect' || !a.contacts.length) return a.type === 'prospect' && isOpenDeal(a) ? '<div class="cm-line warn">No contacts yet: add the owner, HR and finance.</div>' : '';
+    const cm = committee(a);
+    const th = threading(a);
+    const live = isOpenDeal(a);
+    return `<div class="cm-line ${live && (!cm.dm || th.reached <= 1) ? 'warn' : ''}">
+      <span class="small muted">Buying committee</span>
+      ${COMMITTEE.map((r) => `<span class="cm-role ${cm.roles[r] ? 'on' : ''}">${cm.roles[r] ? '✓' : '○'} ${esc(r)}</span>`).join('')}
+      ${live && !cm.dm ? '<b class="pt-late small">No decision maker mapped</b>' : ''}
+      ${live && th.reached <= 1 && th.people.length ? `<b class="pt-late small">${th.reached ? `Single-threaded: only ${esc(th.people[0].c.name)} reached` : 'Nobody reached yet'}</b>` : ''}
+    </div>`;
+  }
+
+  /** Contacts as an upload file for ZoomInfo / Apollo. */
+  function contactsCsvRows(pairs) {
+    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [['First Name', 'Last Name', 'Title', 'Role', 'Email', 'Phone', 'Mobile', 'Person LinkedIn URL', 'Company', 'Website', 'City', 'State', 'Employees', 'Industry', 'Status']];
+    for (const { a, c } of pairs) {
+      const [first, ...rest] = (c.name || '').split(/\s+/);
+      const [city, stt] = (a.location || '').split(',').map((x) => x.trim());
+      rows.push([first, rest.join(' '), c.title, c.role, c.email, c.phone, c.mobile, c.linkedin, a.name, a.website, city, stt, a.employees, a.industry, c.status || 'Active']);
+    }
+    downloadFile(`contacts-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
   }
 
   // ---------- partners (ecosystem) ----------
@@ -2880,16 +3060,7 @@
     $('#al-lid').addEventListener('change', sync); sync();
   }
 
-  function contactsCsv(list) {
-    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['First Name', 'Last Name', 'Title', 'Email', 'Phone', 'Mobile', 'Person LinkedIn URL', 'Company', 'Website', 'City', 'State', 'Employees', 'Industry']];
-    for (const a of list) for (const c of a.contacts.filter((x) => !x.status || x.status === 'Active')) {
-      const [first, ...rest] = (c.name || '').split(/\s+/);
-      const [city, st] = (a.location || '').split(',').map((x) => x.trim());
-      rows.push([first, rest.join(' '), c.title, c.email, c.phone, c.mobile, c.linkedin, a.name, a.website, city, st, a.employees, a.industry]);
-    }
-    downloadFile(`contacts-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
-  }
+  const contactsCsv = (list) => contactsCsvRows(list.flatMap((a) => a.contacts.filter(isActiveContact).map((c) => ({ a, c }))));
 
   function renderAccounts() {
     trackViews();
@@ -3081,6 +3252,7 @@
 
         <div>
           <div class="section-head"><h2 style="margin:0">Contacts <span class="muted small">(${a.contacts.length})</span></h2><button class="btn sm ghost" data-act="new-contact" data-id="${a.id}">+ Add contact</button></div>
+          ${committeeLine(a)}
           ${a.contacts.length ? `<div class="contact-grid">${[...a.contacts].sort((x, y) => (y.primary ? 1 : 0) - (x.primary ? 1 : 0)).map((c) => `
             <div class="contact-card" data-contact="${c.id}">
               <div class="row spread">
@@ -3093,8 +3265,9 @@
                   <button class="icon-btn" data-act="del-contact" data-id="${a.id}" data-cid="${c.id}" title="Delete">✕</button>
                 </div>
               </div>
-              ${c.title || c.role ? `<div class="small muted">${esc([c.title, c.role].filter(Boolean).join(' · '))}</div>` : ''}
-              ${c.status && c.status !== 'Active' ? `<span class="pill overdue">${esc(c.status)}</span>` : ''}
+              ${c.title || c.role ? `<div class="small muted">${esc(c.title || '')} ${rolePill(c.role)}</div>` : ''}
+              ${c.status && c.status !== 'Active' ? `<span class="pill overdue">${esc(c.status)}</span>${c.movedTo && getAccount(c.movedTo) ? ` <a class="small" href="#account/${c.movedTo}">now at ${esc(getAccount(c.movedTo).name)}</a>` : c.status === 'Left company' ? ' <button type="button" class="link-btn small" data-act="ct-follow" data-id="' + a.id + '" data-cid="' + c.id + '">Where did they go?</button>' : ''}` : ''}
+              <div class="row cc-reach-row">${contactReach(c, a)}<span class="small muted">${(() => { const lc = lastContacted(a, c); return lc ? `Last touch ${esc(relDays(lc))}` : 'Never touched'; })()}</span></div>
               ${c.flag ? `<div><span class="pill overdue" title="${esc(c.flagAt ? `Logged ${relDays(c.flagAt)}` : '')}">⚠ ${esc(c.flag)}</span> <button type="button" class="link-btn small" data-act="contact-unflag" data-id="${a.id}" data-cid="${c.id}">Clear</button></div>` : ''}
               ${contactLinks(c, a)}
               ${stayLine(a, c)}
@@ -4779,6 +4952,7 @@
     if (type.plan) addPlanTouch(date, type.plan, { name: acct.name, accountId: acct.id, contactId: contact.id, kind: type.kind, note: `${cad.name}: ${step.title || type.label}`, done: true, activityId: actId });
     if (rules.badFlag && /wrong number|bounced/i.test(outcome)) {
       contact.flag = /bounced/i.test(outcome) ? 'Email bounced' : 'Wrong number';
+      if (/bounced/i.test(outcome)) contact.status = 'Bounced';
       contact.flagAt = date;
       if (then === 'continue') then = 'bad';
       said.push(`${contact.name} flagged: ${contact.flag.toLowerCase()}`);
@@ -6706,6 +6880,8 @@
         // People who left or opted out come out of any running cadence.
         for (const p of enrollmentsFor(existing.id)) finishEnrollment(p.e, 'bad');
       }
+      const becameLeft = existing && data.status === 'Left company' && (existing.status || 'Active') !== 'Left company';
+      if (becameLeft) setTimeout(() => leftCompanyForm(acct, existing), 80);
       let target = existing;
       if (existing && existing.flag && (fields.phone !== existing.phone || fields.mobile !== existing.mobile || fields.email !== existing.email)) fields.flag = '';
       if (existing) Object.assign(existing, fields);
@@ -6797,6 +6973,10 @@
     const a = el.dataset && el.dataset.id && getAccount(el.dataset.id);
     if (el.matches('[data-influence]') && a) {
       const c = a.contacts.find((x) => x.id === el.dataset.cid); if (c) { c.influence = el.value; touch(a); save(); }
+    } else if (el.matches('[data-ct-role]') && a) {
+      const c = a.contacts.find((x) => x.id === el.dataset.cid); if (c) { c.role = el.value; touch(a); save(); rerender(); toast(`${c.name}: ${el.value || 'no role'}`); }
+    } else if (el.matches('[data-ct-status]') && a) {
+      const c = a.contacts.find((x) => x.id === el.dataset.cid); if (c) { setContactStatus(a, c, el.value); save(); rerender(); }
     } else if (el.matches('[data-client-kind]') && a) {
       const c = (a.clients || []).find((x) => x.id === el.dataset.client); if (c) { c.kind = el.value; touch(a); save(); rerender(); }
     } else if (el.matches('[data-comp-plan]') && a) {
@@ -6976,6 +7156,7 @@
       }
       case 'ct-filter': ui.contactFilter = el.dataset.f; ui.contactLimit = 200; return rerender();
       case 'ct-more': ui.contactLimit += 200; return rerender();
+      case 'ct-follow': { const c = acct && acct.contacts.find((x) => x.id === cid); return c ? leftCompanyForm(acct, c) : undefined; }
       case 'primary-contact':
         acct.contacts.forEach((c) => { c.primary = c.id === cid; }); touch(acct); save(); rerender(); return;
       case 'del-contact': {

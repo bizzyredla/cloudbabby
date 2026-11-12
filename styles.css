@@ -1920,3 +1920,40 @@ tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 .dup-review { border: 1px solid var(--warn); background: var(--warn-soft); border-radius: 10px; padding: .6rem .8rem; }
 .dup-review ul { margin: .35rem 0 .5rem; padding-left: 1.1rem; }
 @media (max-width: 700px) { .cols-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .act-bar .btn { font-size: .78rem; } }
+
+/* ---------- contacts: roles, reach buttons, threading ---------- */
+.ct-row > .ct-sit select, .ct-row > .ct-sit .sit-pick { max-width: 100%; }
+.ct-row > .ct-sit select { width: 100%; }
+@media (min-width: 1181px) { .ct-row { grid-template-columns: 18px minmax(0, 1.4fr) minmax(0, 1.2fr) 132px 104px 128px 104px 110px 120px; } }
+.ct-reach2 { display: inline-flex; gap: .3rem; align-items: center; }
+.reach-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: .78rem; font-weight: 700; text-decoration: none; }
+.reach-btn:hover { border-color: var(--accent); color: var(--accent); }
+.reach-btn.li { color: #0a66c2; }
+.reach-btn.li.find { opacity: .55; }
+.reach-btn.off { opacity: .3; cursor: default; }
+.role-sel { font: inherit; font-size: .74rem; font-weight: 650; border-radius: 999px; padding: .18rem .5rem; width: auto; max-width: 100%; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); }
+.role-pill { display: inline-block; font-size: .7rem; font-weight: 650; border-radius: 999px; padding: .05rem .5rem; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); vertical-align: middle; }
+.role-sel.dm, .role-pill.dm { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.role-sel.champ, .role-pill.champ { background: var(--accent-soft); color: var(--ok); border-color: transparent; }
+.role-sel.fin, .role-pill.fin { background: var(--prospect-soft); color: var(--prospect); border-color: transparent; }
+.role-sel.hr, .role-pill.hr { background: #e8f1fd; color: #2563eb; border-color: transparent; }
+.role-sel.none { color: var(--muted); border-style: dashed; background: transparent; }
+@media (prefers-color-scheme: dark) { .role-sel.hr, .role-pill.hr { background: #1d2a3d; color: #8fb3e8; } }
+.status-sel { font: inherit; font-size: .78rem; width: auto; padding: .15rem .4rem; }
+.ct-lower { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; align-items: start; }
+.cm-line { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .65rem; padding: .5rem .7rem; border-radius: 10px; background: var(--surface-2); margin: .25rem 0 .6rem; }
+.cm-line.warn { background: var(--danger-soft); }
+.cm-role { font-size: .78rem; color: var(--muted); }
+.cm-role.on { color: var(--ok); font-weight: 650; }
+.cc-reach-row { gap: .5rem; margin-top: .35rem; }
+@media (max-width: 1180px) and (min-width: 701px) {
+  .ct-row { grid-template-columns: 18px minmax(0, 1.3fr) minmax(0, 1fr) 124px 100px 88px 108px; }
+  .ct-acct .pill { display: none; }
+  .ct-headrow > span:nth-of-type(3), .ct-headrow > span:nth-of-type(6), .ct-row > .ct-last { display: block; }
+  .ct-row > .ct-sit, .ct-headrow > span:nth-of-type(5), .ct-row > .ct-next, .ct-headrow > span:nth-of-type(7) { display: none; }
+}
+@media (max-width: 760px) { .ct-lower { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 700px) {
+  .ct-row > .ct-reach2 { grid-column: 3; grid-row: 1; }
+  .ct-row > .ct-role { grid-column: 2 / -1; grid-row: 5; }
+}
