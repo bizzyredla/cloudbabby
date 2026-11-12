@@ -229,10 +229,10 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode })); } catch (e) { /* ignore */ }
   };
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], deleted: {} }; }
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
@@ -254,6 +254,7 @@
     const st = { ...emptyState(), ...data };
     st.accounts.forEach(migrateAccount);
     if (!Array.isArray(st.compPlans)) st.compPlans = [];
+    if (!Array.isArray(st.categories)) st.categories = [];
     if (!st.compPlans.length) st.compPlans = defaultCompPlans().filter((x) => !(st.deleted || {})['cp:' + x.id]);
     // Planner rows used to store only the account name; link each to its account where the name is unique.
     const byName = new Map();
@@ -284,7 +285,7 @@
   let booted = false;
   // Device-only sync bookkeeping: records waiting to upload, and how far we have read the cloud.
   const local = { dirty: new Set(), cursor: 0, user: '', seen: {} };
-  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:']];
+  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:']];
 
   function loadLegacy() {
     try {
@@ -960,7 +961,7 @@
     const pb = PLAYBOOKS[key];
     pb.steps.forEach(([day, title], i) => {
       state.tasks.push({ id: uid(), date: nextWorkday(addDays(start, day)), time: '', title, accountId: p.id, priority: i === 0 ? 'high' : 'med',
-        notes: `${pb.name} · step ${i + 1} of ${pb.steps.length}`, done: false, playbook: key });
+        notes: `${pb.name} · step ${i + 1} of ${pb.steps.length}`, done: false, playbook: key, categoryId: 'cat-partner' });
     });
     p.playbook = key; touch(p);
   }
@@ -975,7 +976,7 @@
       const lt = lastTouchDate(p);
       if (lt && daysBetween(lt, t) < 45) continue;
       if (state.tasks.some((x) => x.accountId === p.id && x.rule === 'reengage' && !x.done)) continue;
-      state.tasks.push({ id: uid(), date: t, time: '', title: `Re-engage ${p.name}`, accountId: p.id, priority: 'med', done: false, rule: 'reengage',
+      state.tasks.push({ id: uid(), date: t, time: '', title: `Re-engage ${p.name}`, accountId: p.id, priority: 'med', done: false, rule: 'reengage', categoryId: 'cat-partner',
         notes: `${lt ? `Last touch ${relDays(lt)}.` : 'No touch logged yet.'} Share a product update, a success story or a client idea.` });
       made = true;
     }
@@ -989,7 +990,7 @@
     const title = `Update ${p.name}: ${deal.name} moved to ${to}`;
     const open = state.tasks.find((x) => x.rule === 'update' && x.dealId === deal.id && !x.done);
     if (open) Object.assign(open, { title, date: today() });
-    else state.tasks.push({ id: uid(), date: today(), time: '', title, accountId: p.id, dealId: deal.id, priority: 'med', done: false, rule: 'update', notes: '' });
+    else state.tasks.push({ id: uid(), date: today(), time: '', title, accountId: p.id, dealId: deal.id, priority: 'med', done: false, rule: 'update', notes: '', categoryId: 'cat-partner' });
   }
 
   // ----- the Partners page -----
@@ -1406,6 +1407,200 @@
     draw();
   }
 
+  // ---------- calendar (day and work week, Outlook-style categories) ----------
+  // Timed planner tasks are the calendar's events; untimed ones sit in the "due" strip on top.
+  // Categories are a small synced table you can rename and recolor; a task carries categoryId.
+  const CAT_COLORS = [
+    ['Red', '#e5484d'], ['Orange', '#f76b15'], ['Peach', '#e8875d'], ['Yellow', '#d4a106'], ['Green', '#2f9e44'], ['Teal', '#0d9488'],
+    ['Blue', '#2563eb'], ['Navy', '#1e40af'], ['Purple', '#7c3aed'], ['Pink', '#d6409f'], ['Brown', '#a16207'], ['Steel', '#64748b'],
+  ];
+  const defaultCategories = () => [
+    { id: 'cat-meeting', name: 'Meeting', color: '#2563eb' },
+    { id: 'cat-call', name: 'Calls & outreach', color: '#2f9e44' },
+    { id: 'cat-visit', name: 'Visit', color: '#f76b15' },
+    { id: 'cat-partner', name: 'Partner', color: '#7c3aed' },
+    { id: 'cat-admin', name: 'Admin', color: '#64748b' },
+    { id: 'cat-personal', name: 'Personal', color: '#d4a106' },
+  ];
+  const catRows = () => {
+    if (!Array.isArray(state.categories) || !state.categories.length) state.categories = defaultCategories();
+    return state.categories;
+  };
+  const catOf = (x) => (x && x.categoryId && catRows().find((c) => c.id === x.categoryId)) || null;
+  const catColor = (x) => (catOf(x) || {}).color || 'var(--accent)';
+  const CAL_HOUR_PX = 56;
+  const toMin = (hhmm) => { const [h, m] = (hhmm || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
+  const fmtMin = (min) => fmtTime(`${pad(Math.floor(min / 60) % 24)}:${pad(min % 60)}`);
+  const calHidden = () => new Set(ui.calHidden || []);
+  const isShown = (x) => !calHidden().has(x.categoryId || 'none');
+
+  /** Side-by-side columns for overlapping events (greedy, per cluster of overlaps). */
+  function layoutDay(evs) {
+    evs.sort((a, b) => a.s - b.s || b.e - a.e);
+    const out = []; let cluster = []; let end = -1;
+    const flush = () => {
+      const cols = [];
+      for (const ev of cluster) { let c = cols.findIndex((e) => e <= ev.s); if (c === -1) { c = cols.length; cols.push(0); } cols[c] = ev.e; ev.col = c; }
+      cluster.forEach((ev) => { ev.cols = cols.length; });
+      out.push(...cluster); cluster = []; end = -1;
+    };
+    for (const ev of evs) { if (cluster.length && ev.s >= end) flush(); cluster.push(ev); end = Math.max(end, ev.e); }
+    if (cluster.length) flush();
+    return out;
+  }
+
+  /** The time grid for one or more days. Week mode adds day headers and a per-day due strip. */
+  function calendarGrid(days, week) {
+    const t = today();
+    const timed = (d) => state.tasks.filter((x) => x.date === d && x.time && isShown(x));
+    const allTimed = days.flatMap(timed);
+    let startH = DAY_START; let endH = DAY_END + 1;
+    for (const x of allTimed) {
+      const s = toMin(x.time); const e = s + Math.max(15, Number(x.duration) || 30);
+      startH = Math.min(startH, Math.floor(s / 60)); endH = Math.max(endH, Math.min(24, Math.ceil(e / 60)));
+    }
+    const hours = []; for (let h = startH; h < endH; h++) hours.push(h);
+    const px = (min) => ((min - startH * 60) / 60) * CAL_HOUR_PX;
+    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+
+    const dueStrip = (d) => {
+      const untimed = state.tasks.filter((x) => x.date === d && !x.time && isShown(x));
+      const steps = dueSteps(d).length;
+      const follow = upcomingItems().filter((i) => i.kind !== 'revisit' && (i.date === d || (d === t && i.date < t))).length;
+      const open = untimed.filter((x) => !x.done).length;
+      if (!week) {
+        if (!untimed.length) return '';
+        return `<details class="cal-due" ${ui.calDueOpen ? 'open' : ''}><summary><span class="cal-due-ic">☰</span> ${plural(open, 'task')} due${untimed.length - open ? ` <span class="muted">· ${untimed.length - open} done</span>` : ''}</summary>
+          <div class="cal-due-list">${untimed.map((x) => evChip(x)).join('')}</div></details>`;
+      }
+      const bits = [open && `${open} task${open === 1 ? '' : 's'}`, steps && `${steps} step${steps === 1 ? '' : 's'}`, follow && `${follow} follow-up${follow === 1 ? '' : 's'}`].filter(Boolean);
+      return `<a class="cal-due-week ${bits.length ? '' : 'empty'}" href="#planner/${d}" data-act="cal-day" data-date="${d}">${bits.length ? esc(bits.join(' · ')) : '&nbsp;'}</a>`;
+    };
+
+    const column = (d) => {
+      const evs = layoutDay(timed(d).map((x) => { const s = toMin(x.time); return { x, s, e: s + Math.max(15, Number(x.duration) || 30) }; }));
+      return `<div class="cal-col ${d === t ? 'is-today' : ''}" data-date="${d}">
+        ${hours.map((h) => `<div class="cal-slot" data-act="slot" data-date="${d}" data-time="${pad(h)}:00" title="Add at ${fmtTime(pad(h) + ':00')}"></div><div class="cal-slot half" data-act="slot" data-date="${d}" data-time="${pad(h)}:30" title="Add at ${fmtTime(pad(h) + ':30')}"></div>`).join('')}
+        ${evs.map(({ x, s, e, col, cols }) => {
+          const h = Math.max(22, px(e) - px(s) - 2);
+          const acct = x.accountId && getAccount(x.accountId);
+          const cat = catOf(x);
+          return `<div class="cal-ev ${x.done ? 'done' : ''} ${h < 40 ? 'short' : ''}" data-act="edit-task" data-tid="${x.id}" style="--c:${catColor(x)};top:${px(s) + 1}px;height:${h}px;left:calc(${(col / cols) * 100}% + 2px);width:calc(${100 / cols}% - 4px)" title="${esc(`${x.title} · ${fmtMin(s)}–${fmtMin(e)}${cat ? ' · ' + cat.name : ''}`)}">
+            <input type="checkbox" data-act="cal-check" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="Done">
+            <div class="cal-ev-body"><div class="cal-ev-title">${esc(x.title)}</div>
+              <div class="cal-ev-sub">${fmtMin(s)}–${fmtMin(e)}${acct ? ` · ${esc(acct.name)}` : ''}</div></div>
+          </div>`;
+        }).join('')}
+        ${d === t && nowMin >= startH * 60 && nowMin <= endH * 60 ? `<div class="cal-now" style="top:${px(nowMin)}px"></div>` : ''}
+      </div>`;
+    };
+
+    return `<div class="cal ${week ? 'cal-week' : 'cal-day'}" style="--hpx:${CAL_HOUR_PX}px;--days:${days.length}">
+      ${week ? `<div class="cal-row cal-headrow"><div class="cal-gutter"></div>${days.map((d) => `<button type="button" class="cal-dayhead ${d === t ? 'is-today' : ''}" data-act="cal-day" data-date="${d}"><span>${esc(fmtDate(d, { weekday: 'short' }))}</span><b>${fromISO(d).getDate()}</b></button>`).join('')}</div>` : ''}
+      ${week || days.some((d) => state.tasks.some((x) => x.date === d && !x.time && isShown(x))) ? `<div class="cal-row cal-duerow"><div class="cal-gutter"></div>${days.map((d) => `<div class="cal-duecell">${dueStrip(d)}</div>`).join('')}</div>` : ''}
+      <div class="cal-row cal-body">
+        <div class="cal-gutter cal-times">${hours.map((h) => `<div class="cal-time"><span>${fmtTime(pad(h) + ':00')}</span></div>`).join('')}</div>
+        ${days.map(column).join('')}
+      </div>
+    </div>`;
+  }
+
+  /** Compact chip for an untimed task in the due strip. */
+  function evChip(x) {
+    const acct = x.accountId && getAccount(x.accountId);
+    return `<div class="cal-chip ${x.done ? 'done' : ''}" data-act="edit-task" data-tid="${x.id}" style="--c:${catColor(x)}">
+      <input type="checkbox" data-act="cal-check" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="Done">
+      <span class="grow">${esc(x.title)}${acct ? ` <span class="muted">· ${esc(acct.name)}</span>` : ''}</span></div>`;
+  }
+
+  /** Category legend; tap a chip to hide or show it on the calendar. */
+  function calLegend() {
+    const hidden = calHidden();
+    const used = new Set(state.tasks.map((x) => x.categoryId || 'none'));
+    const chips = [...catRows().map((c) => ({ id: c.id, name: c.name, color: c.color })), ...(used.has('none') ? [{ id: 'none', name: 'No category', color: 'var(--accent)' }] : [])];
+    return `<div class="cal-legend">
+      ${chips.map((c) => `<button type="button" class="cal-cat ${hidden.has(c.id) ? 'off' : ''}" data-act="cal-cat" data-cat="${c.id}" style="--c:${c.color}" title="${hidden.has(c.id) ? 'Show' : 'Hide'} ${esc(c.name)}"><i></i>${esc(c.name)}</button>`).join('')}
+      <button type="button" class="btn sm ghost" data-act="cal-categories">Categories</button>
+    </div>`;
+  }
+
+  /** Create, rename, recolor and delete categories. */
+  function categoriesForm() {
+    const rows = catRows();
+    const swatches = (name, cur) => `<div class="swatches">${CAT_COLORS.map(([label, hex]) => `<label class="swatch" title="${label}"><input type="radio" name="${name}" value="${hex}" ${hex === cur ? 'checked' : ''}><i style="--c:${hex}"></i></label>`).join('')}</div>`;
+    openModal('Calendar categories', `
+      <p class="small muted" style="margin:0">Name your categories and pick a color. Every task with that category shows in its color on the calendar.</p>
+      <div class="cat-rows">
+        ${rows.map((c) => `<div class="cat-row">
+          <i class="cat-dot" style="--c:${c.color}"></i>
+          <input name="n_${c.id}" value="${esc(c.name)}" aria-label="Category name">
+          ${swatches('c_' + c.id, c.color)}
+          <label class="small cr-del"><input type="checkbox" name="d_${c.id}" style="width:auto"> delete</label>
+        </div>`).join('')}
+        <div class="cat-row cat-new">
+          <i class="cat-dot" style="--c:${CAT_COLORS[8][1]}"></i>
+          <input name="n_new" placeholder="+ New category name" aria-label="New category name">
+          ${swatches('c_new', CAT_COLORS[8][1])}
+          <span></span>
+        </div>
+      </div>`, (data) => {
+      const next = [];
+      for (const c of catRows()) {
+        if (data['d_' + c.id]) { state.tasks.forEach((x) => { if (x.categoryId === c.id) x.categoryId = ''; }); continue; }
+        next.push({ ...c, name: (data['n_' + c.id] || '').trim() || c.name, color: data['c_' + c.id] || c.color });
+      }
+      if ((data.n_new || '').trim()) next.push({ id: uid(), name: data.n_new.trim(), color: data.c_new || CAT_COLORS[8][1] });
+      state.categories = next.length ? next : defaultCategories();
+      toast('Categories saved');
+    }, 'Save categories', { wide: true });
+    // Keep each row's dot in step with its chosen color.
+    $$('.cat-row', modalForm).forEach((row) => row.addEventListener('change', (e) => { if (e.target.type === 'radio') $('.cat-dot', row).style.setProperty('--c', e.target.value); }));
+  }
+
+  /** Planner header controls for the calendar mode and week navigation. */
+  const calModeSwitch = () => `<div class="seg" role="group" aria-label="Calendar view">
+      <button type="button" class="${ui.calMode !== 'week' ? 'active' : ''}" data-act="cal-mode" data-mode="day">Day</button>
+      <button type="button" class="${ui.calMode === 'week' ? 'active' : ''}" data-act="cal-mode" data-mode="week">Work week</button>
+    </div>`;
+
+  /** Full-width work week (Mon–Fri) for the week containing the planner date. */
+  function renderWeek() {
+    const ws = weekStart(ui.plannerDate);
+    const days = [0, 1, 2, 3, 4].map((i) => addDays(ws, i));
+    const t = today();
+    const tasks = state.tasks.filter((x) => days.includes(x.date));
+    const timedN = tasks.filter((x) => x.time).length;
+    $('#view').innerHTML = `
+      <div class="planner-head">
+        <div>
+          <h1 style="margin:0">${esc(fmtDate(days[0], { month: 'short', day: 'numeric' }))} – ${esc(fmtDate(days[4], { month: 'short', day: 'numeric', year: 'numeric' }))}</h1>
+          <div class="muted">Work week · ${plural(timedN, 'scheduled item')} · ${tasks.filter((x) => x.done).length}/${tasks.length} done</div>
+        </div>
+        <div class="row">
+          ${calModeSwitch()}
+          <button class="btn ghost" data-act="day-shift" data-n="-7" title="Previous week">‹</button>
+          <button class="btn ghost" data-act="day-shift" data-n="7" title="Next week">›</button>
+          ${days.includes(t) ? '' : '<button class="btn ghost" data-act="day-today">This week</button>'}
+          <button class="btn" data-act="new-task" data-date="${days.includes(ui.plannerDate) ? ui.plannerDate : days[0]}">+ Task</button>
+        </div>
+      </div>
+      <div class="card cal-card">
+        ${calLegend()}
+        <div class="cal-scroll">${calendarGrid(days, true)}</div>
+        <p class="small muted" style="margin:.5rem 0 0">Click a time to add a task · click a day to open its full plan · open a task to change its time, day or category.</p>
+      </div>`;
+    bindCalendar();
+  }
+
+  function bindCalendar() {
+    $$('.cal input[data-act=cal-check], .cal-due input[data-act=cal-check]').forEach((cb) => cb.addEventListener('change', (e) => {
+      const task = state.tasks.find((x) => x.id === e.target.dataset.id);
+      if (task) { task.done = e.target.checked; save(); rerender(); }
+    }));
+    const due = $('.cal-due');
+    if (due) due.addEventListener('toggle', () => { ui.calDueOpen = due.open; });
+  }
+
   // ---------- routing ----------
   const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession, partners: renderPartners };
   const TAB_FOR = { account: 'accounts', report: 'dashboard', session: 'cadences' };
@@ -1672,7 +1867,7 @@
       `This permanently deletes all ${state.accounts.length} accounts, tasks, planner days, lists and cadences` +
       `${cloudOn() ? ' on this device AND every synced device' : ' on this device'}.\n\nExport a backup first if you might need it.\n\nType DELETE to confirm.`);
     if ((typed || '').trim().toUpperCase() !== 'DELETE') { if (typed !== null) toast('Nothing was deleted'); return; }
-    state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = []; state.flows = []; state.compPlans = defaultCompPlans();
+    state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = []; state.flows = []; state.compPlans = defaultCompPlans(); state.categories = defaultCategories();
     ui.listId = null;
     research = { target: '', hint: '', list: '', flows: ['hq', 'dm', 'hr'], custom: '', pasted: '' }; saveResearch();
     session = null; saveSession();
@@ -2145,6 +2340,7 @@
 
   // ---------- planner ----------
   function renderPlanner() {
+    if (ui.calMode === 'week') return renderWeek();
     const d = ui.plannerDate;
     const t = today();
     const day = getDay(d);
@@ -2169,6 +2365,7 @@
           <div class="muted">${d === t ? 'Today' : relDays(d)} · ${doneCount}/${tasks.length} tasks done</div>
         </div>
         <div class="row">
+          ${calModeSwitch()}
           <button class="btn ghost" data-act="day-shift" data-n="-1" title="Previous day">‹</button>
           <input type="date" id="planner-date" value="${d}">
           <button class="btn ghost" data-act="day-shift" data-n="1" title="Next day">›</button>
@@ -2182,17 +2379,10 @@
         <div class="card sched-col">
           <div class="row spread" style="margin-bottom:.5rem">
             <h2 style="margin:0">Schedule</h2>
-            <span class="small muted">Click an hour to add a task</span>
+            <span class="small muted">Click a time to add</span>
           </div>
-          ${early.length ? `<div class="stack" style="margin-bottom:.5rem">${early.map(taskCard).join('')}</div>` : ''}
-          <div class="schedule">
-            ${hours.map((h) => `
-              <div class="slot ${h === nowHour ? 'now' : ''}">
-                <div class="hour">${fmtTime(pad(h) + ':00')}</div>
-                <div class="slot-body" data-act="slot" data-time="${pad(h)}:00">${tasksAt(h).map(taskCard).join('')}</div>
-              </div>`).join('')}
-          </div>
-          ${late.length ? `<div class="stack" style="margin-top:.5rem">${late.map(taskCard).join('')}</div>` : ''}
+          ${calLegend()}
+          ${calendarGrid([d], false)}
         </div>
 
         <div class="stack side-col">
@@ -2286,6 +2476,7 @@
       task.done = e.target.checked; save(); renderPlanner();
     }));
     bindPlan(d);
+    bindCalendar();
   }
 
   // ---------- daily activity plan ----------
@@ -5267,7 +5458,8 @@
         ${field('Time (blank = anytime)', `<input name="time" type="time" value="${esc(x.time)}">`)}
         ${field('Duration (min)', `<input name="duration" type="number" min="0" step="5" value="${esc(x.duration)}">`)}
         ${field('Priority', `<select name="priority">${Object.entries(PRIORITIES).map(([v, l]) => opt(v, l, x.priority)).join('')}</select>`)}
-        ${field('Related account', `<select name="accountId">${accountOptions(x.accountId)}</select>`, 'span-2')}
+        ${field('Category', `<div class="row" style="flex-wrap:nowrap"><i class="cat-dot" id="tf-dot" style="--c:${catColor(x)}"></i><select name="categoryId" id="tf-cat"><option value="">No category</option>${catRows().map((c) => opt(c.id, c.name, x.categoryId || '')).join('')}</select><button type="button" class="btn sm ghost" id="tf-cats">Edit</button></div>`)}
+        ${field('Related account', `<select name="accountId">${accountOptions(x.accountId)}</select>`)}
         ${field('Notes', `<textarea name="notes" rows="3">${esc(x.notes)}</textarea>`, 'span-2')}
       </div>`, (data) => {
       if (!data.title.trim()) return false;
@@ -5275,6 +5467,8 @@
       else state.tasks.push({ id: uid(), ...data, done: false });
       toast(existing ? 'Task updated' : 'Task added');
     });
+    $('#tf-cat').addEventListener('change', (e) => { const c = catRows().find((k) => k.id === e.target.value); $('#tf-dot').style.setProperty('--c', c ? c.color : 'var(--accent)'); });
+    $('#tf-cats').addEventListener('click', () => { modal.close(); categoriesForm(); });
   }
 
   function notesForm(acct) {
@@ -5369,8 +5563,17 @@
           acct.keyDates = acct.keyDates.filter((k) => k.id !== kid); touch(acct); save(); rerender();
         }
         return;
-      case 'new-task': return taskForm(null, { ...(id ? { accountId: id } : {}), ...(el.dataset.time !== undefined ? { time: el.dataset.time } : {}) });
-      case 'slot': return taskForm(null, { time: el.dataset.time });
+      case 'new-task': return taskForm(null, { ...(id ? { accountId: id } : {}), ...(el.dataset.time !== undefined ? { time: el.dataset.time } : {}), ...(el.dataset.date ? { date: el.dataset.date } : {}) });
+      case 'slot': return taskForm(null, { time: el.dataset.time, ...(el.dataset.date ? { date: el.dataset.date } : {}), duration: '30' });
+      case 'cal-check': return; // the checkbox's own change handler marks it done
+      case 'cal-mode': ui.calMode = el.dataset.mode; savePrefs(); return rerender();
+      case 'cal-day': e.preventDefault(); ui.calMode = 'day'; savePrefs(); return go(`planner/${el.dataset.date}`);
+      case 'cal-cat': {
+        const h = calHidden(); const k = el.dataset.cat;
+        if (h.has(k)) h.delete(k); else h.add(k);
+        ui.calHidden = [...h]; return rerender();
+      }
+      case 'cal-categories': return categoriesForm();
       case 'edit-task': return taskForm(state.tasks.find((x) => x.id === tid));
       case 'del-task':
         state.tasks = state.tasks.filter((x) => x.id !== tid); save(); rerender(); return;
@@ -5781,11 +5984,12 @@
       { id: uid(), name: 'Enterprise accounts', criteria: { ...emptyCriteria(), tags: ['enterprise'] } },
     );
     state.tasks.push(
-      { id: uid(), date: t, time: '09:00', duration: 30, title: 'Pipeline review & inbox', accountId: '', priority: 'med', notes: '', done: false },
-      { id: uid(), date: t, time: '10:30', duration: 45, title: 'Proposal walkthrough with Dana', accountId: northwind.id, priority: 'high', notes: 'Bring pricing options A/B', done: false },
-      { id: uid(), date: t, time: '14:00', duration: 30, title: 'Call Priya re: HIPAA questions', accountId: helix.id, priority: 'high', notes: '', done: false },
-      { id: uid(), date: t, time: '', title: 'Research Oak & Iron decision makers', accountId: oak.id, priority: 'low', notes: '', done: false },
-      { id: uid(), date: addDays(t, 1), time: '11:00', duration: 60, title: 'Summit technical onboarding', accountId: summit.id, priority: 'med', notes: '', done: false },
+      { id: uid(), date: t, time: '09:00', duration: 30, title: 'Pipeline review & inbox', accountId: '', priority: 'med', notes: '', done: false, categoryId: 'cat-admin' },
+      { id: uid(), date: t, time: '10:30', duration: 45, title: 'Proposal walkthrough with Dana', accountId: northwind.id, priority: 'high', notes: 'Bring pricing options A/B', done: false, categoryId: 'cat-meeting' },
+      { id: uid(), date: t, time: '10:30', duration: 30, title: 'Catch-up with Sam (BrightPath)', accountId: brightpath.id, priority: 'med', notes: '', done: false, categoryId: 'cat-partner' },
+      { id: uid(), date: t, time: '14:00', duration: 30, title: 'Call Priya re: HIPAA questions', accountId: helix.id, priority: 'high', notes: '', done: false, categoryId: 'cat-call' },
+      { id: uid(), date: t, time: '', title: 'Research Oak & Iron decision makers', accountId: oak.id, priority: 'low', notes: '', done: false, categoryId: 'cat-admin' },
+      { id: uid(), date: addDays(t, 1), time: '11:00', duration: 60, title: 'Summit technical onboarding', accountId: summit.id, priority: 'med', notes: '', done: false, categoryId: 'cat-partner' },
     );
     state.days[t] = { priorities: ['Move Northwind to Negotiation', 'Unblock Helix on HIPAA', 'Prep BrightPath webinar'], notes: '' };
     const plan = getPlan(t, true);

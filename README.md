@@ -248,7 +248,18 @@ No install, no build step: open `index.html` in a browser.
   priorities / cadence steps / follow-ups / notes. Narrower screens stack them
 - Cadence steps due are grouped by cadence with a count each; the first 3 people show, the rest
   open with "Show N more"
-- Hour-by-hour schedule (7 AM–7 PM); click an hour to add a task
+- **Calendar** with **Day | Work week** (the choice is remembered on each device):
+  - Day: the Schedule column is a time grid (7 AM–7 PM, widening for earlier or later items).
+    Blocks are sized by duration, overlapping items sit side by side, a red line marks the time
+    now, and untimed tasks collapse into an "N tasks due" strip at the top
+  - Work week: Monday to Friday side by side, with each day's tasks, cadence steps and follow-ups
+    summarized on top. Click a day to open its full plan; ‹ › move a week
+  - Click any half-hour to add a task there (30 min by default); click a block to edit it; tick
+    its box to mark it done
+- **Categories** (synced, Outlook-style): Meeting, Calls & outreach, Visit, Partner, Admin and
+  Personal to start. "Categories" lets you rename, recolor (12 colors), add and delete them; tap
+  a category in the legend to hide or show it. Each task has a category, and tasks made by the
+  partner rules start as Partner
 - Tasks with time, duration, priority, linked account and notes, plus an "Anytime" list
 - Pulls in account follow-ups and key dates due that day automatically (today's page also
   shows overdue items)
