@@ -65,7 +65,7 @@ No install, no build step: open `index.html` in a browser.
   tap-to-call buttons (direct, mobile, main line), the talk track with merge fields filled in, the
   account's notes, vendors, last touch and recent activity, and who's up next. Tap an outcome (or
   press 1–5) to log it, advance the cadence, count it on the daily plan and load the next person.
-  Replied finishes as replied, Wrong number as bad data; ★ Meeting booked finishes the cadence.
+  The cadence's smart rules decide what happens next (below); ★ Meeting booked finishes it.
   Skip for now (S) leaves it due; Snooze (N) moves it to the next workday. A progress bar shows
   "7 of 22", the place is kept if the app reloads after a call, and a summary shows at the end
 - Multiple cadences, e.g. Insperity Renewal, ADP TotalSource Nurture, New Prospect Intro. Starter
@@ -73,16 +73,43 @@ No install, no build step: open `index.html` in a browser.
 - Steps have a day, type (Email, Call, LinkedIn, Visit, Text, Task), name, email subject and
   script, with merge fields: {{first_name}}, {{company}}, {{vendor}}, {{title}}, {{industry}},
   {{employees}}, {{renewal_date}}. Weekends can be skipped automatically
-- Enroll contacts one by one (⇉ on a contact card) or in bulk from any saved list or vendor group
-- Each cadence shows stats (active, due, overdue, paused, replied/meetings, success rate), a
-  visual step track with how many people are at each step, a "Due now" queue, and everyone's
-  progress bar, last touch, next touch and status
+- Enroll contacts one by one (⇉ on a contact card) or in bulk from any saved list or vendor group.
+  **Spread start dates** (on by default): a big batch starts over several workdays, up to N new
+  people a day (8 to start; remembered), keeping people at the same company on the same day. The
+  form previews it ("33 people start over 5 workdays, Nov 12 – Nov 18")
+- **Steps | Calendar | Results** switch at the top of the Cadences page (remembered on each device)
+- **Steps**: each cadence's stats (active, due, overdue, paused, engaged, engage rate), its smart
+  rules, a visual step track with how many people are at each step and each step's hit rate, a
+  "Due now" queue, and everyone's progress bar, last touch, next touch and status
+- **Calendar**: Work week or Month, ‹ › and Today
+  - One chip per cadence step per day: type, step name, cadence and how many people. One color
+    per cadence (tap the legend to hide one); faded = done, red outline = overdue (overdue steps
+    sit on today). Later steps are projected at the cadence's spacing
+  - Click a chip to see who's on it; if it's due, "▶ Work these now" starts a session for exactly
+    that cadence step. Click a day's count (red when over your capacity) to move all its steps to
+    the next workday, a week later or a date you pick, or skip them. Each person's later steps
+    move with them
+  - **Cadence timelines**: every cadence drawn on one day axis, so you can see its shape. Flags a
+    7+ day gap or two calls back to back. Drag a step to change its day; click it to edit
+  - **Workload, next 2 weeks**: steps per workday across all cadences, stacked by cadence, against
+    your daily capacity (25 to start; click to change). **Spread it out** moves current steps to
+    later days, most overdue kept first, so no day goes over, and shows the before/after first
+- **Results**: compare cadences (enrolled, reached, engaged, engage rate, meetings, bad data) and
+  a step-by-step table (done, skipped, connected/replied/met and the rate), with a note when a
+  later step clearly outperforms the first one
+- **Smart rules** per cadence (all on to start; change them in Edit steps):
+  - Connected or replied → the person is paused and the account gets a follow-up date (2 workdays
+    by default, or the date you pick). Resume them from their timeline
+  - Left a voicemail → when the next step is an email, it comes due the next workday
+  - No answer on two calls → a "LinkedIn: connect with …" task for the next workday
+  - Wrong number or bounced email → finished as bad data and the contact gets a ⚠ flag (on the
+    contact card and in Contacts). Changing the number or email, or "Clear", removes it
 - Tap a person for their full start-to-finish timeline: completed steps with dates and outcomes,
   the current step, and planned dates for the rest. You can pause, resume, skip, finish or restart
 - "Do it" opens the step with one-tap actions (Open in Mail with subject and body filled in, Call,
-  Text, LinkedIn, Directions) and the merged script. Log the outcome and either continue (the
-  next step is scheduled automatically) or finish as meeting booked, replied, not interested or
-  bad data
+  Text, LinkedIn, Directions) and the merged script. Log the outcome; "Then" follows the outcome
+  and smart rules (continue, pause with a follow-up date, or finish as meeting booked, replied,
+  not interested or bad data), and you can change it
 - Completed steps are logged to the account history (with the contact) and counted in the daily
   activity plan. Due steps show on the Planner and Dashboard
 - Contacts marked "Left company" or "Do not contact" can't be enrolled and are taken out of

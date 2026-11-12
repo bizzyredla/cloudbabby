@@ -109,7 +109,7 @@
     task: { label: 'Task', icon: '✓', kind: 'Note', outcomes: ['Done'] },
   };
   const EXIT_OUTCOMES = {
-    continue: 'Continue to next step', meeting: 'Meeting booked: finish', replied: 'Replied / engaged: finish',
+    continue: 'Continue to next step', pause: 'Pause and set a follow-up', meeting: 'Meeting booked: finish', replied: 'Replied / engaged: finish',
     notinterested: 'Not interested: finish', bad: 'Bad data / left company: finish',
   };
   const FINISH_LABELS = { completed: 'Completed all steps', meeting: 'Meeting booked', replied: 'Replied', notinterested: 'Not interested', bad: 'Bad data' };
@@ -229,7 +229,7 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay })); } catch (e) { /* ignore */ }
   };
 
   function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], deleted: {} }; }
@@ -793,7 +793,7 @@
           <div class="ct-name">
             <span class="avatar sm" aria-hidden="true">${esc(initials(c.name))}</span>
             <div class="grow">
-              <button type="button" class="link-btn title" data-act="open-contact" data-id="${a.id}" data-cid="${c.id}">${esc(c.name)}</button>${c.primary ? ' <span class="pill primary">Primary</span>' : ''}
+              <button type="button" class="link-btn title" data-act="open-contact" data-id="${a.id}" data-cid="${c.id}">${esc(c.name)}</button>${c.primary ? ' <span class="pill primary">Primary</span>' : ''}${c.flag ? ` <span class="pill overdue" title="${esc(c.flag)}">⚠</span>` : ''}
               <div class="small muted ellipsis">${esc([c.title, c.role].filter(Boolean).join(' · ')) || '&nbsp;'}</div>
             </div>
           </div>
@@ -1597,7 +1597,10 @@
   const kindToType = (k) => ({ Call: 'call', Email: 'email', LinkedIn: 'linkedin', Visit: 'visit', Text: 'text' })[k] || 'task';
   const dueWords = (iso) => { const n = daysBetween(iso, today()); return n > 0 ? `${plural(n, 'day')} overdue` : n === 0 ? 'due today' : `due ${relDays(iso)}`; };
   function taskType(x) {
-    const s = `${x.categoryId || ''} ${x.title || ''}`.toLowerCase();
+    const title = (x.title || '').toLowerCase();
+    if (/linkedin/.test(title)) return 'linkedin';
+    if (/email|e-mail/.test(title)) return 'email';
+    const s = `${x.categoryId || ''} ${title}`;
     return /cat-call|\bcall\b/.test(s) ? 'call' : /email|e-mail/.test(s) ? 'email' : /linkedin/.test(s) ? 'linkedin' : /cat-visit|visit|drop off|drop-in/.test(s) ? 'visit' : 'task';
   }
   function taskWhy(x, a) {
@@ -2460,6 +2463,7 @@
               </div>
               ${c.title || c.role ? `<div class="small muted">${esc([c.title, c.role].filter(Boolean).join(' · '))}</div>` : ''}
               ${c.status && c.status !== 'Active' ? `<span class="pill overdue">${esc(c.status)}</span>` : ''}
+              ${c.flag ? `<div><span class="pill overdue" title="${esc(c.flagAt ? `Logged ${relDays(c.flagAt)}` : '')}">⚠ ${esc(c.flag)}</span> <button type="button" class="link-btn small" data-act="contact-unflag" data-id="${a.id}" data-cid="${c.id}">Clear</button></div>` : ''}
               ${contactLinks(c, a)}
               ${stayLine(a, c)}
               ${enrollmentsFor(c.id).map((p) => `<button type="button" class="cad-badge" style="--c:${p.cad.color}" data-act="enr-open" data-eid="${p.e.id}">${esc(p.cad.name)} · ${p.e.step + 1}/${p.cad.steps.length}${p.e.status === 'paused' ? ' · paused' : ` · next ${esc(fmtDate(p.e.dueDate, { month: 'short', day: 'numeric' }))}`}</button>`).join('')}
@@ -3055,13 +3059,20 @@
     }
     if (!cadenceById(ui.cadenceId)) ui.cadenceId = state.cadences[0].id;
     const cad = cadenceById(ui.cadenceId);
+    const view = CAD_VIEWS[ui.cadView] ? ui.cadView : 'steps';
+    if (view === 'calendar') {
+      $('#view').innerHTML = `${cadPageHead(view)}${cadCalendarCard()}<div class="cc-lower">${cadTimelinesCard()}${cadWorkloadCard()}</div>`;
+      bindTimelines();
+      return;
+    }
+    if (view === 'results') { $('#view').innerHTML = `${cadPageHead(view)}${cadSwitchRow(cad)}${cadResultsView(cad)}`; return; }
     const people = liveEnrollments(cad.id);
     const t = today();
     const active = people.filter((p) => p.e.status === 'active');
     const due = active.filter((p) => isDue(p.e)).sort((a, b) => a.e.dueDate.localeCompare(b.e.dueDate));
     const overdue = due.filter((p) => p.e.dueDate < t);
     const finished = people.filter((p) => p.e.status === 'finished');
-    const won = finished.filter((p) => ['meeting', 'replied'].includes(p.e.outcome));
+    const res = cadResults(cad);
     const atStep = cad.steps.map((s, i) => people.filter((p) => p.e.status !== 'finished' && p.e.step === i).length);
     const filters = { active: 'Active', due: 'Due', paused: 'Paused', finished: 'Finished', all: 'All' };
     const shown = people.filter((p) => ({
@@ -3069,23 +3080,7 @@
     })[ui.cadFilter]).sort((a, b) => (a.e.status === 'finished') - (b.e.status === 'finished') || (a.e.dueDate || '').localeCompare(b.e.dueDate || ''));
 
     $('#view').innerHTML = `
-      <div class="page-head">
-        <h1>Cadences</h1>
-        <div class="row">
-          ${session && session.idx < session.queue.length ? `<a class="btn" href="#session">▶ Resume session · ${Math.min(session.idx + 1, session.queue.length)} of ${session.queue.length}</a>` : `<button class="btn" data-act="session-setup">▶ Start session${dueSteps(today()).length ? ` · ${dueSteps(today()).length} due` : ''}</button>`}
-          <button class="btn ghost" data-act="cad-new">+ New cadence</button>
-        </div>
-      </div>
-      <div class="cad-switch">
-        ${state.cadences.map((c) => {
-          const live = liveEnrollments(c.id);
-          const dueN = live.filter((p) => isDue(p.e)).length;
-          return `<button type="button" class="cad-chip ${c.id === cad.id ? 'active' : ''}" data-act="cad-open" data-cad="${c.id}" style="--c:${c.color}">
-            <span class="dot"></span>${esc(c.name)} <span class="muted">${live.filter((p) => p.e.status !== 'finished').length}</span>
-            ${dueN ? `<span class="due-badge">${dueN} due</span>` : ''}
-          </button>`;
-        }).join('')}
-      </div>
+      ${cadPageHead('steps')}${cadSwitchRow(cad)}
 
       <div class="card cad-head" style="--c:${cad.color}">
         <div class="detail-head">
@@ -3093,6 +3088,7 @@
             <h2 style="margin:0">${esc(cad.name)}</h2>
             ${cad.description ? `<div class="muted small" style="margin-top:.2rem">${esc(cad.description)}</div>` : ''}
             <div class="small muted" style="margin-top:.35rem">${plural(cad.steps.length, 'step')} · ${plural(cadenceDays(cad), 'day')}${cad.skipWeekends ? ' · skips weekends' : ''}</div>
+            <div class="small muted">Smart rules: ${(() => { const r = cadRules(cad); const on = Object.keys(CAD_RULE_SHORT).filter((k) => r[k]); return on.length ? esc(on.map((k) => CAD_RULE_SHORT[k]).join(' · ')) : 'off'; })()} · <button type="button" class="link-btn small" data-act="cad-edit">change</button></div>
           </div>
           <div class="row">
             ${due.length ? `<button class="btn" data-act="session-setup" data-cad="${cad.id}">▶ Work this cadence</button>` : ''}
@@ -3106,8 +3102,8 @@
           <div class="${due.length ? 'warn' : ''}"><b>${due.length}</b><span>Due now</span></div>
           <div class="${overdue.length ? 'bad' : ''}"><b>${overdue.length}</b><span>Overdue</span></div>
           <div><b>${people.filter((p) => p.e.status === 'paused').length}</b><span>Paused</span></div>
-          <div class="good"><b>${won.length}</b><span>Replied / meetings</span></div>
-          <div><b>${finished.length ? Math.round((won.length / finished.length) * 100) + '%' : '—'}</b><span>Success rate</span></div>
+          <div class="good"><b>${res.engaged}</b><span>Engaged</span></div>
+          <div><b>${res.reached ? pct(res.engaged, res.reached) + '%' : '—'}</b><span>Engage rate</span></div>
         </div>
       </div>
 
@@ -3120,6 +3116,7 @@
               <div class="step-day">Day ${s.day}</div>
               <div class="step-title">${esc(s.title || stepType(s).label)}</div>
               <div class="step-count ${atStep[i] ? 'on' : ''}">${atStep[i]} here</div>
+              ${POSITIVE[s.type] && res.steps[i].done ? `<div class="step-rate" title="${esc(`${POSITIVE_LABEL[s.type]} ${res.steps[i].pos} of ${res.steps[i].done}`)}">${pct(res.steps[i].pos, res.steps[i].done)}% ${POSITIVE_LABEL[s.type].toLowerCase()}</div>` : ''}
             </div>`).join('<div class="step-link"></div>')}
         </div>
       </div>
@@ -3164,7 +3161,7 @@
 
   const statusPill = (e) => e.status === 'finished'
     ? `<span class="pill ${['meeting', 'replied'].includes(e.outcome) ? 'won' : ''}">${esc(FINISH_LABELS[e.outcome] || 'Finished')}</span>`
-    : e.status === 'paused' ? '<span class="pill med">Paused</span>'
+    : e.status === 'paused' ? `<span class="pill med" title="${esc(e.pausedAt ? `Paused ${relDays(e.pausedAt)}` : 'Paused')}">Paused${e.pauseReason ? ' · ' + esc(e.pauseReason.toLowerCase()) : ''}</span>`
     : isDue(e) ? `<span class="pill ${e.dueDate < today() ? 'overdue' : 'today'}">${e.dueDate < today() ? 'Overdue' : 'Due today'}</span>`
     : '<span class="pill active-pill">Active</span>';
 
@@ -3251,7 +3248,7 @@
     if (action === 'log') return logStepForm(eid);
     if (action === 'skip') { e.history.push({ stepId: p.step.id, date: t, skipped: true }); advance(p, t); toast('Step skipped'); }
     if (action === 'pause') { e.status = 'paused'; toast('Paused'); }
-    if (action === 'resume') { e.status = 'active'; if (e.dueDate < t) e.dueDate = p.cad.skipWeekends ? nextWorkday(t) : t; toast('Resumed'); }
+    if (action === 'resume') { e.status = 'active'; e.pauseReason = ''; if (e.dueDate < t) e.dueDate = p.cad.skipWeekends ? nextWorkday(t) : t; toast('Resumed'); }
     if (action === 'restart') {
       Object.assign(e, { step: 0, status: 'active', outcome: '', finishedAt: '', dueDate: p.cad.skipWeekends ? nextWorkday(t) : t });
       toast('Restarted');
@@ -3302,22 +3299,27 @@
         </div>` : ''}
       <div class="grid-3">
         ${field('Outcome', `<select name="outcome" id="step-outcome">${type.outcomes.map((o) => `<option>${esc(o)}</option>`).join('')}</select>`)}
-        ${field('Then', `<select name="then" id="step-then">${Object.entries(EXIT_OUTCOMES).map(([k, l]) => opt(k, l, 'continue')).join('')}</select>`)}
+        ${field('Then', `<select name="then" id="step-then">${Object.entries(EXIT_OUTCOMES).map(([k, l]) => opt(k, l, outcomeThen(type.outcomes[0], cad))).join('')}</select>`)}
         ${field('Date', `<input name="date" type="date" value="${today()}">`)}
+        ${field('Follow-up date', `<input name="followUp" type="date" id="step-fu" value="${shiftDays(today(), 2, true)}">`, 'step-fu')}
         ${field('Notes', '<textarea name="note" rows="2" placeholder="What happened, next steps…"></textarea>', 'span-3')}
       </div>`, (data) => {
-      completeStep(p, { outcome: data.outcome, then: data.then, date: data.date, note: data.note });
-      toast(e.status === 'finished' ? `${contact.name}: ${FINISH_LABELS[e.outcome]}` : `Logged · next: ${fmtDate(e.dueDate, { month: 'short', day: 'numeric' })}`);
+      const said = completeStep(p, { outcome: data.outcome, then: data.then, date: data.date, note: data.note, followUp: data.followUp });
+      toast(said || (e.status === 'finished' ? `${contact.name}: ${FINISH_LABELS[e.outcome]}` : `Logged · next: ${fmtDate(e.dueDate, { month: 'short', day: 'numeric' })}`));
     }, 'Complete step', { wide: true });
     const copy = $('#copy-script');
     if (copy) copy.addEventListener('click', () => {
       const text = [subject && `Subject: ${subject}`, body].filter(Boolean).join('\n\n');
       (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => toast('Copied'), () => toast('Copy not available'));
     });
-    $('#step-outcome').addEventListener('change', (ev) => {
-      if (/replied/i.test(ev.target.value)) $('#step-then').value = 'replied';
-    });
+    const fuField = $('#step-fu').closest('.field');
+    const syncFu = () => { fuField.hidden = $('#step-then').value !== 'pause'; };
+    $('#step-outcome').addEventListener('change', (ev) => { $('#step-then').value = outcomeThen(ev.target.value, cad); syncFu(); });
+    $('#step-then').addEventListener('change', syncFu);
+    syncFu();
   }
+
+  const pickRows = (values) => values.map((v) => { const [aid, cid] = v.split('|'); const a = getAccount(aid); return { a, c: a.contacts.find((c) => c.id === cid) }; });
 
   function addPeopleForm(cad, preset = {}) {
     const inCad = new Set(state.enrollments.filter((e) => e.cadenceId === cad.id && e.status !== 'finished').map((e) => e.contactId));
@@ -3337,6 +3339,11 @@
         <label class="row"><input type="checkbox" id="ap-primary" style="width:auto"> Primary contacts only</label>
         <label class="row"><input type="checkbox" id="ap-all" style="width:auto"> Select all shown</label>
       </div>
+      <div class="ap-spread small">
+        <label class="row"><input type="checkbox" name="spread" id="ap-spread" style="width:auto" checked> Spread start dates</label>
+        <span>up to <input type="number" name="perDay" id="ap-perday" min="1" max="200" value="${Number(ui.enrollPerDay) || 8}" aria-label="New people per workday"> new people a workday</span>
+        <span class="muted" id="ap-spread-note"></span>
+      </div>
       <div class="pick-list" id="ap-list">
         ${people.length ? people.map(({ a, c }) => {
           const blocked = c.status && c.status !== 'Active' ? c.status : inCad.has(c.id) ? 'Already in this cadence' : '';
@@ -3351,13 +3358,14 @@
       <div class="small" id="ap-count"></div>`, (data, fd) => {
       const picks = fd.getAll('pick');
       if (!picks.length) { toast('Pick at least one person'); return false; }
-      for (const v of picks) {
-        const [aid, cid] = v.split('|');
-        const a = getAccount(aid);
-        enroll(cad, a, a.contacts.find((c) => c.id === cid), data.start || today());
-      }
+      const perDay = Math.max(1, Number(data.perDay) || 8);
+      ui.enrollPerDay = perDay; savePrefs();
+      const rows = pickRows(picks);
+      const dated = data.spread && rows.length > perDay ? staggerStarts(rows, data.start || today(), perDay) : rows.map((x) => ({ ...x, date: data.start || today() }));
+      for (const x of dated) enroll(cad, x.a, x.c, x.date);
       ui.cadenceId = cad.id;
-      toast(`Added ${picks.length} ${picks.length === 1 ? 'person' : 'people'}`);
+      const last = dated[dated.length - 1].date;
+      toast(`Added ${picks.length} ${picks.length === 1 ? 'person' : 'people'}${last !== dated[0].date ? ` · starts spread to ${fmtDate(last, { weekday: 'short', month: 'short', day: 'numeric' })}` : ''}`);
     }, 'Add to cadence', { wide: true });
 
     const listIds = (src) => {
@@ -3374,10 +3382,18 @@
       });
       const n = $$('#ap-list input:checked').length;
       $('#ap-count').textContent = `${n} selected`;
+      const perDay = Math.max(1, Number($('#ap-perday').value) || 8);
+      const note = $('#ap-spread-note');
+      if ($('#ap-spread').checked && n > perDay) {
+        const dated = staggerStarts(pickRows($$('#ap-list input:checked').map((x) => x.value)), $('[name=start]', modalForm).value || today(), perDay);
+        const days = new Set(dated.map((x) => x.date)).size;
+        note.textContent = `→ ${n} people start over ${days} workdays (${fmtDate(dated[0].date, { month: 'short', day: 'numeric' })} – ${fmtDate(dated[dated.length - 1].date, { month: 'short', day: 'numeric' })})`;
+      } else note.textContent = n ? `→ all ${n} start on the same day` : '';
     };
     $('#ap-source').addEventListener('change', refresh);
     $('#ap-search').addEventListener('input', refresh);
     $('#ap-primary').addEventListener('change', refresh);
+    ['#ap-spread', '#ap-perday', '[name=start]'].forEach((sel) => $(sel, modalForm).addEventListener('input', refresh));
     $('#ap-list').addEventListener('change', refresh);
     $('#ap-all').addEventListener('change', (ev) => {
       $$('#ap-list .pick:not([hidden]) input:not(:disabled)').forEach((cb) => { cb.checked = ev.target.checked; });
@@ -3438,6 +3454,10 @@
         ${field('Description', `<input name="description" value="${esc(src.description)}" placeholder="Who it's for and the angle">`, 'span-2')}
         <label class="row small" style="align-self:end"><input type="checkbox" name="skipWeekends" style="width:auto" ${src.skipWeekends ? 'checked' : ''}> Skip weekends</label>
       </div>
+      <details class="rules-box" open>
+        <summary><strong>Smart rules</strong> <span class="small muted">· what happens after you log an outcome</span></summary>
+        ${Object.entries(CAD_RULE_LABELS).map(([k, l]) => `<label class="row small"><input type="checkbox" name="rule_${k}" style="width:auto" ${cadRules(src)[k] ? 'checked' : ''}> ${esc(l)}</label>`).join('')}
+      </details>
       <div>
         <div class="row spread"><strong>Steps</strong><span class="small muted">Merge fields: {{first_name}} {{company}} {{vendor}} {{title}} {{industry}} {{employees}} {{renewal_date}}</span></div>
         <div id="steps-edit">${src.steps.map(stepRow).join('')}</div>
@@ -3449,14 +3469,11 @@
       const steps = ids.map((id, i) => ({ id, day: Math.max(1, Number(days[i]) || 1), type: types[i], title: titles[i].trim(), subject: subjects[i], body: bodies[i] }))
         .map((s, i) => ({ s, i })).sort((x, y) => x.s.day - y.s.day || x.i - y.i).map((x) => x.s);
       if (!steps.length) { toast('Add at least one step'); return false; }
-      const fields = { name: data.name.trim(), description: data.description, color: data.color, skipWeekends: !!data.skipWeekends, steps };
+      const rules = Object.fromEntries(Object.keys(CAD_RULE_DEFAULTS).map((k) => [k, !!data['rule_' + k]]));
+      const fields = { name: data.name.trim(), description: data.description, color: data.color, skipWeekends: !!data.skipWeekends, rules, steps };
       if (existing) {
         // Keep everyone on the same step (by id) after steps are reordered, added or removed.
-        for (const e of state.enrollments.filter((x) => x.cadenceId === existing.id && x.status !== 'finished')) {
-          const oldId = (existing.steps[e.step] || {}).id;
-          const idx = steps.findIndex((s) => s.id === oldId);
-          e.step = idx === -1 ? Math.min(e.step, steps.length - 1) : idx;
-        }
+        keepEnrollmentSteps(existing, existing.steps, steps);
         Object.assign(existing, fields);
         toast('Cadence saved');
       } else {
@@ -3491,6 +3508,550 @@
   /** Cadence steps due on day d (on today's page, overdue ones too), across all cadences. */
   const dueSteps = (d) => liveEnrollments().filter((p) => p.e.status === 'active' && (p.e.dueDate === d || (d === today() && p.e.dueDate < d)))
     .sort((a, b) => a.e.dueDate.localeCompare(b.e.dueDate));
+
+  // ---------- cadence calendar, timelines, workload, results and smart rules ----------
+  // The calendar reads the same enrollments as everything else: logged steps sit on the day they
+  // were done, each person's current step sits on its due day (overdue ones on today) and later
+  // steps are projected from there at the cadence's spacing. Nothing extra is stored.
+  const CAD_VIEWS = { steps: 'Steps', calendar: 'Calendar', results: 'Results' };
+  const CAD_RULE_DEFAULTS = { pauseOnReply: true, vmEmail: true, noAnswerLi: true, badFlag: true };
+  const CAD_RULE_LABELS = {
+    pauseOnReply: 'Connected or replied → pause them and set a real follow-up',
+    vmEmail: 'Left a voicemail → the email right after it comes due the next workday',
+    noAnswerLi: 'No answer twice → add a LinkedIn touch for the next workday',
+    badFlag: 'Wrong number or bounced email → finish and flag the contact',
+  };
+  const CAD_RULE_SHORT = { pauseOnReply: 'pause on reply', vmEmail: 'voicemail → email', noAnswerLi: 'no answer ×2 → LinkedIn', badFlag: 'flag bad data' };
+  const cadRules = (cad) => ({ ...CAD_RULE_DEFAULTS, ...((cad && cad.rules) || {}) });
+  const POSITIVE = { call: /connected|replied/i, email: /replied/i, linkedin: /replied/i, visit: /met in person/i, text: /replied/i };
+  const POSITIVE_LABEL = { call: 'Connected', email: 'Replied', linkedin: 'Replied', visit: 'Met', text: 'Replied' };
+  const isPositive = (step, outcome) => !!(POSITIVE[step.type] && POSITIVE[step.type].test(outcome || ''));
+  const stepCap = () => Number(ui.stepCap) || 25;
+  const nextWorkdayAfter = (iso) => nextWorkday(addDays(iso, 1));
+  const pct = (n, d) => (d ? Math.round((n / d) * 100) : 0);
+
+  /** Where each remaining step of an active enrollment lands if it's done on its day (overdue counts from today). */
+  function projectSteps(p, shift = 0) {
+    const { e, cad } = p;
+    if (e.status !== 'active' || !e.dueDate) return [];
+    const t = today();
+    let d = e.dueDate < t ? t : e.dueDate;
+    if (cad.skipWeekends) d = nextWorkday(d);
+    if (shift) d = shiftDays(d, shift, cad.skipWeekends);
+    const out = [{ i: e.step, date: d, current: true, late: e.dueDate < t }];
+    for (let i = e.step + 1; i < cad.steps.length; i++) {
+      d = shiftDays(d, Math.max(0, cad.steps[i].day - cad.steps[i - 1].day), cad.skipWeekends);
+      out.push({ i, date: d, current: false, late: false });
+    }
+    return out;
+  }
+
+  /** Steps per day between two dates, one chip per cadence + step + state (done, overdue, open). */
+  function cadSchedule(from, to, { all = false } = {}) {
+    const hidden = all ? {} : ui.cadHidden || {};
+    const byDay = {};
+    const put = (date, cad, i, st, p, extra) => {
+      if (date < from || date > to) return;
+      const key = `${cad.id}|${i}|${st}`;
+      const day = (byDay[date] ||= {});
+      const c = (day[key] ||= { key, date, cad, i, step: cad.steps[i], st, people: [] });
+      c.people.push({ p, ...extra });
+    };
+    for (const p of liveEnrollments()) {
+      if (hidden[p.cad.id]) continue;
+      for (const h of p.e.history) {
+        const i = p.cad.steps.findIndex((s) => s.id === h.stepId);
+        if (i !== -1) put(h.date, p.cad, i, 'done', p, { h });
+      }
+      for (const x of projectSteps(p)) put(x.date, p.cad, x.i, x.late ? 'late' : 'open', p, { current: x.current });
+    }
+    const order = { late: 0, open: 1, done: 2 };
+    const out = {};
+    for (const [d, m] of Object.entries(byDay)) out[d] = Object.values(m).sort((a, b) => order[a.st] - order[b.st] || a.cad.name.localeCompare(b.cad.name) || a.i - b.i);
+    return out;
+  }
+  const openCount = (chips) => (chips || []).filter((c) => c.st !== 'done').reduce((n, c) => n + c.people.length, 0);
+
+  function cadChip(c, compact) {
+    const n = c.people.length;
+    const label = c.step.title || stepType(c.step).label;
+    const tip = `${c.cad.name} · Step ${c.i + 1}: ${label} · ${plural(n, 'person', 'people')}${c.st === 'late' ? ' · overdue' : c.st === 'done' ? ' · done' : ''}`;
+    return `<button type="button" class="cc-chip st-${c.st}" style="--c:${c.cad.color}" data-act="cc-open" data-date="${c.date}" data-key="${esc(c.key)}" title="${esc(tip)}">
+      <span class="cc-top">${stepType(c.step).icon} ${esc(label)}${c.st === 'late' ? ' <b class="cc-late">overdue</b>' : ''}</span>
+      ${compact ? `<span class="cc-n">${n}</span>` : `<span class="cc-sub">${esc(c.cad.name)} · ${n}</span>`}
+    </button>`;
+  }
+
+  function cadCalRange() {
+    const anchor = ui.cadCalDate || today();
+    if (ui.cadCalMode === 'month') {
+      const first = anchor.slice(0, 8) + '01';
+      const last = addDays(addMonths(first, 1), -1);
+      return { from: weekStart(first), to: addDays(weekStart(last), 6), month: anchor.slice(0, 7) };
+    }
+    const ws = weekStart(anchor);
+    return { from: ws, to: addDays(ws, 6) };
+  }
+
+  function cadCalendarCard() {
+    const t = today();
+    const isMonth = ui.cadCalMode === 'month';
+    const { from, to, month } = cadCalRange();
+    const sched = cadSchedule(from, to);
+    const dates = [];
+    for (let d = from; d <= to; d = addDays(d, 1)) dates.push(d);
+    const weekend = dates.some((d) => isWeekend(d) && sched[d]);
+    const cols = dates.filter((d) => weekend || !isWeekend(d));
+    const cap = stepCap();
+    const hidden = ui.cadHidden || {};
+    const title = isMonth ? fmtDate(month + '-01', { month: 'long', year: 'numeric' })
+      : `${fmtDate(from, { month: 'short', day: 'numeric' })} – ${fmtDate(addDays(from, weekend ? 6 : 4), { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const inRange = from <= t && t <= to;
+    const MAX = isMonth ? 3 : 99;
+    return `
+      <div class="card cc-card">
+        <div class="cc-bar">
+          <div class="seg" role="group" aria-label="Calendar range">
+            <button type="button" class="${isMonth ? '' : 'active'}" data-act="cc-mode" data-mode="week">Work week</button>
+            <button type="button" class="${isMonth ? 'active' : ''}" data-act="cc-mode" data-mode="month">Month</button>
+          </div>
+          <button class="btn ghost sm" data-act="cc-shift" data-n="-1" title="Previous" aria-label="Previous">‹</button>
+          <h2>${esc(title)}</h2>
+          <button class="btn ghost sm" data-act="cc-shift" data-n="1" title="Next" aria-label="Next">›</button>
+          ${inRange ? '' : '<button class="btn ghost sm" data-act="cc-today">Today</button>'}
+          <div class="cc-legend">${state.cadences.map((c) => `<button type="button" class="cc-leg ${hidden[c.id] ? 'off' : ''}" data-act="cc-hide" data-cad="${c.id}" style="--c:${c.color}" title="Show or hide ${esc(c.name)}"><i></i>${esc(c.name)} <span class="muted">(${liveEnrollments(c.id).filter((p) => p.e.status !== 'finished').length})</span></button>`).join('')}</div>
+        </div>
+        <div class="cc-scroll"><div class="cc-grid ${isMonth ? 'month' : 'week'}" style="--cols:${weekend ? 7 : 5}">
+          ${cols.map((d) => {
+            const chips = sched[d] || [];
+            const n = openCount(chips);
+            const cls = [d === t ? 'today' : '', d < t ? 'past' : '', isMonth && d.slice(0, 7) !== month ? 'out' : ''].join(' ');
+            return `<div class="cc-day ${cls}">
+              <div class="cc-dhead">
+                <b>${esc(fmtDate(d, { weekday: 'short' }))}</b>
+                <span>${esc(isMonth ? String(fromISO(d).getDate()) : fmtDate(d, { month: 'short', day: 'numeric' }))}</span>
+                ${n ? `<button type="button" class="cc-dn ${n > cap ? 'over' : ''}" data-act="cc-day" data-date="${d}" title="${plural(n, 'step')} due · move or skip">${n}</button>` : ''}
+              </div>
+              <div class="cc-chips">${chips.slice(0, MAX).map((c) => cadChip(c, isMonth)).join('')}${chips.length > MAX ? `<button type="button" class="cc-more" data-act="cc-day" data-date="${d}">+${chips.length - MAX} more</button>` : ''}</div>
+            </div>`;
+          }).join('')}
+        </div></div>
+        <div class="cc-foot"><span>Faded = done · <span class="cc-late">red outline</span> = overdue · number = people on that step · day count turns red over your capacity (${cap})</span><span>Click a step to see who's on it or work it · click a day's count to move or skip that day</span></div>
+      </div>`;
+  }
+
+  /** Cadence templates on one day axis: the shape of each cadence. Drag a step to change its day. */
+  function cadTimelinesCard() {
+    const cads = state.cadences.filter((c) => !(ui.cadHidden || {})[c.id] && c.steps.length);
+    const maxDay = Math.max(21, ...cads.map(cadenceDays));
+    const pos = (day) => ((day - 1) / (maxDay - 1)) * 100;
+    const every = maxDay > 49 ? 14 : 7;
+    const ticks = [1]; for (let d = every; d <= maxDay; d += every) ticks.push(d);
+    const warn = (cad) => {
+      const out = [];
+      for (let i = 1; i < cad.steps.length; i++) {
+        const gap = cad.steps[i].day - cad.steps[i - 1].day;
+        if (gap >= 7) { out.push(`${gap}-day gap after step ${i}`); break; }
+      }
+      for (let i = 1; i < cad.steps.length; i++) {
+        if (cad.steps[i].type === 'call' && cad.steps[i - 1].type === 'call' && cad.steps[i].day - cad.steps[i - 1].day <= 1) { out.push(`calls back to back (steps ${i}–${i + 1})`); break; }
+      }
+      return out;
+    };
+    return `
+      <div class="card tl-card">
+        <h2 style="margin:0">Cadence timelines</h2>
+        <p class="small muted" style="margin:.2rem 0 .6rem">The shape of each cadence: where its steps land over its full length. Drag a step to change its day; click one to edit the cadence.</p>
+        ${cads.length ? `
+          <div class="tl-axis"><span></span><div class="tl-track tl-ticks"><div class="tl-in">${ticks.map((d) => `<span style="left:${pos(d)}%">Day ${d}</span>`).join('')}</div></div></div>
+          ${cads.map((cad) => {
+            const groups = new Map();
+            cad.steps.forEach((s, i) => { if (!groups.has(s.day)) groups.set(s.day, []); groups.get(s.day).push({ s, i }); });
+            const w = warn(cad);
+            // Steps a few days apart would overlap on the line: stagger them above and below it.
+            const level = new Map(); const days = [...groups.keys()];
+            for (let k = 0; k < days.length;) {
+              let j = k;
+              while (j + 1 < days.length && (days[j + 1] - days[j]) / (maxDay - 1) < 0.1) j++;
+              for (let m = k; m <= j; m++) level.set(days[m], j > k ? ((m - k) % 2 ? 'lo' : 'hi') : '');
+              k = j + 1;
+            }
+            const n = liveEnrollments(cad.id).filter((p) => p.e.status !== 'finished').length;
+            return `<div class="tl-row" style="--c:${cad.color}">
+              <div class="tl-name"><b>${esc(cad.name)}</b><span class="small muted">${n} enrolled · ${plural(cadenceDays(cad), 'day')} · ${plural(cad.steps.length, 'step')}</span>${w.length ? `<span class="tl-warn">⚠ ${esc(w.join(' · '))}</span>` : ''}</div>
+              <div class="tl-track"><div class="tl-in" data-cad="${cad.id}" data-max="${maxDay}">
+                <div class="tl-line"></div>
+                ${[...groups].map(([day, list]) => `<div class="tl-grp ${level.get(day)}" style="left:${pos(day)}%">${list.map(({ s, i }) => `<button type="button" class="tl-step" data-step="${s.id}" data-day="${day}" title="${esc(`Day ${day} · Step ${i + 1}: ${s.title || stepType(s).label} (drag to change the day)`)}">${stepType(s).icon}<b>${i + 1}</b></button>`).join('')}</div>`).join('')}
+              </div></div>
+            </div>`;
+          }).join('')}` : '<div class="empty">No cadences to show.</div>'}
+      </div>`;
+  }
+
+  /** Move one step to another day of its cadence; people stay on the step they're on. */
+  function keepEnrollmentSteps(cad, oldSteps, steps) {
+    for (const e of state.enrollments.filter((x) => x.cadenceId === cad.id && x.status !== 'finished')) {
+      const oldId = (oldSteps[e.step] || {}).id;
+      const idx = steps.findIndex((s) => s.id === oldId);
+      e.step = idx === -1 ? Math.min(e.step, steps.length - 1) : idx;
+    }
+  }
+  function setStepDay(cad, stepId, day) {
+    const before = cad.steps.slice();
+    const s = cad.steps.find((x) => x.id === stepId);
+    if (!s) return;
+    s.day = Math.max(1, day);
+    const steps = cad.steps.map((x, i) => ({ x, i })).sort((a, b) => a.x.day - b.x.day || a.i - b.i).map((o) => o.x);
+    keepEnrollmentSteps(cad, before, steps);
+    cad.steps = steps;
+  }
+
+  function bindTimelines() {
+    $$('.tl-step').forEach((btn) => {
+      btn.addEventListener('pointerdown', (ev) => {
+        if (ev.button !== 0) return;
+        const track = btn.closest('.tl-in');
+        const cad = cadenceById(track.dataset.cad);
+        const max = Number(track.dataset.max);
+        const r = track.getBoundingClientRect();
+        const x0 = ev.clientX;
+        const day0 = Number(btn.dataset.day);
+        let day = day0; let moved = false;
+        const tip = document.createElement('span');
+        tip.className = 'tl-tip';
+        btn.setPointerCapture(ev.pointerId);
+        const move = (e2) => {
+          const dx = e2.clientX - x0;
+          if (!moved && Math.abs(dx) < 4) return;
+          if (!moved) { moved = true; btn.classList.add('dragging'); btn.appendChild(tip); }
+          day = Math.round(1 + Math.min(1, Math.max(0, (e2.clientX - r.left) / r.width)) * (max - 1));
+          btn.style.transform = `translateX(${dx}px)`;
+          tip.textContent = `Day ${day}`;
+        };
+        const up = () => {
+          btn.removeEventListener('pointermove', move);
+          btn.removeEventListener('pointerup', up);
+          btn.removeEventListener('pointercancel', up);
+          if (!moved) return cadenceForm(cad);
+          btn.style.transform = '';
+          if (day === day0) { rerender(); return; }
+          const i = cad.steps.findIndex((s) => s.id === btn.dataset.step);
+          setStepDay(cad, btn.dataset.step, day);
+          save(); rerender();
+          toast(`Step ${i + 1} moved to day ${day}`);
+        };
+        btn.addEventListener('pointermove', move);
+        btn.addEventListener('pointerup', up);
+        btn.addEventListener('pointercancel', up);
+      });
+    });
+  }
+
+  /** Steps landing per workday over the next two weeks, stacked by cadence, against a daily capacity. */
+  function cadWorkloadCard() {
+    const t = today();
+    const cap = stepCap();
+    const days = [];
+    for (let d = nextWorkday(t); days.length < 10; d = nextWorkdayAfter(d)) days.push(d);
+    const sched = cadSchedule(days[0], days[days.length - 1], { all: true });
+    const rows = days.map((d) => {
+      const by = new Map();
+      for (const c of (sched[d] || []).filter((x) => x.st !== 'done')) by.set(c.cad, (by.get(c.cad) || 0) + c.people.length);
+      return { d, by: [...by], tot: [...by.values()].reduce((a, b) => a + b, 0) };
+    });
+    const max = Math.max(cap, ...rows.map((r) => r.tot)) * 1.12;
+    const over = rows.filter((r) => r.tot > cap);
+    const worst = over.slice().sort((a, b) => b.tot - a.tot)[0];
+    const movable = over.length ? rebalancePlan().length : 0;
+    const firstWeek = weekStart(days[0]);
+    return `
+      <div class="card wl-card">
+        <div class="section-head" style="margin-bottom:.2rem"><h2 style="margin:0">Workload, next 2 weeks</h2>
+          <button type="button" class="link-btn small" data-act="cc-cap" title="Change your daily capacity">Capacity ${cap}/day ✎</button></div>
+        <p class="small muted" style="margin:0 0 .75rem">Steps landing per day across all cadences if you keep pace. Spot pile-ups before enrolling the next batch.</p>
+        <div class="wl-plot">
+          <div class="wl-area"><div class="wl-cap" style="bottom:${(cap / max) * 100}%" title="Capacity ${cap} a day"></div></div>
+          ${rows.map((r) => `<div class="wl-col ${weekStart(r.d) !== firstWeek && r.d === days.find((x) => weekStart(x) !== firstWeek) ? 'wk2' : ''}" title="${esc(`${fmtDate(r.d, { weekday: 'long', month: 'short', day: 'numeric' })}: ${plural(r.tot, 'step')}${r.by.length ? ' (' + r.by.map(([c, n]) => `${c.name} ${n}`).join(', ') + ')' : ''}`)}">
+            <span class="wl-num ${r.tot > cap ? 'over' : ''}">${r.tot || ''}</span>
+            <div class="wl-bar" style="height:${(r.tot / max) * 100}%">${r.by.map(([c, n]) => `<i style="height:${(n / r.tot) * 100}%;--c:${c.color}"></i>`).join('')}</div>
+          </div>`).join('')}
+        </div>
+        <div class="wl-labels">${rows.map((r) => `<div class="${r.d === days.find((x) => weekStart(x) !== firstWeek) ? 'wk2' : ''} ${r.d === t ? 'now' : ''}">${esc(fmtDate(r.d, { weekday: 'short' }))}<span>${fromISO(r.d).getDate()}</span></div>`).join('')}</div>
+        <div class="wl-sum">
+          ${over.length ? `<span><b class="cc-late">${esc(fmtDate(worst.d, { weekday: 'long' }))} has ${worst.tot} steps</b>, ${worst.tot - cap} over your capacity${over.length > 1 ? ` · ${plural(over.length, 'day')} over` : ''}.${movable ? '' : ' These come from later steps of people already under way, so they ease as you work through them. Spread start dates when you enroll the next batch.'}</span>
+            ${movable ? `<button type="button" class="btn sm" data-act="cc-rebalance">Spread it out</button>` : ''}`
+            : `<span class="muted">Every day is at or under your capacity of ${cap}.</span>`}
+        </div>
+      </div>`;
+  }
+
+  /** Push current steps forward a workday at a time (whole sequences move with them) until each day fits the capacity. */
+  function rebalancePlan() {
+    const cap = stepCap();
+    const people = liveEnrollments().filter((p) => p.e.status === 'active' && p.e.dueDate);
+    const shift = new Map();
+    const plan = (p) => projectSteps(p, shift.get(p.e.id) || 0);
+    let d = nextWorkday(today());
+    for (let k = 0; k < 40; k++, d = nextWorkdayAfter(d)) {
+      let n = people.reduce((s, p) => s + plan(p).filter((x) => x.date === d).length, 0);
+      if (n <= cap) continue;
+      // Keep the most overdue where they are; move the most recently due first, an account at a time.
+      const movable = people.filter((p) => plan(p)[0].date === d)
+        .sort((a, b) => b.e.dueDate.localeCompare(a.e.dueDate) || b.acct.name.localeCompare(a.acct.name));
+      for (const p of movable) {
+        if (n <= cap) break;
+        shift.set(p.e.id, (shift.get(p.e.id) || 0) + 1);
+        n -= 1;
+      }
+    }
+    return people.filter((p) => shift.get(p.e.id)).map((p) => ({ p, to: plan(p)[0].date }));
+  }
+
+  function rebalanceForm() {
+    const moves = rebalancePlan();
+    if (!moves.length) { toast('Nothing to move: the pile-up comes from later steps already in motion'); return; }
+    const t = today();
+    const days = [];
+    for (let d = nextWorkday(t); days.length < 10; d = nextWorkdayAfter(d)) days.push(d);
+    const load = () => { const s = cadSchedule(days[0], days[days.length - 1], { all: true }); return days.map((d) => openCount(s[d])); };
+    const before = load();
+    const saved = moves.map(({ p }) => [p.e, p.e.dueDate]);
+    moves.forEach(({ p, to }) => { p.e.dueDate = to; });
+    const after = load();
+    saved.forEach(([e, d]) => { e.dueDate = d; });
+    const late = moves.filter(({ p }) => p.e.dueDate < t).length;
+    openModal('Spread out the pile-up', `
+      <p class="small" style="margin:0">Moves <b>${plural(moves.length, 'current step')}</b> to later workdays so no day goes over <b>${stepCap()}</b>. Each person's later steps move with them, keeping the cadence spacing.${late ? ` ${plural(late, 'overdue step')} will be rescheduled.` : ''}</p>
+      <table class="rs-table">
+        <thead><tr><th>Day</th><th>Now</th><th>After</th></tr></thead>
+        <tbody>${days.map((d, i) => before[i] === after[i] ? '' : `<tr><td>${esc(fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' }))}</td><td class="${before[i] > stepCap() ? 'cc-late' : ''}">${before[i]}</td><td><b>${after[i]}</b></td></tr>`).join('')}</tbody>
+      </table>
+      ${after.some((n) => n > stepCap()) ? `<p class="small" style="margin:0">${plural(after.filter((n) => n > stepCap()).length, 'day')} will still be over: those are later steps of people already under way, and they ease as you work through them.</p>` : ''}
+      <p class="small muted" style="margin:0">The most overdue people stay first in line. You can move anyone back from their cadence page.</p>`, () => {
+      moves.forEach(({ p, to }) => { p.e.dueDate = to; });
+      toast(`${plural(moves.length, 'step')} spread out`);
+    }, 'Spread out', { wide: true });
+  }
+
+  /** Who is on one chip (a cadence step on a day), with a session button when it's due. */
+  function cadChipForm(date, key) {
+    const chip = (cadSchedule(date, date, { all: true })[date] || []).find((c) => c.key === key);
+    if (!chip) return;
+    const t = today();
+    const label = chip.step.title || stepType(chip.step).label;
+    const due = chip.st !== 'done' && date <= t;
+    const movable = chip.people.filter((x) => x.current).map((x) => x.p.e.id);
+    const state_ = (x) => {
+      if (x.h) return x.h.skipped ? 'Skipped' : x.h.outcome || 'Done';
+      if (x.current) return x.p.e.dueDate < t ? `<span class="cc-late">Due ${esc(relDays(x.p.e.dueDate))}</span>` : 'Current step';
+      return `After step ${x.p.e.step + 1} (due ${esc(shortDate(x.p.e.dueDate < t ? t : x.p.e.dueDate))})`;
+    };
+    openModal(`${chip.cad.name} · Step ${chip.i + 1}`, `
+      <div class="enr-head">
+        ${stepIcon(chip.step, 'lg')}
+        <div class="grow"><strong>${esc(label)}</strong>
+          <div class="small muted">${esc(fmtDate(date, { weekday: 'long', month: 'short', day: 'numeric' }))} · ${plural(chip.people.length, 'person', 'people')}${chip.st === 'done' ? ' · done' : chip.st === 'late' ? ' · overdue' : date > t ? ' · planned' : ''}</div></div>
+      </div>
+      ${due ? `<button type="button" class="btn" id="cc-work">▶ Work ${chip.people.length === 1 ? 'it' : `these ${chip.people.length}`} now</button>` : ''}
+      <div class="cc-people">${chip.people.map((x) => `
+        <button type="button" class="cc-person" data-eid="${x.p.e.id}">
+          <span class="avatar sm" style="--c:${chip.cad.color}">${esc(initials(x.p.contact.name))}</span>
+          <span class="grow"><strong>${esc(x.p.contact.name)}</strong> <span class="small muted">· ${esc(x.p.acct.name)}</span></span>
+          <span class="small">${state_(x)}</span>
+        </button>`).join('')}</div>
+      ${movable.length && chip.st !== 'done' ? `<button type="button" class="btn ghost sm" id="cc-move">Move ${movable.length === 1 ? 'this step' : `these ${movable.length} steps`}…</button>` : ''}
+      ${chip.people.length > movable.length && chip.st !== 'done' ? `<p class="small muted" style="margin:0">${plural(chip.people.length - movable.length, 'person', 'people')} reach this step later; it moves when their earlier step does.</p>` : ''}`, () => {}, 'Close', { wide: true });
+    modalForm.querySelector('.modal-actions [data-close]').remove();
+    const work = $('#cc-work');
+    if (work) work.addEventListener('click', () => { modal.close(); startSession({ type: 'all', cadenceId: chip.cad.id, stepNo: String(chip.i + 1) }); });
+    const mv = $('#cc-move');
+    if (mv) mv.addEventListener('click', () => cadMoveForm(movable, `${chip.cad.name} · Step ${chip.i + 1}`, date));
+    $$('.cc-person', modalForm).forEach((b) => b.addEventListener('click', () => enrollmentDetail(b.dataset.eid)));
+  }
+
+  /** Everything on one day, with bulk move and skip for the current steps. */
+  function cadDayForm(date) {
+    const chips = (cadSchedule(date, date, { all: true })[date] || []).filter((c) => c.st !== 'done');
+    if (!chips.length) return;
+    const t = today();
+    const movable = chips.flatMap((c) => c.people.filter((x) => x.current).map((x) => x.p.e.id));
+    const later = openCount(chips) - movable.length;
+    openModal(fmtDate(date, { weekday: 'long', month: 'long', day: 'numeric' }), `
+      <div class="cc-people">${chips.map((c) => `
+        <button type="button" class="cc-person" data-key="${esc(c.key)}" style="--c:${c.cad.color}">
+          ${stepIcon(c.step)}
+          <span class="grow"><strong>${esc(c.step.title || stepType(c.step).label)}</strong> <span class="small muted">· ${esc(c.cad.name)} · step ${c.i + 1}</span></span>
+          <span class="small ${c.st === 'late' ? 'cc-late' : ''}">${plural(c.people.length, 'person', 'people')}${c.st === 'late' ? ' · overdue' : ''}</span>
+        </button>`).join('')}</div>
+      <p class="small muted" style="margin:0">${plural(movable.length, 'current step')} can be moved${later ? `; ${plural(later, 'later step')} follow their earlier step` : ''}.</p>
+      ${movable.length ? `<div class="row">
+        <button type="button" class="btn ghost sm" id="cd-move">Move ${movable.length === 1 ? 'it' : `all ${movable.length}`}…</button>
+        ${date <= t ? `<button type="button" class="btn ghost sm" id="cd-skip">Skip ${movable.length === 1 ? 'it' : `all ${movable.length}`}</button>` : ''}
+      </div>` : ''}`, () => {}, 'Close', { wide: true });
+    modalForm.querySelector('.modal-actions [data-close]').remove();
+    $$('.cc-person', modalForm).forEach((b) => b.addEventListener('click', () => cadChipForm(date, b.dataset.key)));
+    const mv = $('#cd-move');
+    if (mv) mv.addEventListener('click', () => cadMoveForm(movable, fmtDate(date, { weekday: 'long', month: 'short', day: 'numeric' }), date));
+    const sk = $('#cd-skip');
+    if (sk) sk.addEventListener('click', () => {
+      if (!confirm(`Skip ${plural(movable.length, 'step')}? Each person moves on to their next step.`)) return;
+      for (const id of movable) {
+        const p = enrollmentParts(state.enrollments.find((x) => x.id === id) || {});
+        if (!p || p.e.status !== 'active') continue;
+        p.e.history.push({ stepId: p.step.id, date: t, skipped: true });
+        advance(p, t);
+      }
+      modal.close(); save(); rerender();
+      toast(`${plural(movable.length, 'step')} skipped`);
+    });
+  }
+
+  function cadMoveForm(eids, label, fromDate) {
+    const t = today();
+    const base = fromDate < t ? t : fromDate;
+    const opts = [['next', `Next workday (${fmtDate(nextWorkdayAfter(base), { weekday: 'short', month: 'short', day: 'numeric' })})`], ['week', `A week later (${fmtDate(addDays(base, 7), { weekday: 'short', month: 'short', day: 'numeric' })})`], ['pick', 'Pick a date']];
+    openModal(`Move ${plural(eids.length, 'step')}`, `
+      <p class="small muted" style="margin:0">${esc(label)}. Each person's later steps move with them.</p>
+      <div class="grid-2">
+        ${field('Move to', `<select name="when" id="mv-when">${opts.map(([k, l]) => opt(k, l, 'next')).join('')}</select>`)}
+        ${field('Date', `<input name="date" type="date" id="mv-date" value="${nextWorkdayAfter(base)}" min="${t}">`)}
+      </div>`, (data) => {
+      const to = data.when === 'next' ? nextWorkdayAfter(base) : data.when === 'week' ? addDays(base, 7) : data.date;
+      if (!to) return false;
+      let n = 0;
+      for (const id of eids) {
+        const e = state.enrollments.find((x) => x.id === id);
+        if (!e || e.status !== 'active') continue;
+        const cad = cadenceById(e.cadenceId);
+        e.dueDate = cad && cad.skipWeekends ? nextWorkday(to) : to;
+        n++;
+      }
+      toast(`${plural(n, 'step')} moved to ${fmtDate(to, { weekday: 'short', month: 'short', day: 'numeric' })}`);
+    }, 'Move');
+    const when = $('#mv-when'); const date = $('#mv-date');
+    const sync = () => { date.closest('.field').hidden = when.value !== 'pick'; };
+    when.addEventListener('change', sync); sync();
+  }
+
+  /** Per-step and per-cadence results from logged outcomes. */
+  function cadResults(cad) {
+    const ens = state.enrollments.filter((e) => e.cadenceId === cad.id);
+    const steps = cad.steps.map((s, i) => ({ s, i, done: 0, skipped: 0, pos: 0 }));
+    let reached = 0; let engaged = 0;
+    for (const e of ens) {
+      let r = false; let g = false;
+      for (const h of e.history) {
+        const x = steps.find((y) => y.s.id === h.stepId);
+        if (!x) continue;
+        if (h.skipped) { x.skipped++; continue; }
+        x.done++; r = true;
+        if (isPositive(x.s, h.outcome)) { x.pos++; g = true; }
+      }
+      if (['meeting', 'replied'].includes(e.outcome)) g = true;
+      reached += r ? 1 : 0; engaged += g ? 1 : 0;
+    }
+    return {
+      enrolled: ens.length, active: ens.filter((e) => e.status === 'active').length, reached, engaged,
+      meetings: ens.filter((e) => e.outcome === 'meeting').length, bad: ens.filter((e) => e.outcome === 'bad').length, steps,
+    };
+  }
+
+  function cadResultsView(cad) {
+    const all = state.cadences.map((c) => ({ c, r: cadResults(c) }));
+    const ranked = all.filter((x) => x.r.reached >= 5);
+    const best = ranked.sort((a, b) => b.r.engaged / b.r.reached - a.r.engaged / a.r.reached)[0];
+    const r = cadResults(cad);
+    const rated = r.steps.filter((x) => POSITIVE[x.s.type] && x.done >= 5);
+    const top = rated.slice().sort((a, b) => b.pos / b.done - a.pos / a.done)[0];
+    const first = rated[0];
+    const insight = top && first && top.i > first.i && top.pos / top.done >= 1.5 * (first.pos / first.done || 0.0001) && top.pos
+      ? `Step ${top.i + 1} (${esc(top.s.title || stepType(top.s).label)}) gets ${pct(top.pos, top.done)}% ${POSITIVE_LABEL[top.s.type].toLowerCase()} vs ${pct(first.pos, first.done)}% for step ${first.i + 1}. Consider moving it earlier.`
+      : r.steps.reduce((n, x) => n + x.done, 0) < 20 ? 'Rates firm up after a few weeks of logged outcomes. Under 10 completions a step, treat them as early signals.' : '';
+    const rateCell = (n, d, color) => `<div class="rs-rate" style="--c:${color}"><span class="bar"><i style="width:${pct(n, d)}%"></i></span><b>${d ? pct(n, d) + '%' : '—'}</b></div>`;
+    return `
+      <div class="card">
+        <h2 style="margin:0">Compare cadences</h2>
+        <p class="small muted" style="margin:.2rem 0 .5rem">Engaged = connected, replied, met or booked a meeting at any step. Rate = engaged ÷ people reached.</p>
+        <div class="rs-wrap"><table class="rs-table">
+          <thead><tr><th>Cadence</th><th>Enrolled</th><th>Reached</th><th>Engaged</th><th>Engage rate</th><th>Meetings</th><th>Bad data</th></tr></thead>
+          <tbody>${all.map(({ c, r: x }) => `<tr>
+            <td><button type="button" class="link-btn" data-act="cad-open" data-cad="${c.id}"><span class="dot" style="--c:${c.color}"></span>${esc(c.name)}</button>${best && best.c === c && ranked.length > 1 ? ' <span class="rs-best">Best</span>' : ''}</td>
+            <td>${x.enrolled}</td><td>${x.reached}</td><td>${x.engaged}</td><td>${rateCell(x.engaged, x.reached, c.color)}</td><td>${x.meetings}</td><td>${x.bad}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>
+      <div class="card" style="margin-top:1rem;--c:${cad.color}">
+        <h2 style="margin:0">Step by step · ${esc(cad.name)}</h2>
+        <p class="small muted" style="margin:.2rem 0 .5rem">${r.enrolled} enrolled · ${r.reached} reached · ${r.engaged} engaged · ${r.meetings} meetings</p>
+        <div class="rs-wrap"><table class="rs-table">
+          <thead><tr><th>#</th><th>Step</th><th>Day</th><th>Done</th><th>Skipped</th><th>Result</th><th>Rate</th></tr></thead>
+          <tbody>${r.steps.map((x) => `<tr>
+            <td>${x.i + 1}</td>
+            <td>${stepIcon(x.s, 'xs')} ${esc(x.s.title || stepType(x.s).label)}</td>
+            <td>${x.s.day}</td><td>${x.done}</td><td>${x.skipped}</td>
+            <td>${POSITIVE[x.s.type] ? `${POSITIVE_LABEL[x.s.type]} ${x.pos} of ${x.done}` : '<span class="muted">—</span>'}</td>
+            <td>${POSITIVE[x.s.type] ? rateCell(x.pos, x.done, cad.color) : ''}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+        ${insight ? `<div class="rs-insight">${insight}</div>` : ''}
+      </div>`;
+  }
+
+  function cadPageHead(view) {
+    const t = today();
+    const live = liveEnrollments().filter((p) => p.e.status !== 'finished');
+    const wk = Object.values(cadSchedule(t, addDays(weekStart(t), 6), { all: true })).reduce((n, chips) => n + openCount(chips), 0);
+    const dueN = dueSteps(t).length;
+    return `
+      <div class="page-head">
+        <div>
+          <h1>Cadences</h1>
+          <div class="muted small">${plural(state.cadences.length, 'cadence')} · ${plural(live.length, 'person', 'people')} enrolled · ${plural(wk, 'step')} due this week</div>
+        </div>
+        <div class="row">
+          <div class="seg" role="group" aria-label="Cadence view">${Object.entries(CAD_VIEWS).map(([k, l]) => `<button type="button" class="${view === k ? 'active' : ''}" data-act="cad-view" data-view="${k}">${l}</button>`).join('')}</div>
+          ${session && session.idx < session.queue.length ? `<a class="btn" href="#session">▶ Resume session · ${Math.min(session.idx + 1, session.queue.length)} of ${session.queue.length}</a>` : `<button class="btn" data-act="session-setup">▶ Start session${dueN ? ` · ${dueN} due` : ''}</button>`}
+          <button class="btn ghost" data-act="cad-new">+ New cadence</button>
+        </div>
+      </div>`;
+  }
+
+  const cadSwitchRow = (cad) => `
+      <div class="cad-switch">
+        ${state.cadences.map((c) => {
+          const live = liveEnrollments(c.id);
+          const dueN = live.filter((p) => isDue(p.e)).length;
+          return `<button type="button" class="cad-chip ${c.id === cad.id ? 'active' : ''}" data-act="cad-open" data-cad="${c.id}" style="--c:${c.color}">
+            <span class="dot"></span>${esc(c.name)} <span class="muted">${live.filter((p) => p.e.status !== 'finished').length}</span>
+            ${dueN ? `<span class="due-badge">${dueN} due</span>` : ''}
+          </button>`;
+        }).join('')}
+      </div>`;
+
+  /** Start a session straight away (no setup dialog). */
+  function startSession(filt) {
+    const list = sessionCandidates(filt);
+    if (!list.length) { toast('Nothing due for that choice'); return; }
+    session = { filter: filt, queue: list.map((p) => p.e.id), idx: 0, results: [], startedAt: new Date().toISOString() };
+    saveSession();
+    go('session');
+  }
+
+  /** Spread a batch of new people over workdays, keeping people at one account on the same day. */
+  function staggerStarts(picks, start, perDay) {
+    const groups = new Map();
+    for (const x of picks) { if (!groups.has(x.a.id)) groups.set(x.a.id, []); groups.get(x.a.id).push(x); }
+    const out = [];
+    let day = nextWorkday(start); let used = 0;
+    for (const group of groups.values()) {
+      if (used && used + group.length > perDay && group.length <= perDay) { day = nextWorkdayAfter(day); used = 0; }
+      for (const x of group) {
+        if (used >= perDay) { day = nextWorkdayAfter(day); used = 0; }
+        out.push({ ...x, date: day }); used++;
+      }
+    }
+    return out;
+  }
 
   // ---------- step sessions (power dialer style) ----------
   // A session is a queue of due cadence steps worked one after another: call, pick an outcome,
@@ -3565,23 +4126,62 @@
     }[step.type] || '';
   }
 
-  /** Record a completed step: account history, cadence history, planner count, then advance or finish. */
-  function completeStep(p, { outcome, then = 'continue', date = today(), note = '' }) {
+  /**
+   * Record a completed step: account history, cadence history, planner count, then advance, pause or
+   * finish. The cadence's smart rules run here, so the log form and sessions behave the same.
+   * Returns a short note of what the rules did (for the toast).
+   */
+  function completeStep(p, { outcome, then = 'continue', date = today(), note = '', followUp = '' }) {
     const { e, cad, acct, contact, step } = p;
     const type = stepType(step);
+    const rules = cadRules(cad);
+    const said = [];
     const actId = uid();
     acct.activities.push({
       id: actId, date, kind: type.kind, contactId: contact.id, createdAt: new Date().toISOString(),
       summary: `${cad.name} · ${step.title || type.label}: ${outcome}`, notes: note,
     });
+    const prevNoAnswer = e.history.some((h) => /no answer/i.test(h.outcome || '') && (cad.steps.find((x) => x.id === h.stepId) || {}).type === 'call');
     e.history.push({ stepId: step.id, date, outcome, note, activityId: actId });
     if (type.plan) addPlanTouch(date, type.plan, { name: acct.name, accountId: acct.id, contactId: contact.id, kind: type.kind, note: `${cad.name}: ${step.title || type.label}`, done: true, activityId: actId });
-    if (then === 'continue') advance(p, date); else finishEnrollment(e, then, date);
+    if (rules.badFlag && /wrong number|bounced/i.test(outcome)) {
+      contact.flag = /bounced/i.test(outcome) ? 'Email bounced' : 'Wrong number';
+      contact.flagAt = date;
+      if (then === 'continue') then = 'bad';
+      said.push(`${contact.name} flagged: ${contact.flag.toLowerCase()}`);
+    }
+    if (then === 'continue' && rules.pauseOnReply && isPositive(step, outcome)) then = 'pause';
+    if (then === 'pause') {
+      if (e.step + 1 >= cad.steps.length) finishEnrollment(e, 'replied', date);
+      else { advance(p, date); Object.assign(e, { status: 'paused', pausedAt: date, pauseReason: outcome }); }
+      const fu = followUp || shiftDays(date, 2, true);
+      if (!acct.nextFollowUp || acct.nextFollowUp < today() || acct.nextFollowUp > fu) acct.nextFollowUp = fu;
+      said.push(`${e.status === 'paused' ? 'Paused' : 'Finished'} · follow-up ${fmtDate(acct.nextFollowUp, { weekday: 'short', month: 'short', day: 'numeric' })}`);
+    } else if (then === 'continue') {
+      advance(p, date);
+      if (e.status === 'active' && rules.vmEmail && /voicemail/i.test(outcome) && cad.steps[e.step].type === 'email') {
+        const next = cad.skipWeekends ? nextWorkdayAfter(date) : addDays(date, 1);
+        if (e.dueDate > next) { e.dueDate = next; said.push(`email moved up to ${fmtDate(next, { weekday: 'short' })}`); }
+      }
+      if (rules.noAnswerLi && step.type === 'call' && /no answer/i.test(outcome) && prevNoAnswer && !e.liTask) {
+        const d2 = nextWorkdayAfter(date);
+        state.tasks.push({ id: uid(), date: d2, time: '', title: `LinkedIn: connect with ${contact.name}`, accountId: acct.id, priority: 'med', done: false, notes: `Two calls with no answer in ${cad.name}.`, categoryId: 'cat-call' });
+        e.liTask = true;
+        said.push(`LinkedIn touch added for ${fmtDate(d2, { weekday: 'short' })}`);
+      }
+    } else finishEnrollment(e, then, date);
     touch(acct);
+    return said.join(' · ');
   }
 
-  /** What an outcome usually means for the cadence (the person can change it before tapping). */
-  const outcomeThen = (o) => (/replied/i.test(o) ? 'replied' : /wrong number|bounced/i.test(o) ? 'bad' : 'continue');
+  /** What an outcome usually means for the cadence (the person can change it before saving). */
+  const outcomeThen = (o, cad) => {
+    const r = cadRules(cad);
+    if (/wrong number|bounced/i.test(o)) return 'bad';
+    if (/replied/i.test(o)) return r.pauseOnReply ? 'pause' : 'replied';
+    if (r.pauseOnReply && /connected|met in person/i.test(o)) return 'pause';
+    return 'continue';
+  };
 
   function renderSession() {
     if (!session) {
@@ -3669,7 +4269,10 @@
             </details>` : ''}
           <div class="ss-log">
             <label class="field"><span>Notes (optional)</span><textarea id="ss-note" rows="2" placeholder="What happened, next steps…"></textarea></label>
-            <label class="field ss-then"><span>Then</span><select id="ss-then">${Object.entries(EXIT_OUTCOMES).map(([k, l]) => opt(k, l, 'continue')).join('')}</select></label>
+            <div class="stack ss-then" style="gap:.5rem">
+              <label class="field"><span>Then</span><select id="ss-then"><option value="auto">Follow the outcome</option>${Object.entries(EXIT_OUTCOMES).map(([k, l]) => opt(k, l, '')).join('')}</select></label>
+              <label class="field"><span>Follow-up if they engage</span><input type="date" id="ss-fu" value="${shiftDays(t, 2, true)}"></label>
+            </div>
           </div>
           <div class="ss-outcomes">
             ${type.outcomes.map((o, i) => `<button type="button" class="btn ss-outcome" data-act="session-log" data-outcome="${esc(o)}"><kbd>${i + 1}</kbd>${esc(o)}</button>`).join('')}
@@ -3709,11 +4312,11 @@
     const note = ($('#ss-note') || {}).value || '';
     if (action === 'log' || action === 'meeting') {
       const out = action === 'meeting' ? (stepType(p.step).outcomes.find((o) => /connected|met|replied/i.test(o)) || stepType(p.step).outcomes[0]) : outcome;
-      const thenSel = ($('#ss-then') || {}).value || 'continue';
-      const then = action === 'meeting' ? 'meeting' : thenSel !== 'continue' ? thenSel : outcomeThen(out);
-      completeStep(p, { outcome: out, then, note });
+      const thenSel = ($('#ss-then') || {}).value || 'auto';
+      const then = action === 'meeting' ? 'meeting' : thenSel !== 'auto' ? thenSel : outcomeThen(out, p.cad);
+      const said = completeStep(p, { outcome: out, then, note, followUp: ($('#ss-fu') || {}).value || '' });
       session.results.push({ eid: p.e.id, kind: 'done', outcome: action === 'meeting' ? 'Meeting booked' : out });
-      toast(p.e.status === 'finished' ? `${p.contact.name}: ${FINISH_LABELS[p.e.outcome]}` : `${out} · next step ${fmtDate(p.e.dueDate, { month: 'short', day: 'numeric' })}`);
+      toast(`${out} · ${said || (p.e.status === 'finished' ? FINISH_LABELS[p.e.outcome] : `next step ${fmtDate(p.e.dueDate, { month: 'short', day: 'numeric' })}`)}`);
     } else if (action === 'skip') {
       session.results.push({ eid: p.e.id, kind: 'skip' });
     } else if (action === 'snooze') {
@@ -5443,6 +6046,7 @@
         for (const p of enrollmentsFor(existing.id)) finishEnrollment(p.e, 'bad');
       }
       let target = existing;
+      if (existing && existing.flag && (fields.phone !== existing.phone || fields.mobile !== existing.mobile || fields.email !== existing.email)) fields.flag = '';
       if (existing) Object.assign(existing, fields);
       else acct.contacts.push(target = { id: uid(), ...fields });
       if (target.primary) acct.contacts.forEach((x) => { if (x !== target) x.primary = false; });
@@ -5805,6 +6409,30 @@
       case 'session-end': if (session) { session.idx = session.queue.length; saveSession(); } return rerender();
       case 'session-close': session = null; saveSession(); return go('cadences');
       case 'cad-filter': ui.cadFilter = el.dataset.f; return rerender();
+      case 'cad-view': ui.cadView = el.dataset.view; savePrefs(); return rerender();
+      case 'cc-mode': ui.cadCalMode = el.dataset.mode; savePrefs(); return rerender();
+      case 'cc-shift': {
+        const base = ui.cadCalDate || today();
+        ui.cadCalDate = ui.cadCalMode === 'month' ? addMonths(base.slice(0, 8) + '01', Number(el.dataset.n)) : addDays(base, 7 * Number(el.dataset.n));
+        return rerender();
+      }
+      case 'cc-today': ui.cadCalDate = today(); return rerender();
+      case 'cc-hide': ui.cadHidden = { ...(ui.cadHidden || {}), [el.dataset.cad]: !(ui.cadHidden || {})[el.dataset.cad] }; savePrefs(); return rerender();
+      case 'cc-open': return cadChipForm(el.dataset.date, el.dataset.key);
+      case 'cc-day': return cadDayForm(el.dataset.date);
+      case 'cc-rebalance': return rebalanceForm();
+      case 'cc-cap': {
+        const v = prompt('How many cadence steps can you work in a day?', String(stepCap()));
+        if (v === null) return;
+        const n = Math.round(Number(v));
+        if (!(n > 0)) { toast('Enter a number above 0'); return; }
+        ui.stepCap = n; savePrefs(); return rerender();
+      }
+      case 'contact-unflag': {
+        const c = acct && acct.contacts.find((x) => x.id === cid);
+        if (c) { c.flag = ''; touch(acct); save(); rerender(); toast('Flag cleared'); }
+        return;
+      }
       case 'cad-delete': {
         const cad = cadenceById(ui.cadenceId);
         const n = state.enrollments.filter((x) => x.cadenceId === cad.id).length;
