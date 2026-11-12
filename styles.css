@@ -942,12 +942,9 @@ input, select, textarea { border-radius: 10px; }
 .count-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 .35rem; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: .72rem; font-weight: 700; vertical-align: 2px; }
 
 /* ----- logo ----- */
-.logo-mark { display: inline-grid; grid-template-columns: 1fr 1fr; gap: 3px; width: 22px; height: 22px; margin-right: .5rem; vertical-align: -4px; }
-.logo-mark i { border-radius: 3px; background: #7fd1a4; }
-.logo-mark i:nth-child(2) { background: #c6ead3; }
-.logo-mark i:nth-child(3) { background: #c6ead3; }
-.logo-mark i:nth-child(4) { background: #5fb98a; }
-.brand { text-decoration: none; color: inherit; font-weight: 800; letter-spacing: -0.03em; }
+.logo-svg { display: block; flex: none; width: 1.6em; height: 1.6em; margin-right: .5rem; }
+.brand { display: inline-flex; align-items: center; min-width: 0; text-decoration: none; color: inherit; font-weight: 800; letter-spacing: -0.02em; white-space: nowrap; }
+.os-badge { margin-left: .4em; padding: .3em .42em; border-radius: .4em; background: #F2A541; color: #14201B; font-size: .56em; font-weight: 800; letter-spacing: .08em; line-height: 1; }
 
 /* ----- top header ----- */
 .topbar { background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
