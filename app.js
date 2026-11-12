@@ -229,7 +229,7 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen })); } catch (e) { /* ignore */ }
   };
 
   function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], deleted: {} }; }
@@ -2217,6 +2217,7 @@
 
   // ---------- dashboard ----------
   function renderDashboard() {
+    trackViews();
     const t = today();
     const items = workQueue(t);
     const now = dueNow(items);
@@ -2271,6 +2272,7 @@
         ${kpi(`#planner/${t}`, 'Everything due', now.length, `${overdue ? `<span class="pill overdue">${overdue} overdue</span> ` : ''}${esc(dueBits.join(' · ')) || 'Nothing due'}`)}
         ${kpi('#accounts', 'Stale accounts', stale.length, 'no touch in 30+ days')}
       </div>
+      ${pinnedViewsStrip()}
       <div class="ov2">
         <div class="stack">
           <div class="card">
@@ -2344,7 +2346,7 @@
 
   // ---------- routing ----------
   const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession, partners: renderPartners };
-  const TAB_FOR = { account: 'accounts', report: 'dashboard', session: 'cadences' };
+  const TAB_FOR = { account: 'accounts', report: 'dashboard', session: 'cadences', lists: 'accounts' };
 
   function route() {
     let [name, arg] = location.hash.replace('#', '').split('/');
@@ -2427,14 +2429,19 @@
     renewal: (x, y) => (x.vendorRenewal || FAR).localeCompare(y.vendorRenewal || FAR),
     close: (x, y) => (x.closeDate || FAR).localeCompare(y.closeDate || FAR),
     lasttouch: (x, y) => lastTouchDate(y).localeCompare(lastTouchDate(x)),
+    employees: (x, y) => (Number(y.employees) || 0) - (Number(x.employees) || 0),
+    instage: (x, y) => daysInStage(y) - daysInStage(x),
+    next: (x, y) => ((nextStepOf(x) || {}).date || FAR).localeCompare((nextStepOf(y) || {}).date || FAR),
     updated: (x, y) => (y.updatedAt || '').localeCompare(x.updatedAt || ''),
   };
-  const SORT_LABELS = { close: 'Expected close', followup: 'Next follow-up', revisit: 'Next revisit', renewal: 'Vendor renewal', name: 'Name', location: 'Location', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', updated: 'Recently updated' };
+  const SORT_LABELS = { close: 'Expected close', followup: 'Next follow-up', revisit: 'Next revisit', renewal: 'Vendor renewal', name: 'Name', location: 'Location', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', instage: 'Days in stage', next: 'Next step', employees: 'Employees', updated: 'Recently updated' };
   const sortAccounts = (list) => list.sort((x, y) => SORTERS[ui.sort](x, y) * ui.sortDir || x.name.localeCompare(y.name));
 
   function filteredAccounts() {
     const q = ui.search.trim().toLowerCase();
+    const view = ui.viewId && ui.viewId !== 'scoreboard' ? resolveList(ui.viewId) : null;
     return sortAccounts(state.accounts.filter((a) => {
+      if (view && !listHas(view, a)) return false;
       if (ui.typeFilter !== 'all' && a.type !== ui.typeFilter) return false;
       if (ui.stageFilter !== 'all' && a.stage !== ui.stageFilter) return false;
       if (ui.vendorFilter !== 'all' && !a.vendors.includes(ui.vendorFilter)) return false;
@@ -2466,37 +2473,6 @@
     const more = list.length - shown.length;
     return (ui.accountView === 'cards' ? accountCards(shown) : accountTable(shown))
       + (more ? `<div class="show-more"><button class="btn ghost" data-act="show-all">Show all ${list.length} accounts (${more} more)</button></div>` : '');
-  }
-
-  function accountTable(list) {
-    const th = (label, key) => key
-      ? `<th><button type="button" class="th-sort ${ui.sort === key ? 'on' : ''}" data-act="sort" data-key="${key}">${label}${ui.sort === key ? (ui.sortDir > 0 ? ' ▲' : ' ▼') : ''}</button></th>`
-      : `<th>${label}</th>`;
-    return `
-      <div class="card table-card">
-        <div class="table-wrap">
-          <table class="table acct-table">
-            <thead><tr>${th('Account', 'name')}${th('Location', 'location')}${th('Stage', 'stage')}${th('Primary contact')}${th('Current vendors')}${th('Renewal', 'renewal')}${th('Value', 'value')}${th('Close', 'close')}${th('Follow-up', 'followup')}${th('Revisit', 'revisit')}${th('Last touch', 'lasttouch')}</tr></thead>
-            <tbody>${list.map((a) => {
-              const p = primaryContact(a);
-              const last = lastActivity(a);
-              return `<tr class="click-row" data-act="open-account" data-id="${a.id}">
-                <td class="sticky-col"><strong>${esc(a.name)}</strong><div class="row" style="gap:.35rem">${typePill(a)}${accountLinks(a)}</div></td>
-                <td class="loc-cell">${a.location ? esc(a.location) : '<span class="muted">—</span>'}</td>
-                <td>${esc(a.stage)}${a.type === 'partner' && a.partnerType ? `<div class="small muted">${esc(a.partnerType)}</div>` : ''}</td>
-                <td>${p ? `${esc(p.name)}${p.title ? `<div class="small muted">${esc(p.title)}</div>` : ''}` : '<span class="muted">—</span>'}${a.contacts.length > 1 ? `<div class="small muted">+${a.contacts.length - 1} more</div>` : ''}</td>
-                <td>${vendorPills(a) || '<span class="muted">—</span>'}</td>
-                <td>${a.vendorRenewal ? `<span class="small">${fmtDate(a.vendorRenewal, { month: 'short', day: 'numeric', year: '2-digit' })}</span>` : '<span class="muted">—</span>'}</td>
-                <td class="num">${a.value ? money(a.value) : '<span class="muted">—</span>'}</td>
-                <td>${dueChip(a.closeDate)}</td>
-                <td>${dueChip(a.nextFollowUp)}</td>
-                <td>${dueChip(a.revisitDate)}</td>
-                <td class="small">${(() => { const d = lastTouchDate(a); return d ? `${esc(relDays(d))}${last && last.date === d ? `<div class="muted">${esc(last.kind)}</div>` : ''}` : '<span class="muted">Never</span>'; })()}</td>
-              </tr>`;
-            }).join('')}</tbody>
-          </table>
-        </div>
-      </div>`;
   }
 
   function accountCards(list) {
@@ -2628,14 +2604,329 @@
     });
   }
 
+  // ----- staleness: days in stage and the next step, derived from what's already logged -----
+  /** The day an account entered its current stage: its last "Stage changed: … → X" note, else when it was added. */
+  function stageSince(a) {
+    let d = '';
+    for (const h of a.activities) {
+      const m = /^Stage changed: .* → (.+)$/.exec(h.summary || '');
+      if (m && m[1] === a.stage && h.date > d) d = h.date;
+    }
+    return d || (a.createdAt || '').slice(0, 10) || today();
+  }
+  const daysInStage = (a) => Math.max(0, daysBetween(stageSince(a), today()));
+  const isLive = (a) => (a.type === 'partner' ? a.stage !== 'Closed' : isOpenDeal(a));
+  /** The soonest planned thing for an account: a task, follow-up, revisit or cadence step. */
+  function nextStepOf(a) {
+    const c = [];
+    for (const x of state.tasks) if (x.accountId === a.id && !x.done) c.push({ date: x.date, label: x.title });
+    if (a.nextFollowUp) c.push({ date: a.nextFollowUp, label: 'Follow up' });
+    if (a.revisitDate) c.push({ date: a.revisitDate, label: 'Revisit' });
+    for (const e of state.enrollments) {
+      if (e.accountId !== a.id || e.status !== 'active') continue;
+      const cad = cadenceById(e.cadenceId);
+      const s = cad && cad.steps[Math.min(e.step, cad.steps.length - 1)];
+      if (s) c.push({ date: e.dueDate, label: `${cad.name}: ${s.title || stepType(s).label}` });
+    }
+    return c.sort((x, y) => x.date.localeCompare(y.date))[0] || null;
+  }
+  const inCadence = (a) => state.enrollments.some((e) => e.accountId === a.id && e.status !== 'finished');
+  const STALE_TOUCH = 30;
+  const STALE_STAGE = 21;
+
+  // ----- table columns (pick your own) -----
+  const ACCT_COLS = {
+    type: 'Type', stage: 'Stage', value: 'Value', employees: 'Employees', vendor: 'Current vendor', renewal: 'Renewal',
+    touch: 'Last touch', instage: 'In stage', next: 'Next step', followup: 'Follow-up', contact: 'Primary contact',
+    location: 'Location', close: 'Close', revisit: 'Revisit', industry: 'Industry', source: 'Lead source', tags: 'Tags',
+  };
+  const COL_SORT = { stage: 'stage', value: 'value', employees: 'employees', renewal: 'renewal', touch: 'lasttouch', instage: 'instage', next: 'next', followup: 'followup', location: 'location', close: 'close', revisit: 'revisit' };
+  const DEFAULT_COLS = ['type', 'stage', 'value', 'employees', 'vendor', 'renewal', 'touch', 'instage', 'next', 'followup', 'location'];
+  const acctCols = () => (Array.isArray(ui.acctCols) && ui.acctCols.length ? ui.acctCols.filter((k) => ACCT_COLS[k]) : DEFAULT_COLS);
+
+  function columnsForm() {
+    const on = new Set(acctCols());
+    openModal('Columns', `
+      <p class="small muted" style="margin:0">Pick what the accounts table shows. Account name is always first; click any header to sort.</p>
+      <div class="check-grid cols-grid">${Object.entries(ACCT_COLS).map(([k, l]) => `<label><input type="checkbox" name="cols" value="${k}" ${on.has(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
+      <button type="button" class="link-btn small" id="cols-reset">Back to the default columns</button>`, (data, fd) => {
+      const picked = Object.keys(ACCT_COLS).filter((k) => fd.getAll('cols').includes(k));
+      ui.acctCols = picked.length ? picked : DEFAULT_COLS; savePrefs();
+    }, 'Show columns');
+    $('#cols-reset').addEventListener('click', () => { $$('[name=cols]', modalForm).forEach((cb) => { cb.checked = DEFAULT_COLS.includes(cb.value); }); });
+  }
+
+  function accountTable(list) {
+    const cols = acctCols();
+    const sel = ui.acctSel || new Set();
+    const t = today();
+    const th = (k) => COL_SORT[k]
+      ? `<th><button type="button" class="th-sort ${ui.sort === COL_SORT[k] ? 'on' : ''}" data-act="sort" data-key="${COL_SORT[k]}">${ACCT_COLS[k]}${ui.sort === COL_SORT[k] ? (ui.sortDir > 0 ? ' ▲' : ' ▼') : ''}</button></th>`
+      : `<th>${ACCT_COLS[k]}</th>`;
+    const muted = '<span class="muted">—</span>';
+    const view = ui.viewId && resolveList(ui.viewId);
+    const fresh = view && !view.builtIn ? newInView(view) : null;
+    const cell = (a, k) => {
+      const live = isLive(a);
+      switch (k) {
+        case 'type': return `<td>${typePill(a)}</td>`;
+        case 'stage': return `<td><select class="cell-edit" data-inline="stage" data-id="${a.id}" aria-label="Stage for ${esc(a.name)}" title="${esc(STAGE_HINTS[a.stage] || '')}">${STAGES[a.type].map((s) => opt(s, stageShort(s), a.stage)).join('')}</select>${a.type === 'partner' && a.partnerType ? `<div class="small muted">${esc(a.partnerType)}</div>` : ''}</td>`;
+        case 'value': return `<td class="num"><input class="cell-edit cell-num" data-inline="value" data-id="${a.id}" type="text" inputmode="numeric" value="${a.value ? esc(money(a.value)) : ''}" placeholder="—" aria-label="Value for ${esc(a.name)}"></td>`;
+        case 'employees': return `<td class="num">${a.employees ? esc(a.employees) : muted}</td>`;
+        case 'vendor': return `<td>${vendorPills(a) || muted}</td>`;
+        case 'renewal': return `<td>${a.vendorRenewal ? `<span class="small ${daysBetween(t, a.vendorRenewal) >= 0 && daysBetween(t, a.vendorRenewal) <= 90 ? 'cell-warn' : ''}">${fmtDate(a.vendorRenewal, { month: 'short', day: 'numeric', year: '2-digit' })}</span>` : muted}</td>`;
+        case 'touch': { const d = lastTouchDate(a); const late = live && (!d || daysBetween(d, t) > STALE_TOUCH); return `<td class="small ${late ? 'cell-bad' : ''}">${d ? `${daysBetween(d, t)} d` : 'never'}</td>`; }
+        case 'instage': { const n = daysInStage(a); return `<td class="small ${live && n >= STALE_STAGE ? 'cell-bad' : ''}" title="Since ${esc(fmtDate(stageSince(a)))}">${n} d</td>`; }
+        case 'next': { const ns = nextStepOf(a); return `<td class="small cell-next ${ns && ns.date < t ? 'cell-bad' : !ns && live ? 'cell-bad' : ''}">${ns ? `${esc(ns.label)} · ${esc(ns.date === t ? 'today' : shortDate(ns.date))}` : live ? 'No next step' : muted}</td>`; }
+        case 'followup': return `<td><input class="cell-edit cell-date ${a.nextFollowUp && a.nextFollowUp < t ? 'late' : ''}" data-inline="nextFollowUp" data-id="${a.id}" type="date" value="${esc(a.nextFollowUp || '')}" aria-label="Follow-up for ${esc(a.name)}"></td>`;
+        case 'contact': { const p = primaryContact(a); return `<td>${p ? `${esc(p.name)}${p.title ? `<div class="small muted">${esc(p.title)}</div>` : ''}` : muted}</td>`; }
+        case 'location': return `<td class="loc-cell">${a.location ? esc(a.location) : muted}</td>`;
+        case 'close': return `<td>${dueChip(a.closeDate)}</td>`;
+        case 'revisit': return `<td>${dueChip(a.revisitDate)}</td>`;
+        case 'industry': return `<td class="small">${a.industry ? esc(a.industry) : muted}</td>`;
+        case 'source': return `<td class="small">${a.leadSource ? esc(a.leadSource) : muted}</td>`;
+        case 'tags': return `<td class="small">${tagList(a).map((x) => '#' + esc(x)).join(' ') || muted}</td>`;
+        default: return '<td></td>';
+      }
+    };
+    return `
+      <div class="card table-card">
+        <div class="table-wrap">
+          <table class="table acct-table">
+            <thead><tr><th class="pick-col"><input type="checkbox" class="row-pick" id="pick-all" aria-label="Select all shown" ${list.length && list.every((a) => sel.has(a.id)) ? 'checked' : ''}></th><th><button type="button" class="th-sort ${ui.sort === 'name' ? 'on' : ''}" data-act="sort" data-key="name">Account${ui.sort === 'name' ? (ui.sortDir > 0 ? ' ▲' : ' ▼') : ''}</button></th>${cols.map(th).join('')}</tr></thead>
+            <tbody>${list.map((a) => `<tr class="click-row ${sel.has(a.id) ? 'picked' : ''}" data-act="open-account" data-id="${a.id}">
+                <td class="pick-col"><input type="checkbox" class="row-pick" data-id="${a.id}" ${sel.has(a.id) ? 'checked' : ''} aria-label="Select ${esc(a.name)}"></td>
+                <td class="sticky-col"><strong>${esc(a.name)}</strong>${fresh && fresh.has(a.id) ? ' <span class="pill new-pill">New</span>' : ''}<div class="row" style="gap:.35rem">${cols.includes('type') ? '' : typePill(a)}${accountLinks(a)}</div></td>
+                ${cols.map((k) => cell(a, k)).join('')}
+              </tr>`).join('')}</tbody>
+          </table>
+        </div>
+        <div class="table-foot small muted"><span>Red: no touch in ${STALE_TOUCH}+ days, ${STALE_STAGE}+ days in stage, or no next step on an open deal.</span><button type="button" class="link-btn small" data-act="acct-cols">Columns</button></div>
+      </div>`;
+  }
+
+  /** Inline edits from the table: stage, value, follow-up. */
+  function inlineEdit(el) {
+    const a = getAccount(el.dataset.id);
+    if (!a) return;
+    const k = el.dataset.inline;
+    if (k === 'stage') { moveStage(a.id, el.value); return; }
+    if (k === 'value') {
+      const n = Number(String(el.value).replace(/[^\d.]/g, ''));
+      a.value = n || ''; touch(a); save(); el.value = a.value ? money(a.value) : '';
+      toast(`${a.name}: value ${a.value ? money(a.value) : 'cleared'}`); return;
+    }
+    if (k === 'nextFollowUp') { a.nextFollowUp = el.value; touch(a); save(); rerender(); toast(el.value ? `${a.name}: follow up ${fmtDate(el.value, { weekday: 'short', month: 'short', day: 'numeric' })}` : `${a.name}: follow-up cleared`); }
+  }
+
+  // ----- saved views: the old Lists, as tabs on the accounts table -----
+  /** Keep each view's joined / left dates so it can say "+4 this week, −2" and mark new rows. */
+  function trackView(l) {
+    if (l.builtIn) return false;
+    const ids = new Set(state.accounts.filter((a) => listHas(l, a)).map((a) => a.id));
+    const t = today();
+    let changed = false;
+    if (!l.joined) { l.joined = Object.fromEntries([...ids].map((id) => [id, ''])); l.left = {}; l.trackedFrom = t; return true; }
+    l.left = l.left || {};
+    const stamp = new Date().toISOString();
+    for (const id of ids) if (!(id in l.joined)) { l.joined[id] = stamp; delete l.left[id]; changed = true; }
+    for (const id of Object.keys(l.joined)) if (!ids.has(id)) { delete l.joined[id]; l.left[id] = t; changed = true; }
+    for (const [id, d] of Object.entries(l.left)) if (daysBetween(d, t) > 30) { delete l.left[id]; changed = true; }
+    return changed;
+  }
+  function trackViews() {
+    let changed = false;
+    for (const l of state.lists) if (trackView(l)) changed = true;
+    if (changed) save();
+  }
+  const viewDelta = (l) => {
+    const wk = addDays(today(), -7);
+    return { plus: Object.values(l.joined || {}).filter((d) => d && d >= wk).length, minus: Object.values(l.left || {}).filter((d) => d >= wk).length };
+  };
+  const deltaText = (l) => { const d = viewDelta(l); return [d.plus && `+${d.plus}`, d.minus && `−${d.minus}`].filter(Boolean).join(' '); };
+  /** Rows that joined since you last opened this view (on this device). */
+  function newInView(l) {
+    const seen = (ui.viewSeenPrev || {})[l.id];
+    return new Set(Object.entries(l.joined || {}).filter(([, d]) => d && (!seen || d > seen)).map(([id]) => id));
+  }
+  function openView(id) {
+    ui.viewSeenPrev = { ...(ui.viewSeenPrev || {}), [id]: (ui.viewSeen || {})[id] || '' };
+    ui.viewSeen = { ...(ui.viewSeen || {}), [id]: new Date().toISOString() }; savePrefs();
+    ui.viewId = id; ui.acctSel = new Set(); ui.showAll = false;
+  }
+
+  function vendorScoreboard() {
+    const t = today();
+    const rows = new Map();
+    for (const a of state.accounts) for (const v of a.vendors) {
+      if (v === NO_VENDOR) continue;
+      const r = rows.get(v) || { v, n: 0, open: 0, pipe: 0, emp: 0, empN: 0, renew: 0, won: 0 };
+      r.n++;
+      if (isOpenDeal(a)) { r.open++; r.pipe += Number(a.value) || 0; }
+      if (a.stage === 'Closed Won') r.won++;
+      if (Number(a.employees)) { r.emp += Number(a.employees); r.empN++; }
+      if (a.vendorRenewal && daysBetween(t, a.vendorRenewal) >= 0 && daysBetween(t, a.vendorRenewal) <= 90) r.renew++;
+      rows.set(v, r);
+    }
+    const list = [...rows.values()].sort((x, y) => y.renew - x.renew || y.pipe - x.pipe || y.n - x.n);
+    return `<div class="card">
+      <h2 style="margin:0">Vendor scoreboard</h2>
+      <p class="small muted" style="margin:.2rem 0 .5rem">Your displacement targets by incumbent. Click a vendor to open its accounts.</p>
+      ${list.length ? `<div class="rs-wrap"><table class="rs-table">
+        <thead><tr><th>Current vendor</th><th>Accounts</th><th>Open deals</th><th>Open pipeline</th><th>Avg employees</th><th>Renew in 90 days</th><th>Won</th></tr></thead>
+        <tbody>${list.map((r) => `<tr class="click-row" data-act="acct-view" data-view="${esc(VENDOR_LIST + r.v)}">
+          <td><strong>${esc(r.v)}</strong>${COMPETITORS.includes(r.v) ? ' <span class="pill">PEO</span>' : ''}</td><td>${r.n}</td><td>${r.open}</td><td>${r.pipe ? money(r.pipe) : '—'}</td>
+          <td>${r.empN ? Math.round(r.emp / r.empN) : '—'}</td><td class="${r.renew ? 'cell-warn' : ''}">${r.renew || '—'}</td><td>${r.won || '—'}</td></tr>`).join('')}</tbody>
+      </table></div>` : '<div class="empty">Add current vendors on your accounts to build the scoreboard.</div>'}
+    </div>`;
+  }
+
+  // ----- verbs: act on a whole view or the rows you ticked -----
+  const ACCT_ACTIONS = { enroll: 'Enroll in a cadence', route: 'Add to a route', session: 'Start a call session', stage: 'Set stage', tag: 'Add a tag', list: 'Add to a hand-picked list', csv: 'Export accounts (CSV)', contacts: 'Export contacts for ZoomInfo / Apollo' };
+  function actionTargets() {
+    const sel = ui.acctSel || new Set();
+    const shown = filteredAccounts();
+    return sel.size ? shown.filter((a) => sel.has(a.id)) : shown;
+  }
+  const PEOPLE_PICK = { primary: 'Primary contact', all: 'Everyone active', decision: 'Decision makers', title: 'Title contains…' };
+  function pickPeople(a, who, text = '') {
+    const active = a.contacts.filter((c) => !c.status || c.status === 'Active');
+    if (who === 'all') return active;
+    if (who === 'decision') return active.filter((c) => /decision/i.test(c.role || '') || /owner|founder|ceo|cfo|coo|president|chief|vp|vice president/i.test(c.title || ''));
+    if (who === 'title') return active.filter((c) => text && (c.title || '').toLowerCase().includes(text.toLowerCase()));
+    const p = active.find((c) => c.primary) || active[0];
+    return p ? [p] : [];
+  }
+  function runAction(kind) {
+    const list = actionTargets();
+    if (!list.length) { toast('No accounts here'); return; }
+    const scope = ui.acctSel && ui.acctSel.size ? `${plural(list.length, 'selected account')}` : `${plural(list.length, 'account')} in this view`;
+    if (kind === 'csv') return accountsCsv(ui.viewId ? (resolveList(ui.viewId) || {}).name || 'accounts' : 'accounts', list);
+    if (kind === 'contacts') return contactsCsv(list);
+    if (kind === 'enroll') {
+      if (!state.cadences.length) { toast('Create a cadence first'); return; }
+      return openModal(`Enroll · ${scope}`, `
+        <div class="grid-2">
+          ${field('Cadence', `<select name="cad">${state.cadences.map((c) => opt(c.id, c.name, ui.cadenceId)).join('')}</select>`)}
+          ${field('Who', `<select name="who" id="en-who">${Object.entries(PEOPLE_PICK).map(([k, l]) => opt(k, l, 'primary')).join('')}</select>`)}
+          ${field('Title contains', '<input name="title" id="en-title" placeholder="e.g. HR, CFO">', 'en-title-f')}
+          ${field('Start', `<input name="start" type="date" value="${today()}">`)}
+        </div>
+        <label class="row small"><input type="checkbox" name="spread" checked style="width:auto"> Spread start dates, up to <input type="number" name="perDay" min="1" value="${Number(ui.enrollPerDay) || 8}" style="width:4.2rem;display:inline-block"> new people a workday</label>
+        <div class="small" id="en-count"></div>`, (data) => {
+        const cad = cadenceById(data.cad);
+        const inCad = new Set(state.enrollments.filter((e) => e.cadenceId === cad.id && e.status !== 'finished').map((e) => e.contactId));
+        const picks = list.flatMap((a) => pickPeople(a, data.who, data.title).filter((c) => !inCad.has(c.id)).map((c) => ({ a, c })));
+        if (!picks.length) { toast('Nobody new to enroll'); return false; }
+        const perDay = Math.max(1, Number(data.perDay) || 8);
+        const dated = data.spread && picks.length > perDay ? staggerStarts(picks, data.start || today(), perDay) : picks.map((x) => ({ ...x, date: data.start || today() }));
+        for (const x of dated) enroll(cad, x.a, x.c, x.date);
+        toast(`${plural(dated.length, 'person', 'people')} enrolled in ${cad.name}${dated[dated.length - 1].date !== dated[0].date ? ` · spread to ${fmtDate(dated[dated.length - 1].date, { weekday: 'short', month: 'short', day: 'numeric' })}` : ''}`);
+      }, 'Enroll', { wide: true });
+    }
+    if (kind === 'route') {
+      return openModal(`Add to a route · ${scope}`, field('Day', `<input name="d" type="date" value="${today()}">`), (data) => {
+        const d = data.d || today();
+        const r = getRoute(d);
+        const withAddr = list.filter((a) => geoQuery(a));
+        const ids = withAddr.map((a) => a.id).filter((id) => !r.extra.includes(id));
+        setRoute(d, { extra: [...r.extra, ...ids], removed: r.removed.filter((x) => !ids.includes(x)) });
+        toast(`${plural(ids.length, 'stop')} added to the ${fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' })} route${list.length - withAddr.length ? ` · ${list.length - withAddr.length} without an address` : ''}`);
+      }, 'Add stops');
+    }
+    if (kind === 'session') {
+      const ids = new Set(list.map((a) => a.id));
+      const due = sessionCandidates({ type: 'all', cadenceId: 'all', stepNo: '' }).filter((p) => ids.has(p.acct.id));
+      if (!due.length) { toast('None of these accounts has a cadence step due'); return; }
+      session = { filter: { type: 'all', cadenceId: 'all', stepNo: '' }, queue: due.map((p) => p.e.id), idx: 0, results: [], startedAt: new Date().toISOString() };
+      saveSession(); return go('session');
+    }
+    if (kind === 'stage') {
+      const types = [...new Set(list.map((a) => a.type))];
+      if (types.length > 1) { toast('Pick only prospects or only partners to set a stage'); return; }
+      return openModal(`Set stage · ${scope}`, field('Stage', `<select name="stage">${STAGES[types[0]].map((s) => opt(s, s, list[0].stage)).join('')}</select>`), (data) => {
+        let n = 0;
+        for (const a of list) if (a.stage !== data.stage) { logStageChange(a, a.stage, data.stage); a.stage = data.stage; touch(a); n++; }
+        toast(`${plural(n, 'account')} moved to ${data.stage}`);
+      }, 'Set stage');
+    }
+    if (kind === 'tag') {
+      const tag = (prompt(`Tag to add to ${scope}:`) || '').trim().replace(/^#/, '');
+      if (!tag) return;
+      for (const a of list) if (!tagList(a).some((x) => x.toLowerCase() === tag.toLowerCase())) { a.tags = [...tagList(a), tag].join(', '); touch(a); }
+      save(); rerender(); return toast(`#${tag} added to ${plural(list.length, 'account')}`);
+    }
+    if (kind === 'list') return addToListForm(list);
+    return undefined;
+  }
+
+  function addToListForm(list) {
+    const statics = state.lists.filter((l) => l.kind === 'static');
+    openModal(`Add ${plural(list.length, 'account')} to a list`, `
+      <p class="small muted" style="margin:0">Hand-picked lists hold exactly the accounts you put in them, e.g. "Brokers Brew members" or "Q1 gift drop".</p>
+      ${field('List', `<select name="lid" id="al-lid">${statics.map((l) => opt(l.id, l.name, statics[0] && statics[0].id)).join('')}<option value="__new" ${statics.length ? '' : 'selected'}>+ New hand-picked list…</option></select>`)}
+      ${field('New list name', '<input name="name" id="al-name" placeholder="e.g. Brokers Brew members">', 'al-name-f')}`, (data) => {
+      let l = statics.find((x) => x.id === data.lid);
+      if (!l) {
+        if (!data.name.trim()) { toast('Name the new list'); return false; }
+        l = { id: uid(), name: data.name.trim(), kind: 'static', ids: [], criteria: emptyCriteria() };
+        state.lists.push(l);
+      }
+      const before = l.ids.length;
+      l.ids = [...new Set([...l.ids, ...list.map((a) => a.id)])];
+      toast(`${plural(l.ids.length - before, 'account')} added to ${l.name}`);
+    }, 'Add');
+    const sync = () => { $('#al-name').closest('.field').hidden = $('#al-lid').value !== '__new'; };
+    $('#al-lid').addEventListener('change', sync); sync();
+  }
+
+  function contactsCsv(list) {
+    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [['First Name', 'Last Name', 'Title', 'Email', 'Phone', 'Mobile', 'Person LinkedIn URL', 'Company', 'Website', 'City', 'State', 'Employees', 'Industry']];
+    for (const a of list) for (const c of a.contacts.filter((x) => !x.status || x.status === 'Active')) {
+      const [first, ...rest] = (c.name || '').split(/\s+/);
+      const [city, st] = (a.location || '').split(',').map((x) => x.trim());
+      rows.push([first, rest.join(' '), c.title, c.email, c.phone, c.mobile, c.linkedin, a.name, a.website, city, st, a.employees, a.industry]);
+    }
+    downloadFile(`contacts-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
+  }
+
   function renderAccounts() {
+    trackViews();
+    if (ui.viewId && ui.viewId !== 'scoreboard' && !resolveList(ui.viewId)) ui.viewId = null;
+    const view = ui.viewId && ui.viewId !== 'scoreboard' ? resolveList(ui.viewId) : null;
     const list = filteredAccounts();
+    const sel = ui.acctSel || (ui.acctSel = new Set());
+    for (const id of [...sel]) if (!getAccount(id)) sel.delete(id);
+    const vendorCounts = new Map();
+    for (const a of state.accounts) for (const v of a.vendors) if (v !== NO_VENDOR) vendorCounts.set(v, (vendorCounts.get(v) || 0) + 1);
+    const vendors = [...vendorCounts].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));
+    const tab = (id, label, n, extra = '') => `<button type="button" class="q-tab ${ui.viewId === id || (!ui.viewId && id === null) ? 'active' : ''}" data-act="acct-view" data-view="${id === null ? '' : esc(id)}">${esc(label)} <span>${n}</span>${extra}</button>`;
+    const c = view ? { ...emptyCriteria(), ...view.criteria } : null;
 
     $('#view').innerHTML = `
       <div class="page-head">
-        <div class="row" style="gap:.85rem"><h1>Accounts <span class="muted small">(${list.length})</span></h1>${peopleSwitch('accounts')}</div>
+        <div>
+          <div class="row" style="gap:.85rem"><h1>Accounts <span class="muted small">(${ui.viewId === 'scoreboard' ? state.accounts.length : list.length})</span></h1>${peopleSwitch('accounts')}</div>
+          <div class="muted small">Saved views live here (they replace the old Lists page). Change stage, value or follow-up right in the table.</div>
+        </div>
         <div class="row">${viewSwitcher()}<button class="btn ghost" data-act="import-csv" title="Import accounts and contacts from a ZoomInfo or spreadsheet CSV">Import</button><button class="btn ghost" data-act="accounts-csv" title="Export the accounts shown">Export CSV</button><button class="btn" data-act="new-account">+ New account</button></div>
       </div>
+      <div class="view-tabs">
+        ${tab(null, 'All', state.accounts.length)}
+        ${state.lists.map((l) => { const d = deltaText(l); return tab(l.id, `${l.pinned ? '★ ' : ''}${l.name}`, state.accounts.filter((a) => listHas(l, a)).length, d ? ` <em class="view-delta">${d}</em>` : ''); }).join('')}
+        ${vendors.length ? `<select id="vendor-view" class="view-select ${ui.viewId && ui.viewId.startsWith(VENDOR_LIST) ? 'on' : ''}" aria-label="Vendor views"><option value="">By vendor…</option>${vendors.map(([v, n]) => `<option value="${esc(VENDOR_LIST + v)}" ${ui.viewId === VENDOR_LIST + v ? 'selected' : ''}>${esc(v)} (${n})</option>`).join('')}</select>` : ''}
+        ${tab('scoreboard', 'Vendor scoreboard', vendors.length)}
+        <button type="button" class="btn ghost sm" data-act="save-view">+ Save view</button>
+      </div>
+      ${ui.viewId === 'scoreboard' ? vendorScoreboard() : `
+      ${view ? `<div class="view-bar">
+        <div class="grow"><b>${esc(view.name)}</b> ${view.kind === 'static' ? '<span class="pill">Hand-picked</span>' : criteriaSummary(c).map((x) => `<span class="pill wrap">${esc(x)}</span>`).join(' ')}
+          ${view.builtIn ? '' : (() => { const d = viewDelta(view); return `<span class="small muted"> · ${d.plus || d.minus ? `${d.plus ? `+${d.plus}` : ''}${d.plus && d.minus ? ', ' : ''}${d.minus ? `−${d.minus}` : ''} this week` : 'no change this week'}${newInView(view).size ? ` · <b>${newInView(view).size} new since you last opened it</b>` : ''}</span>`; })()}</div>
+        ${view.builtIn ? '' : `<button type="button" class="btn ghost sm" data-act="pin-view" data-lid="${view.id}">${view.pinned ? '★ Pinned' : '☆ Pin to Overview'}</button>
+        <button type="button" class="btn ghost sm" data-act="edit-list" data-lid="${view.id}">Edit</button>
+        <button type="button" class="btn ghost sm danger" data-act="del-list" data-lid="${view.id}">Delete</button>`}
+      </div>` : ''}
       <div class="filters">
         <input type="search" id="acct-search" placeholder="Search name, contacts, vendors, tags, notes…" value="${esc(ui.search)}">
         <select id="acct-type" aria-label="Type">
@@ -2645,7 +2936,7 @@
         </select>
         <select id="acct-stage" aria-label="Stage">
           <option value="all">All stages</option>
-          ${(ui.typeFilter === 'all' ? ['prospect', 'partner'] : [ui.typeFilter]).map((t) => `<optgroup label="${t === 'partner' ? 'Partner (channel) stages' : 'Prospect (deal) stages'}">${STAGES[t].map((x) => `<option value="${esc(x)}" ${ui.stageFilter === x ? 'selected' : ''} title="${esc(STAGE_HINTS[x] || '')}">${esc(x)}</option>`).join('')}</optgroup>`).join('')}
+          ${(ui.typeFilter === 'all' ? ['prospect', 'partner'] : [ui.typeFilter]).map((ty) => `<optgroup label="${ty === 'partner' ? 'Partner (channel) stages' : 'Prospect (deal) stages'}">${STAGES[ty].map((x) => `<option value="${esc(x)}" ${ui.stageFilter === x ? 'selected' : ''} title="${esc(STAGE_HINTS[x] || '')}">${esc(x)}</option>`).join('')}</optgroup>`).join('')}
         </select>
         ${ui.typeFilter !== 'prospect' ? `<select id="acct-ptype" aria-label="Partner type">
           <option value="all">All partner types</option>
@@ -2659,8 +2950,16 @@
           ${Object.entries(SORT_LABELS).map(([k, l]) => `<option value="${k}" ${ui.sort === k ? 'selected' : ''}>Sort: ${l}</option>`).join('')}
         </select>
       </div>
-      ${accountCollection(list, state.accounts.length ? 'No accounts match these filters.' : 'No accounts yet. Click "+ New account" to add one.')}`;
+      <div class="act-bar ${sel.size ? 'on' : ''}">
+        <span class="small"><b>${sel.size ? `${sel.size} selected` : `${list.length} shown`}</b>${sel.size ? ' · <button type="button" class="link-btn small" data-act="acct-clear">Clear</button>' : ''}</span>
+        ${['enroll', 'session', 'route', 'stage', 'tag', 'list'].map((k) => `<button type="button" class="btn ghost sm" data-act="acct-action" data-kind="${k}">${esc(ACCT_ACTIONS[k])}</button>`).join('')}
+        <select id="acct-export" class="view-select" aria-label="Export"><option value="">Export…</option><option value="csv">${ACCT_ACTIONS.csv}</option><option value="contacts">${ACCT_ACTIONS.contacts}</option></select>
+      </div>
+      ${accountCollection(list, view ? (view.kind === 'static' ? 'Nothing in this list yet. Tick accounts and use "Add to a hand-picked list".' : 'No accounts match this view yet.') : state.accounts.length ? 'No accounts match these filters.' : 'No accounts yet. Click "+ New account" to add one.')}`}`;
 
+    const vv = $('#vendor-view');
+    if (vv) vv.addEventListener('change', (e) => { if (e.target.value) openView(e.target.value); else ui.viewId = null; renderAccounts(); });
+    if (ui.viewId === 'scoreboard') return;
     $('#acct-search').addEventListener('input', (e) => {
       ui.search = e.target.value;
       clearTimeout(ui.searchTimer);
@@ -2677,7 +2976,21 @@
     $('#acct-vendor').addEventListener('change', (e) => { ui.vendorFilter = e.target.value; renderAccounts(); });
     const ptSel = $('#acct-ptype');
     if (ptSel) ptSel.addEventListener('change', (e) => { ui.partnerTypeFilter = e.target.value; renderAccounts(); });
+    $('#acct-export').addEventListener('change', (e) => { const k = e.target.value; e.target.value = ''; if (k) runAction(k); });
     bindCollection();
+    $$('.row-pick').forEach((cb) => cb.addEventListener('change', () => {
+      if (cb.id === 'pick-all') { if (cb.checked) list.forEach((a) => sel.add(a.id)); else list.forEach((a) => sel.delete(a.id)); }
+      else if (cb.checked) sel.add(cb.dataset.id); else sel.delete(cb.dataset.id);
+      renderAccounts();
+    }));
+    $$('.cell-edit').forEach((el) => el.addEventListener('change', () => inlineEdit(el)));
+  }
+
+  /** Pinned views as counts on the Overview. */
+  function pinnedViewsStrip() {
+    const pins = state.lists.filter((l) => l.pinned).slice(0, 3);
+    if (!pins.length) return '';
+    return `<div class="pin-strip">${pins.map((l) => { const d = deltaText(l); return `<button type="button" class="pin-chip" data-act="acct-view" data-view="${esc(l.id)}"><span>${esc(l.name)}</span><b>${state.accounts.filter((a) => listHas(l, a)).length}</b>${d ? `<em>${d} this week</em>` : ''}</button>`; }).join('')}</div>`;
   }
 
   function renderAccountRecord() {
@@ -2718,6 +3031,7 @@
             <button class="btn" data-act="log" data-id="${a.id}">+ Log activity</button>
             <button class="btn ghost" data-act="new-task" data-id="${a.id}">+ Plan task</button>
             ${researchMenu(a)}
+            <button class="btn ghost" data-act="acct-addlist" data-id="${a.id}" title="Add to a hand-picked list">+ List</button>
             <button class="btn ghost" data-act="edit-account" data-id="${a.id}">Edit</button>
           </div>
         </div>
@@ -3082,9 +3396,24 @@
   // Saved lists are filters: an account matches when it meets every filled-in section and any
   // value ticked within a section. Built-in "vendor:<name>" lists group accounts by current vendor.
   const VENDOR_LIST = 'vendor:';
-  const emptyCriteria = () => ({ type: 'all', stages: [], tags: [], vendors: [], partnerTypes: [], text: '', renewalDays: 0 });
+  const emptyCriteria = () => ({ type: 'all', stages: [], tags: [], vendors: [], partnerTypes: [], text: '', renewalDays: 0,
+    empMin: 0, empMax: 0, place: '', industry: '', touchOlder: 0, noNext: false, noCadence: false, stageDays: 0, valueMin: 0, valueMax: 0, tiers: [] });
+  /** Is an account in a list? Hand-picked lists hold ids; the rest are filters. */
+  const listHas = (l, a) => (l.kind === 'static' ? (l.ids || []).includes(a.id) : matchesCriteria(a, { ...emptyCriteria(), ...l.criteria }));
 
   function matchesCriteria(a, c) {
+    const emp = Number(a.employees) || 0;
+    if (c.empMin && emp < c.empMin) return false;
+    if (c.empMax && (!emp || emp > c.empMax)) return false;
+    if (c.place && !`${a.location || ''} ${a.address || ''}`.toLowerCase().includes(c.place.toLowerCase())) return false;
+    if (c.industry && !(a.industry || '').toLowerCase().includes(c.industry.toLowerCase())) return false;
+    if (c.touchOlder) { const d = lastTouchDate(a); if (d && daysBetween(d, today()) < c.touchOlder) return false; }
+    if (c.noNext && nextStepOf(a)) return false;
+    if (c.noCadence && inCadence(a)) return false;
+    if (c.stageDays && daysInStage(a) < c.stageDays) return false;
+    if (c.valueMin && (Number(a.value) || 0) < c.valueMin) return false;
+    if (c.valueMax && (Number(a.value) || 0) > c.valueMax) return false;
+    if (c.tiers && c.tiers.length && !(a.type === 'partner' && c.tiers.includes(partnerTier(a)))) return false;
     if (c.type !== 'all' && a.type !== c.type) return false;
     if (c.stages.length && !c.stages.includes(a.stage)) return false;
     if (c.tags.length && !tagList(a).some((t) => c.tags.includes(t.toLowerCase()))) return false;
@@ -3107,7 +3436,7 @@
     return state.lists.find((l) => l.id === id) || null;
   }
 
-  const listAccounts = (list) => sortAccounts(state.accounts.filter((a) => matchesCriteria(a, { ...emptyCriteria(), ...list.criteria })));
+  const listAccounts = (list) => sortAccounts(state.accounts.filter((a) => listHas(list, a)));
 
   function criteriaSummary(c) {
     const parts = [];
@@ -3120,86 +3449,66 @@
     if (c.partnerTypes.length) parts.push('Partner type: ' + c.partnerTypes.join(' or '));
     if (c.text) parts.push(`Contains "${c.text}"`);
     if (c.renewalDays) parts.push(`Vendor renewal within ${c.renewalDays} days`);
+    if (c.empMin || c.empMax) parts.push(c.empMin && c.empMax ? `${c.empMin}–${c.empMax} employees` : c.empMin ? `${c.empMin}+ employees` : `Up to ${c.empMax} employees`);
+    if (c.place) parts.push(`In ${c.place}`);
+    if (c.industry) parts.push(`Industry: ${c.industry}`);
+    if (c.valueMin || c.valueMax) parts.push(c.valueMin && c.valueMax ? `Value ${money(c.valueMin)}–${money(c.valueMax)}` : c.valueMin ? `Value ${money(c.valueMin)}+` : `Value up to ${money(c.valueMax)}`);
+    if (c.touchOlder) parts.push(`No touch in ${c.touchOlder}+ days`);
+    if (c.stageDays) parts.push(`${c.stageDays}+ days in stage`);
+    if (c.noNext) parts.push('No next step');
+    if (c.noCadence) parts.push('Not in a cadence');
+    if (c.tiers && c.tiers.length) parts.push('Partner tier ' + c.tiers.join(' or '));
     return parts.length ? parts : ['All accounts'];
   }
 
+  /** Lists live on the Accounts page as saved views; old #lists links land there. */
   function renderLists() {
-    const vendorCounts = new Map();
-    for (const a of state.accounts) for (const v of a.vendors) vendorCounts.set(v, (vendorCounts.get(v) || 0) + 1);
-    const vendorGroups = [...vendorCounts].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));
-    if (!resolveList(ui.listId)) ui.listId = state.lists[0] ? state.lists[0].id : vendorGroups[0] ? VENDOR_LIST + vendorGroups[0][0] : null;
-    const current = resolveList(ui.listId);
-    const item = (id, name, count, sub = '') => `
-      <button class="acct-item ${id === ui.listId ? 'active' : ''}" data-act="open-list" data-lid="${esc(id)}">
-        <div class="row spread"><span class="name">${esc(name)}</span><span class="pill">${count}</span></div>
-        ${sub ? `<div class="meta">${esc(sub)}</div>` : ''}
-      </button>`;
-
-    $('#view').innerHTML = `
-      <div class="lists-layout">
-        <div class="card">
-          <div class="row spread" style="margin-bottom:.5rem">
-            <h2 style="margin:0">My lists</h2>
-            <button class="btn sm" data-act="new-list">+ New list</button>
-          </div>
-          <div class="acct-list" style="max-height:none">
-            ${state.lists.length
-              ? state.lists.map((l) => item(l.id, l.name, listAccounts(l).length, criteriaSummary({ ...emptyCriteria(), ...l.criteria }).join(' · '))).join('')
-              : '<div class="empty">Create a list from tags, vendors, stages or type, e.g. "Prospects on ADP TotalSource".</div>'}
-          </div>
-          <h3 style="margin-top:1rem">By current vendor</h3>
-          <div class="acct-list" style="max-height:none">
-            ${vendorGroups.length
-              ? vendorGroups.map(([v, n]) => item(VENDOR_LIST + v, v, n)).join('')
-              : '<div class="empty">Add current vendors on your accounts to group them here.</div>'}
-          </div>
-        </div>
-        <div>${current ? listDetail(current) : '<div class="card empty">Create a list, or pick a vendor group.</div>'}</div>
-      </div>`;
-    const sortSel = $('#list-sort');
-    if (sortSel) sortSel.addEventListener('change', (e) => { ui.sort = e.target.value; ui.sortDir = 1; renderLists(); });
-    bindCollection();
-  }
-
-  function listDetail(list) {
-    const rows = listAccounts(list);
-    const c = { ...emptyCriteria(), ...list.criteria };
-    return `
-      <div class="card stack list-head">
-        <div class="detail-head">
-          <div>
-            <h1 style="margin:0">${esc(list.name)} <span class="muted small">(${rows.length})</span></h1>
-            <div class="row" style="margin-top:.4rem">${criteriaSummary(c).map((x) => `<span class="pill wrap">${esc(x)}</span>`).join('')}</div>
-          </div>
-          <div class="row">
-            <button class="btn ghost" data-act="list-csv">Export CSV</button>
-            ${list.builtIn ? '' : `
-              <button class="btn ghost" data-act="edit-list" data-lid="${list.id}">Edit</button>
-              <button class="btn danger" data-act="del-list" data-lid="${list.id}">Delete</button>`}
-          </div>
-        </div>
-        <div class="row spread">${viewSwitcher()}
-          <select id="list-sort" aria-label="Sort">${Object.entries(SORT_LABELS).map(([k, l]) => `<option value="${k}" ${ui.sort === k ? 'selected' : ''}>Sort: ${l}</option>`).join('')}</select>
-        </div>
-      </div>
-      <div class="list-results">${accountCollection(rows, 'No accounts match this list yet.')}</div>`;
+    const id = ui.listId || (state.lists[0] || {}).id;
+    if (id) openView(id);
+    ui.listId = null;
+    go('accounts');
   }
 
   const readCriteria = (fd) => ({
     type: fd.get('type') || 'all', vendors: fd.getAll('vendors'), tags: fd.getAll('tags'),
     stages: fd.getAll('stages'), partnerTypes: fd.getAll('partnerTypes'), text: (fd.get('text') || '').trim(), renewalDays: Number(fd.get('renewalDays')) || 0,
+    empMin: Number(fd.get('empMin')) || 0, empMax: Number(fd.get('empMax')) || 0, place: (fd.get('place') || '').trim(), industry: (fd.get('industry') || '').trim(),
+    touchOlder: Number(fd.get('touchOlder')) || 0, noNext: !!fd.get('noNext'), noCadence: !!fd.get('noCadence'), stageDays: Number(fd.get('stageDays')) || 0,
+    valueMin: Number(fd.get('valueMin')) || 0, valueMax: Number(fd.get('valueMax')) || 0, tiers: fd.getAll('tiers'),
   });
+  /** Today's Accounts filters as view criteria, for "+ Save view". */
+  const criteriaFromFilters = () => ({ ...emptyCriteria(), type: ui.typeFilter || 'all', stages: ui.stageFilter && ui.stageFilter !== 'all' ? [ui.stageFilter] : [],
+    vendors: ui.vendorFilter && ui.vendorFilter !== 'all' ? [ui.vendorFilter] : [], partnerTypes: ui.partnerTypeFilter && ui.partnerTypeFilter !== 'all' ? [ui.partnerTypeFilter] : [], text: (ui.search || '').trim() });
 
-  function listForm(existing) {
-    const l = existing || { name: '', criteria: emptyCriteria() };
+  function listForm(existing, preset) {
+    const l = existing || { name: '', criteria: preset || emptyCriteria() };
     const c = { ...emptyCriteria(), ...l.criteria };
     const checks = (name, values, chosen, label = (v) => v) => values.length
       ? `<div class="check-grid">${values.map((v) => `<label><input type="checkbox" name="${name}" value="${esc(v)}" ${chosen.includes(v) ? 'checked' : ''}> ${esc(label(v))}</label>`).join('')}</div>`
       : '<div class="small muted">None in use yet. Add tags on your accounts.</div>';
-    openModal(existing ? 'Edit list' : 'New list', `
-      ${field('List name *', `<input name="name" required value="${esc(l.name)}" placeholder="e.g. Prospects on ADP TotalSource">`)}
+    const num = (name, label, ph, step = 1) => field(label, `<input name="${name}" type="number" min="0" step="${step}" value="${c[name] || ''}" placeholder="${ph}">`);
+    openModal(existing ? 'Edit view' : 'Save view', `
+      <div class="grid-2">
+        ${field('View name *', `<input name="name" required value="${esc(l.name)}" placeholder="e.g. Insperity renewals, 20–150 employees, OC">`)}
+        ${field('Kind', `<select name="kind" id="lf-kind">${opt('filter', 'Filter: updates itself', l.kind === 'static' ? '' : 'filter')}${opt('static', 'Hand-picked: you add accounts', l.kind === 'static' ? 'static' : '')}</select>`)}
+      </div>
+      <label class="row small"><input type="checkbox" name="pinned" style="width:auto" ${l.pinned ? 'checked' : ''}> Pin to the Overview (up to 3 show as counts)</label>
+      <div id="lf-static" class="small muted">${l.kind === 'static' ? `${plural((l.ids || []).length, 'account')} in this list. Add more by ticking rows on Accounts and choosing "Add to a hand-picked list", or from an account's page.` : 'Tick rows on Accounts and choose "Add to a hand-picked list", or use + List on an account page.'}</div>
+      <div id="lf-filter" class="stack">
       <p class="small muted" style="margin:0">Accounts are included when they match <strong>every</strong> section you fill in,
-        and <strong>any</strong> box ticked within a section. Leave a section empty to ignore it. Lists update automatically.</p>
+        and <strong>any</strong> box ticked within a section. Leave a section empty to ignore it. Views update automatically.</p>
+      <div class="grid-3">
+        ${num('empMin', 'Employees from', 'e.g. 20')}
+        ${num('empMax', 'Employees up to', 'e.g. 150')}
+        ${field('City, county or area contains', `<input name="place" value="${esc(c.place || '')}" placeholder="e.g. Irvine, Orange County">`)}
+        ${field('Industry contains', `<input name="industry" value="${esc(c.industry || '')}" placeholder="e.g. Manufacturing">`)}
+        ${num('valueMin', 'Value at least', '$', 1000)}
+        ${num('valueMax', 'Value at most', '$', 1000)}
+        ${num('touchOlder', 'No touch in (days)', 'e.g. 30')}
+        ${num('stageDays', 'Days in stage, at least', 'e.g. 21')}
+        <div class="field"><span>Gaps</span><label class="row small"><input type="checkbox" name="noNext" style="width:auto" ${c.noNext ? 'checked' : ''}> No next step</label><label class="row small"><input type="checkbox" name="noCadence" style="width:auto" ${c.noCadence ? 'checked' : ''}> Not in a cadence</label></div>
+      </div>
+      <div class="field"><span>Partner tier is any of</span>${checks('tiers', ['A', 'B', 'C'], c.tiers || [], (t) => `${t} · ${TIERS[t].name}`)}</div>
       ${field('Account type', `<select name="type">${opt('all', 'Partners & prospects', c.type)}${opt('prospect', 'Prospects only', c.type)}${opt('partner', 'Partners only', c.type)}</select>`)}
       <div class="field"><span>Current vendor is any of</span>${checks('vendors', allVendors(), c.vendors)}</div>
       <div class="field"><span>Tagged with any of</span>${checks('tags', [...new Set([...allTags(), ...PARTNER_TAGS.map((t) => t.toLowerCase())])].sort(), c.tags, (t) => '#' + (PARTNER_TAGS.find((x) => x.toLowerCase() === t) || t))}</div>
@@ -3210,21 +3519,27 @@
         ${field('Name, contacts or notes contain', `<input name="text" value="${esc(c.text)}">`)}
         ${field('Vendor renewal within (days)', `<input name="renewalDays" type="number" min="0" step="15" value="${c.renewalDays || ''}" placeholder="e.g. 120">`)}
       </div>
+      </div>
       <div class="small" id="list-preview"></div>`, (data, fd) => {
       if (!data.name.trim()) return false;
       const criteria = readCriteria(fd);
-      if (existing) Object.assign(existing, { name: data.name.trim(), criteria });
+      const fields = { name: data.name.trim(), criteria, kind: data.kind === 'static' ? 'static' : 'filter', pinned: !!data.pinned };
+      if (fields.kind === 'static') fields.ids = (existing && existing.ids) || [];
+      if (fields.pinned && state.lists.filter((x) => x.pinned && x !== existing).length >= 3) { toast('Up to 3 pinned views; unpin one first'); fields.pinned = false; }
+      if (existing) Object.assign(existing, fields);
       else {
-        const created = { id: uid(), name: data.name.trim(), criteria };
+        const created = { id: uid(), ...fields };
         state.lists.push(created);
-        ui.listId = created.id;
-        location.hash = `lists/${created.id}`;
+        openView(created.id);
+        if (location.hash !== '#accounts') setTimeout(() => go('accounts'), 0);
       }
-      toast(existing ? 'List updated' : 'List created');
-    });
+      toast(existing ? 'View updated' : 'View saved');
+    }, existing ? 'Save view' : 'Save view', { wide: true });
     const preview = () => {
-      const n = state.accounts.filter((a) => matchesCriteria(a, readCriteria(new FormData(modalForm)))).length;
-      $('#list-preview').innerHTML = `Currently matches <strong>${n}</strong> account${n === 1 ? '' : 's'}.`;
+      const isStatic = $('#lf-kind').value === 'static';
+      $('#lf-filter').hidden = isStatic; $('#lf-static').hidden = !isStatic;
+      const n = isStatic ? (l.ids || []).length : state.accounts.filter((a) => matchesCriteria(a, readCriteria(new FormData(modalForm)))).length;
+      $('#list-preview').innerHTML = `Currently ${isStatic ? 'holds' : 'matches'} <strong>${n}</strong> account${n === 1 ? '' : 's'}.`;
     };
     modalForm.oninput = preview;
     preview();
@@ -4821,10 +5136,25 @@
   }
 
   /** Work out what an import would do (dry run) or do it, without overwriting anything already filled in. */
+  const CO_SUFFIX = /\b(llc|inc|incorporated|corp|corporation|co|company|ltd|limited|pc|pllc|lp|llp|plc|the)\b/g;
+  /** "Acme Dental, Inc." and "ACME DENTAL LLC" → "acme dental". */
+  const companyKey = (n) => (n || '').toLowerCase().replace(/&/g, ' and ').replace(/[.,'’()"]/g, ' ').replace(CO_SUFFIX, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+  const domainOf = (u) => (u || '').toLowerCase().trim().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#\s]/)[0];
+  /** An existing account for an imported company: same website domain first, then same name, then a normalized name. */
+  function matchExisting(name, website) {
+    const dom = domainOf(website);
+    if (dom && dom.includes('.')) { const a = state.accounts.find((x) => domainOf(x.website) === dom); if (a) return { a, how: 'website' }; }
+    const exact = findAccountByName(name);
+    if (exact) return { a: exact, how: 'name' };
+    const k = companyKey(name);
+    if (k) { const a = state.accounts.find((x) => companyKey(x.name) === k); if (a) return { a, how: 'similar name' }; }
+    return null;
+  }
+
   function applyImport(records, opts, commit) {
     const now = new Date().toISOString();
     const made = new Map(); // lower-case name -> new account (dry run keeps them here)
-    const stats = { newAccounts: 0, updatedAccounts: new Set(), newContacts: 0, skippedContacts: 0, newPartners: 0 };
+    const stats = { newAccounts: 0, updatedAccounts: new Set(), newContacts: 0, skippedContacts: 0, newPartners: 0, fuzzy: new Map() };
     const addContact = (a, c) => {
       const dup = a.contacts.find((x) => (c.email && x.email && x.email.toLowerCase() === c.email.toLowerCase()) || x.name.toLowerCase() === c.name.toLowerCase());
       if (dup) { stats.skippedContacts++; return dup; }
@@ -4833,23 +5163,29 @@
       if (commit) a.contacts.push(contact); else a.contacts = [...a.contacts, contact];
       return contact;
     };
-    const findOrCreate = (name, type, stage, source) => {
+    const findOrCreate = (name, type, stage, source, website = '') => {
       const key = name.toLowerCase();
-      let a = findAccountByName(name) || made.get(key);
+      let a = made.get(key) || made.get('n:' + companyKey(name));
+      if (!a) {
+        const m = opts.dupes === 'create' ? (findAccountByName(name) ? { a: findAccountByName(name), how: 'name' } : null) : matchExisting(name, website);
+        if (m && m.how !== 'name' && !stats.fuzzy.has(name)) stats.fuzzy.set(name, { to: m.a.name, how: m.how });
+        if (m) a = m.a;
+      }
       if (a) return { a, created: false };
       a = migrateAccount({
         id: uid(), name, type, stage, tags: opts.tag, notes: '', vendors: [],
         contacts: [], activities: [], keyDates: [], leadSource: source, createdAt: now, updatedAt: now,
       });
       made.set(key, a);
+      if (companyKey(name)) made.set('n:' + companyKey(name), a);
       if (commit) state.accounts.push(a);
       return { a, created: true };
     };
     for (const r of records) {
       const stage = stageFromText(opts.type, r.stage) || STAGES[opts.type][0];
-      const { a, created } = findOrCreate(r.company, opts.type, stage, r.leadSource || opts.source);
+      const { a, created } = findOrCreate(r.company, opts.type, stage, r.leadSource || opts.source, r.website);
       if (created) stats.newAccounts++;
-      else if (!made.has(r.company.toLowerCase())) stats.updatedAccounts.add(a.id); // already in the CRM
+      else if (![...made.values()].includes(a)) stats.updatedAccounts.add(a.id); // already in the CRM
       const fill = {
         website: r.website, industry: r.industry, employees: r.employees, location: r.location, address: r.address, mainPhone: r.mainPhone,
         linkedin: r.companyLinkedin, value: r.value, adminFees: r.adminFees, closeDate: r.closeDate, leadSource: r.leadSource,
@@ -4890,7 +5226,7 @@
     const preview = () => {
       const saved = state.accounts;
       state.accounts = saved.map((a) => ({ ...a, contacts: [...a.contacts] }));
-      try { return applyImport(records, { type: 'prospect', tag: '', source: '' }, false); } finally { state.accounts = saved; }
+      try { return applyImport(records, { type: 'prospect', tag: '', source: '', dupes: 'merge' }, false); } finally { state.accounts = saved; }
     };
     const s = preview();
     const found = Object.keys(col).filter((k) => !['first', 'last', 'city', 'state', 'zip'].includes(k))
@@ -4910,13 +5246,18 @@
         <div><b>${s.skippedContacts}</b><span>duplicates skipped</span></div>
       </div>
       <p class="small muted" style="margin:0">From <strong>${esc(fileName)}</strong> (${records.length} rows). Columns recognized: ${[...new Set(found)].map((f) => `<span class="pill">${esc(f)}</span>`).join(' ')}</p>
-      <p class="small muted" style="margin:0">Existing accounts are matched by name. Only empty fields are filled in, and contacts already on an account (same email or name) are skipped.</p>
+      ${s.fuzzy.size ? `<div class="dup-review">
+        <b>${plural(s.fuzzy.size, 'company', 'companies')} look${s.fuzzy.size === 1 ? 's' : ''} like account${s.fuzzy.size === 1 ? '' : 's'} you already have</b> <span class="small muted">(matched on website or a similar name)</span>
+        <ul class="small">${[...s.fuzzy].slice(0, 8).map(([from, m]) => `<li>${esc(from)} → <b>${esc(m.to)}</b> <span class="muted">· ${esc(m.how)}</span></li>`).join('')}${s.fuzzy.size > 8 ? `<li class="muted">and ${s.fuzzy.size - 8} more</li>` : ''}</ul>
+        ${field('For these', `<select name="dupes">${opt('merge', 'Merge into the existing account', 'merge')}${opt('create', 'Create new accounts anyway', 'merge')}</select>`)}
+      </div>` : ''}
+      <p class="small muted" style="margin:0">Existing accounts are matched by website domain first, then by name (ignoring LLC, Inc. and punctuation). Only empty fields are filled in, and contacts already on an account (same email or name) are skipped.</p>
       <div class="grid-3">
         ${field('New accounts are', `<select name="type">${opt('prospect', 'Prospects', 'prospect')}${opt('partner', 'Partners', '')}</select>`)}
         ${field(col.leadSource !== undefined ? 'Lead source (rows without one)' : 'Lead source', `<select name="source"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, '')).join('')}</select>`)}
         ${field('Tag new accounts', `<input name="tag" value="${fromZoomInfo ? 'zoominfo' : 'import'}-${today().slice(5)}">`)}
       </div>`, (data) => {
-      const st2 = applyImport(records, { type: data.type, tag: data.tag.trim(), source: data.source }, true);
+      const st2 = applyImport(records, { type: data.type, tag: data.tag.trim(), source: data.source, dupes: data.dupes || 'merge' }, true);
       toast(`Imported: ${st2.newAccounts - st2.newPartners} new accounts${st2.newPartners ? `, ${st2.newPartners} partners` : ''}, ${st2.newContacts} contacts`);
       ui.typeFilter = 'all'; ui.stageFilter = 'all'; ui.vendorFilter = 'all'; ui.search = '';
       go('accounts');
@@ -6645,13 +6986,29 @@
         if (c.primary && acct.contacts[0]) acct.contacts[0].primary = true;
         touch(acct); save(); rerender(); return;
       }
-      case 'open-list': ui.listId = el.dataset.lid; return go(`lists/${encodeURIComponent(el.dataset.lid)}`);
+      case 'open-list': openView(el.dataset.lid); return go('accounts');
       case 'new-list': return listForm();
+      case 'save-view': return listForm(null, criteriaFromFilters());
+      case 'acct-view': {
+        const v = el.dataset.view || null;
+        if (v) openView(v); else { ui.viewId = null; ui.acctSel = new Set(); }
+        return location.hash === '#accounts' ? rerender() : go('accounts');
+      }
+      case 'pin-view': {
+        const l = state.lists.find((x) => x.id === el.dataset.lid);
+        if (!l) return;
+        if (!l.pinned && state.lists.filter((x) => x.pinned).length >= 3) { toast('Up to 3 pinned views; unpin one first'); return; }
+        l.pinned = !l.pinned; save(); rerender(); return toast(l.pinned ? `${l.name} pinned to the Overview` : 'Unpinned');
+      }
+      case 'acct-action': return runAction(el.dataset.kind);
+      case 'acct-clear': ui.acctSel = new Set(); return rerender();
+      case 'acct-cols': return columnsForm();
+      case 'acct-addlist': return addToListForm([acct]);
       case 'edit-list': return listForm(state.lists.find((l) => l.id === el.dataset.lid));
       case 'del-list': {
         const l = state.lists.find((x) => x.id === el.dataset.lid);
         if (!confirm(`Delete the list "${l.name}"? Accounts are not affected.`)) return;
-        state.lists = state.lists.filter((x) => x !== l); ui.listId = null; save(); go('lists'); return;
+        state.lists = state.lists.filter((x) => x !== l); ui.listId = null; ui.viewId = null; save(); rerender(); return;
       }
       case 'list-csv': return exportListCsv();
       case 'accounts-csv': return accountsCsv('accounts', filteredAccounts());

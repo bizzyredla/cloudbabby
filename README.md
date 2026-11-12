@@ -26,15 +26,15 @@ No install, no build step: open `index.html` in a browser.
   - **Last referral date:** type it, or it updates when you link an account to the partner
     ("Referred by partner"). A Producing partner with no referral in 6+ months is flagged "Dormant?"
   - **Ready-made tags:** tap to add EB-Small-Target / -Engaged / -Active, EB-Large-Target / -Engaged /
-    -Active, AgcyProd-EB-Cold / -Warm / -Active. Lists can filter on them before they're in use
+    -Active, AgcyProd-EB-Cold / -Warm / -Active. Saved views can filter on them before they're in use
   - All three are in CSV export and import ("Partner type", "Last touch", "Last referral")
   - Partner pages and forms leave out deal-only fields (expected close, admin fees, current
     vendors) and always show **Referred accounts**
 - **Stage changes do the follow-up:** moving a prospect to Revisit asks when to go back (14 / 30 /
   60 / 90 days or a date); moving any account to Closed Won, Closed Lost or Closed offers to stop
   its running cadences
-- Lists can also filter by partner type. Search matches partner type and stage, and a contact
-  result opens the account scrolled to that person
+- Saved views can also filter by partner type and tier. Search matches partner type and stage, and
+  a contact result opens the account scrolled to that person
 - **Multiple contacts** per account: name, title, email, phone, role in the deal (decision maker,
   champion, HR…), notes, and one marked primary. Activities can be logged against a contact
 - **Current vendors**: pick from a dropdown of the top 20 TriNet competitors (ADP TotalSource,
@@ -184,11 +184,34 @@ No install, no build step: open `index.html` in a browser.
   **vendor renewal date**, follow-up and revisit dates, tags, notes. Forms are grouped into
   compact sections, and secondary details fold away on the account page
 
-**Lists**
-- Saved lists that update automatically, built from account type, current vendors, tags, stages,
-  text and "vendor renewal within N days", e.g. "Prospects on ADP TotalSource" or "#enterprise partners"
-- Built-in "By current vendor" groups with counts
-- Export any list to CSV
+**Accounts table and saved views** (Lists now live here; old list links open the matching view)
+- **Columns you pick** (Columns, under the table): type, stage, value, employees, current vendor,
+  renewal, last touch, days in stage, next step, follow-up, location, plus primary contact, close,
+  revisit, industry, lead source and tags. Click any header to sort. Remembered on each device
+- **Staleness on every row**: last touch and days in stage (from the account's stage-change
+  history), and the next step (the soonest task, follow-up, revisit or cadence step). Red = no touch
+  in 30+ days, 21+ days in stage, or an open deal with no next step
+- **Inline edit**: change stage, value or next follow-up in the row without opening the account.
+  Stage changes are logged and run the usual follow-ups
+- **Saved views** as tabs across the top, each with a count and what changed this week
+  ("+4 −2"); rows that joined since you last opened a view are marked New. "+ Save view" starts
+  from your current filters. Vendor views sit under "By vendor…"
+  - **Filter views** update themselves: type, stage, vendor, tag, partner type and tier, text,
+    renewal window, employee range, city/county/area, industry, value range, no touch in N days,
+    N+ days in stage, no next step, not in a cadence. "Insperity, 20–150 employees, Irvine, renews
+    within 90 days" or "S3+, no next step" are one view each
+  - **Hand-picked lists** hold the accounts you put in them ("Brokers Brew members", "Q1 gift
+    drop"): tick rows and use "Add to a hand-picked list", or "+ List" on an account page
+  - **Pin** up to three views to the Overview, where they show as counts with this week's change
+- **Actions on a view or the rows you tick**: enroll in a cadence (primary contact, everyone,
+  decision makers, or titles containing a word; start dates can be spread over workdays), start a
+  call session for whatever is due, add to a day's route, set stage, add a tag, add to a
+  hand-picked list, and export accounts or a contacts file shaped for ZoomInfo / Apollo uploads
+- **Vendor scoreboard**: every incumbent with account count, open deals and pipeline, average
+  employees, renewals in the next 90 days and wins. Click one to open its accounts
+- **Import duplicate check**: companies are matched on website domain first, then name, then the
+  name without LLC / Inc. / punctuation. The import screen lists the likely duplicates ("Stale
+  Widgets Incorporated → Stale Widgets LLC · website") and lets you merge or create anyway
 
 **Everywhere**
 - Search accounts and contacts from any screen (🔍, or press `/` or Ctrl/⌘-K on a computer)
@@ -299,7 +322,7 @@ value first, then spends your time by tier
 - Light, modern theme: a cool light-grey background, white cards with hairline borders and soft
   shadows, and an emerald accent. Dark mode uses neutral charcoal (follows the device setting)
 - Each section has its own icon color (Overview indigo, Accounts blue, Contacts cyan, Partners
-  violet, Planner amber, Map green, Lists pink, Cadences orange)
+  violet, Planner amber, Map green, Cadences orange)
 - Desktop: a light sidebar with page counts (accounts, cadence steps due), sync status and
   settings. iPhone: a bottom tab bar with the same colored icons
 - Uses the device's built-in system font (San Francisco on iPhone/Mac, Segoe UI on Windows), so
