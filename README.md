@@ -179,8 +179,8 @@ No install, no build step: open `index.html` in a browser.
   steps and checked planner rows with that person. Next due = last contacted + the interval
 - **Log touch** records the activity and restarts the clock; **↻ Reset** restarts it from today
   without logging anything (for a text or a chance meeting)
-- Due contacts appear on the Overview's Stay in touch card and fill empty slots in the planner's
-  calls/emails/LinkedIn rows; checking one off logs the touch
+- Due contacts appear on the Overview's Stay in touch card and as rows in the planner's work
+  queue; checking one off logs the touch
 - Included in CSV export and import ("Stay in touch" column, primary contact)
 
 **Partners (your ecosystem)**: a light layer on partner accounts, not a separate PRM
@@ -224,14 +224,18 @@ No install, no build step: open `index.html` in a browser.
 - Desktop: sidebar item with a due count. iPhone: the Accounts | Contacts switch on the Accounts page
 
 **Overview (dashboard)**
-- Greeting, today's focus count and a one-click jump into the planner
-- Stay in touch card: who's due, overdue first, then the next 7 days
-- Four tiles: total accounts, open pipeline, follow-ups & dates (overdue / due today), people in cadences
-- **Pipeline overview**: open prospect value by stage, with a tooltip per bar
-- **Your daily momentum**: activity-plan progress ring and a bar per section
-  (calls/emails/LinkedIn, visits, channel, revisits)
-- Needs a little attention (overdue and today), coming up next (14 days), recent activity, and
-  active accounts with no next step (no follow-up and nobody in a cadence)
+- Greeting, date and "+ Add account"
+- Four tiles: total accounts, open pipeline (S1–S5), **everything due** (cadence steps,
+  follow-ups, visits, key dates, stay-in-touch and tasks, with the overdue count and a breakdown)
+  and stale accounts (open, no touch in 30+ days)
+- **Priority tasks**: the top of the same work queue the planner uses, so the numbers always
+  match. Each row has its type, account, why it's due and a one-click action. Three or more
+  overdue steps of the same cadence fold into one row with "Work them"
+- **Priority accounts**: open deals ranked by value and how long since the last touch, with stage,
+  last touch and the next step (late follow-ups show in red)
+- **Today**: real counts of calls, emails, LinkedIn touches and visits due (each opens that tab of
+  the queue), progress toward your daily goal, Start call session and Open daily planner
+- Stay in touch (only when someone is due) and recent activity
 
 **Look and feel**
 - Light, modern theme: a cool light-grey background, white cards with hairline borders and soft
@@ -244,14 +248,27 @@ No install, no build step: open `index.html` in a browser.
   nothing is downloaded and text works offline
 
 **Daily planner**
-- Desktop: three columns side by side: the daily activity plan, the hour-by-hour schedule, and
-  priorities / cadence steps / follow-ups / notes. Narrower screens stack them
-- Cadence steps due are grouped by cadence with a count each; the first 3 people show, the rest
-  open with "Show N more"
+- Header: "N of 40 actions done · X overdue", ‹ › to move a day, Day | Work week, + Task
+- Desktop: two columns. Left: the **work queue**. Right: top-3 priorities, the day's **schedule**
+  (time grid), stale accounts and day notes. Work week uses the full width. Narrower screens stack
+- **Work queue** (Salesloft/Outreach style): one list of everything due from cadence steps,
+  follow-ups, revisits, route stops, key dates, stay-in-touch reminders and untimed tasks
+  - Tabs: All · Calls · Emails · LinkedIn · Visits · Other, each with a count; Start session at
+    the top opens a call/email/LinkedIn session for the tab you're on
+  - Grouped by age: overdue 7+ days, overdue, due today, and upcoming (next 2 days). Each overdue
+    group has **Snooze all to tomorrow** and **Skip N cadence steps** (they advance, after a
+    confirm); long groups show 10 and "Show N more"
+  - Each row: a checkbox, type, title, account, why it's due and one action button. The checkbox
+    does the right thing for its source: a cadence step opens the log form, a follow-up logs the
+    activity and clears the date, a revisit records the visit and asks when to go back, a key date
+    or task is marked done, a stay-in-touch reminder logs the touch
+  - **Daily goal** (40 to start; click it to change): counts every activity logged that day
+    (notes aside) plus tasks done
+- **Stale accounts**: open accounts with no touch in 30+ days; never-touched first, then by value
 - **Calendar** with **Day | Work week** (the choice is remembered on each device):
-  - Day: the Schedule column is a time grid (7 AM–7 PM, widening for earlier or later items).
-    Blocks are sized by duration, overlapping items sit side by side, a red line marks the time
-    now, and untimed tasks collapse into an "N tasks due" strip at the top
+  - Day: the Schedule card is a time grid (7 AM–7 PM, widening for earlier or later items).
+    Blocks are sized by duration, overlapping items sit side by side and a red line marks the time
+    now. Untimed items are in the queue instead
   - Work week: Monday to Friday side by side, with each day's tasks, cadence steps and follow-ups
     summarized on top. Click a day to open its full plan; ‹ › move a week
   - Click any half-hour to add a task there (30 min by default); click a block to edit it; tick
@@ -260,27 +277,19 @@ No install, no build step: open `index.html` in a browser.
   Personal to start. "Categories" lets you rename, recolor (12 colors), add and delete them; tap
   a category in the legend to hide or show it. Each task has a category, and tasks made by the
   partner rules start as Partner
-- Tasks with time, duration, priority, linked account and notes, plus an "Anytime" list
-- Pulls in account follow-ups and key dates due that day automatically (today's page also
-  shows overdue items)
-- Top-3 priorities, day notes and a progress bar
+- Tasks with time, duration, priority, linked account and notes
 - Move unfinished tasks to the next day in one click
-- **Daily activity plan** with target slots for each day:
-  - 25 calls / emails / LinkedIn touches (10 rows shown to start; "+ Add row" adds more, and the
-    25 goal still counts)
-  - 5 visits
-  - 5 channel accounts (suggestions limited to partner accounts)
-  - 5 revisits. Accounts whose revisit date is that day (or overdue, on today's page) fill in
-    automatically. Checking one off logs the visit, clears the due date and asks when to go back
-    (14 / 30 / 60 / 90 days or a date you pick)
+- **Extra activity** (collapsed under the queue; remembers open/closed): free rows for work that
+  isn't in the CRM yet:
+  - 25 calls / emails / LinkedIn touches (10 rows shown to start; "+ Add row" adds more)
+  - 5 visits, 5 channel accounts (suggestions limited to partner accounts), 5 revisits
 
   Each row has an account, a type, a note, and a checkbox. Account names autocomplete from your
   accounts, and checking off a row for an existing account logs it to that account's history.
   Rows are linked to the account itself (by its ID), so renaming an account keeps the link, and
   two accounts with the same name stay separate: the suggestions add the city ("Acme Dental ·
   Fresno, CA"). A name typed that matches two accounts isn't linked until you pick one.
-  Unchecking removes the entry. Use "+ Add row" to go past a target, and copy unfinished rows to
-  the next day in one click. The dashboard shows today's plan progress.
+  Unchecking removes the entry; unfinished rows can be copied to the next day.
 
 ## Install on iPhone / iPad
 

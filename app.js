@@ -229,7 +229,7 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal })); } catch (e) { /* ignore */ }
   };
 
   function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], deleted: {} }; }
@@ -635,7 +635,8 @@
     const def = stayDef(c.stayInTouch);
     if (!def || (c.status && c.status !== 'Active')) return null;
     const last = lastContacted(acct, c);
-    const next = last ? stayStep(last, def.key) : (c.sitSince || today());
+    let next = last ? stayStep(last, def.key) : (c.sitSince || today());
+    if (c.sitSnooze && c.sitSnooze > next) next = c.sitSnooze; // snoozed from the queue
     return { a: acct, c, key: def.key, label: def.label, last, next };
   }
 
@@ -716,22 +717,6 @@
         </div>
         <div class="row sit-acts">${stayActions(s.a, s.c)}</div>
       </li>`).join('')}</ul>`;
-  }
-
-  /** Outreach rows as displayed: contacts due (today incl. overdue) fill empty slots until touched. */
-  function stayPlanRows(d, rows) {
-    const t = today();
-    const out = rows.map((r) => ({ ...r }));
-    if (d < t) return out;
-    const listed = new Set(rows.map((r) => r.contactId).filter(Boolean));
-    const kinds = PLAN_SECTIONS[0].kinds;
-    for (const s of stayList()) {
-      if (listed.has(s.c.id) || !(d === t ? s.next <= t : s.next === d)) continue;
-      const auto = { name: accountLabel(s.a), accountId: s.a.id, kind: channelKind(s.c, kinds), note: `Stay in touch: ${s.c.name}`, done: false, auto: s.next, contactId: s.c.id };
-      const slot = out.findIndex((r) => !r.name.trim() && !r.auto);
-      if (slot === -1) out.push(auto); else out[slot] = auto;
-    }
-    return out;
   }
 
   // ---------- contacts ----------
@@ -1450,7 +1435,7 @@
   }
 
   /** The time grid for one or more days. Week mode adds day headers and a per-day due strip. */
-  function calendarGrid(days, week) {
+  function calendarGrid(days, week, opts = {}) {
     const t = today();
     const timed = (d) => state.tasks.filter((x) => x.date === d && x.time && isShown(x));
     const allTimed = days.flatMap(timed);
@@ -1497,7 +1482,7 @@
 
     return `<div class="cal ${week ? 'cal-week' : 'cal-day'}" style="--hpx:${CAL_HOUR_PX}px;--days:${days.length}">
       ${week ? `<div class="cal-row cal-headrow"><div class="cal-gutter"></div>${days.map((d) => `<button type="button" class="cal-dayhead ${d === t ? 'is-today' : ''}" data-act="cal-day" data-date="${d}"><span>${esc(fmtDate(d, { weekday: 'short' }))}</span><b>${fromISO(d).getDate()}</b></button>`).join('')}</div>` : ''}
-      ${week || days.some((d) => state.tasks.some((x) => x.date === d && !x.time && isShown(x))) ? `<div class="cal-row cal-duerow"><div class="cal-gutter"></div>${days.map((d) => `<div class="cal-duecell">${dueStrip(d)}</div>`).join('')}</div>` : ''}
+      ${!opts.noDue && (week || days.some((d) => state.tasks.some((x) => x.date === d && !x.time && isShown(x)))) ? `<div class="cal-row cal-duerow"><div class="cal-gutter"></div>${days.map((d) => `<div class="cal-duecell">${dueStrip(d)}</div>`).join('')}</div>` : ''}
       <div class="cal-row cal-body">
         <div class="cal-gutter cal-times">${hours.map((h) => `<div class="cal-time"><span>${fmtTime(pad(h) + ':00')}</span></div>`).join('')}</div>
         ${days.map(column).join('')}
@@ -1601,6 +1586,441 @@
     if (due) due.addEventListener('toggle', () => { ui.calDueOpen = due.open; });
   }
 
+  // ---------- today's queue ----------
+  // One engine reads the data and hands back a ranked list of work: cadence steps, follow-ups,
+  // revisits, key dates, stay-in-touch reminders, untimed tasks and route stops. Each item knows
+  // its type, why it is on the list, when it was due and how to act on it. The planner queue, the
+  // Overview's Priority tasks, the Today card and the "Everything due" tile all read from it.
+  const QTABS = { all: 'All', calls: 'Calls', emails: 'Emails', linkedin: 'LinkedIn', visits: 'Visits', other: 'Other' };
+  const TAB_OF = { call: 'calls', email: 'emails', linkedin: 'linkedin', visit: 'visits', text: 'other', task: 'other' };
+  const QGROUPS = { late7: 'Overdue 7+ days', late: 'Overdue', today: 'Due today', upcoming: 'Upcoming' };
+  const kindToType = (k) => ({ Call: 'call', Email: 'email', LinkedIn: 'linkedin', Visit: 'visit', Text: 'text' })[k] || 'task';
+  const dueWords = (iso) => { const n = daysBetween(iso, today()); return n > 0 ? `${plural(n, 'day')} overdue` : n === 0 ? 'due today' : `due ${relDays(iso)}`; };
+  function taskType(x) {
+    const s = `${x.categoryId || ''} ${x.title || ''}`.toLowerCase();
+    return /cat-call|\bcall\b/.test(s) ? 'call' : /email|e-mail/.test(s) ? 'email' : /linkedin/.test(s) ? 'linkedin' : /cat-visit|visit|drop off|drop-in/.test(s) ? 'visit' : 'task';
+  }
+  function taskWhy(x, a) {
+    if (x.rule === 'reengage' && a) { const lt = lastTouchDate(a); return `${a.partnerType || 'Partner'} · last touch ${lt ? relDays(lt) : 'never'}`; }
+    if (x.rule === 'update') return 'Referred deal changed stage';
+    if (x.playbook && PLAYBOOKS[x.playbook]) return `${PLAYBOOKS[x.playbook].name} step`;
+    return [x.priority === 'high' ? 'High priority' : '', (x.notes || '').split('\n')[0].slice(0, 80)].filter(Boolean).join(' · ') || `Task ${dueWords(x.date)}`;
+  }
+
+  function workQueue(d = today()) {
+    const t = today(); const isToday = d === t;
+    const horizon = isToday ? addDays(t, 2) : d;
+    const inRange = (date) => !!date && (isToday ? date <= horizon : date === d);
+    const items = [];
+    for (const p of liveEnrollments()) {
+      if (p.e.status !== 'active' || !inRange(p.e.dueDate)) continue;
+      const late = daysBetween(p.e.dueDate, t);
+      items.push({ key: 'enr:' + p.e.id, type: STEP_TYPES[p.step.type] ? p.step.type : 'task', title: `${stepType(p.step).label} · ${p.contact.name}`,
+        sub: `${p.cad.name} · Step ${p.e.step + 1} of ${p.cad.steps.length}`, acct: p.acct, due: p.e.dueDate, src: 'cadence',
+        why: late > 0 ? `${p.cad.name} step ${p.e.step + 1}, ${plural(late, 'day')} overdue` : `${p.cad.name} step ${p.e.step + 1} ${dueWords(p.e.dueDate)}`,
+        btn: { act: 'enr-log', label: 'Do it', attrs: `data-eid="${p.e.id}"`, primary: true } });
+    }
+    for (const a of state.accounts) {
+      if (a.nextFollowUp && inRange(a.nextFollowUp) && !isClosedStage(a.stage)) {
+        const pc = primaryContact(a); const lt = lastTouchDate(a);
+        items.push({ key: 'fu:' + a.id, type: kindToType(pc ? channelKind(pc) : 'Call'), title: `Follow up · ${accountLabel(a)}`, sub: pc ? `${pc.name}${pc.title ? ', ' + pc.title : ''}` : '',
+          acct: a, due: a.nextFollowUp, src: 'followup', why: `Follow-up ${dueWords(a.nextFollowUp)}; last touch ${lt ? relDays(lt) : 'never'}`,
+          btn: { act: 'log', label: 'Log', attrs: `data-id="${a.id}"` } });
+      }
+      if (a.revisitDate && inRange(a.revisitDate)) {
+        items.push({ key: 'rv:' + a.id, type: 'visit', title: `Revisit · ${accountLabel(a)}`, sub: a.revisitNote || a.location || '', acct: a, due: a.revisitDate, src: 'revisit',
+          why: `Revisit ${dueWords(a.revisitDate)}${a.revisitNote ? ': ' + a.revisitNote : ''}`, btn: { act: 'q-visit', label: 'Visited', attrs: `data-id="${a.id}"` } });
+      }
+      for (const k of a.keyDates) {
+        if (!k.done && inRange(k.date)) items.push({ key: 'kd:' + k.id, type: 'task', title: `${k.label} · ${accountLabel(a)}`, sub: k.note || '', acct: a, due: k.date, src: 'keydate',
+          why: `Key date ${dueWords(k.date)}`, btn: { act: 'keydate-done', label: 'Done', attrs: `data-id="${a.id}" data-kid="${k.id}"` } });
+      }
+    }
+    for (const s of stayList()) {
+      if (!inRange(s.next)) continue;
+      items.push({ key: 'sit:' + s.c.id, type: kindToType(channelKind(s.c)), title: `Stay in touch · ${s.c.name}`, sub: `${s.c.title ? s.c.title + ' · ' : ''}${s.a.name}`,
+        acct: s.a, due: s.next, src: 'stay', why: `${s.label} touch; last ${s.last ? relDays(s.last) : 'never'}`, btn: { act: 'sit-log', label: 'Log', attrs: `data-id="${s.a.id}" data-cid="${s.c.id}"` } });
+    }
+    for (const x of state.tasks) {
+      if (x.done || x.time || !inRange(x.date)) continue;
+      const a = x.accountId && getAccount(x.accountId);
+      items.push({ key: 't:' + x.id, type: taskType(x), title: x.title, sub: a ? a.name : '', acct: a || null, due: x.date, src: 'task', why: taskWhy(x, a), task: x,
+        btn: { act: 'edit-task', label: 'Open', attrs: `data-tid="${x.id}"` } });
+    }
+    routeStops(d).forEach((s, i) => {
+      if (visitedRow(d, s.a) || items.some((it) => it.acct && it.acct.id === s.a.id && it.type === 'visit')) return;
+      items.push({ key: 'rt:' + s.a.id, type: 'visit', title: `Visit · ${accountLabel(s.a)}`, sub: `Route stop ${i + 1}`, acct: s.a, due: d, src: 'route', why: s.why,
+        btn: { act: 'q-visit', label: 'Visited', attrs: `data-id="${s.a.id}"` } });
+    });
+    const gOrder = { late7: 0, late: 1, today: 2, upcoming: 3 };
+    const sOrder = { cadence: 0, followup: 1, revisit: 2, route: 2, stay: 3, keydate: 4, task: 5 };
+    for (const it of items) {
+      it.late = Math.max(0, daysBetween(it.due, t));
+      it.group = !isToday ? 'today' : it.late >= 7 ? 'late7' : it.late > 0 ? 'late' : it.due === t ? 'today' : 'upcoming';
+      it.tab = TAB_OF[it.type] || 'other';
+    }
+    return items.sort((x, y) => gOrder[x.group] - gOrder[y.group] || x.due.localeCompare(y.due) || sOrder[x.src] - sOrder[y.src]
+      || (Number(y.acct && y.acct.value) || 0) - (Number(x.acct && x.acct.value) || 0));
+  }
+  const dueNow = (items) => items.filter((it) => it.group !== 'upcoming');
+  /** Three or more people on the same cadence step in the same group become one summary row. */
+  function foldQueue(items) {
+    const counts = new Map();
+    const keyOf = (it) => { const e = it.src === 'cadence' && state.enrollments.find((x) => x.id === it.key.slice(4)); return e ? `${e.cadenceId}|${e.step}|${it.group}` : null; };
+    for (const it of items) { const k = keyOf(it); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
+    const out = []; const seen = new Set();
+    for (const it of items) {
+      const k = keyOf(it);
+      if (!k || counts.get(k) < 3) { out.push(it); continue; }
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const [cadId, step] = k.split('|'); const cad = cadenceById(cadId); const n = counts.get(k);
+      out.push({ fold: true, type: it.type, late: it.late, cadId, stepNo: Number(step) + 1,
+        title: `${n} × ${stepType(cad.steps[Number(step)]).label}: ${cad.name} step ${Number(step) + 1}`,
+        sub: cad.steps[Number(step)].title || '', why: `${n} people ${it.late ? `${plural(it.late, 'day')} overdue` : 'due'}. Work them in one session, or skip them from the queue if the cadence needs a reset.` });
+    }
+    return out;
+  }
+  const qPill = (it) => (it.src === 'cadence' ? '<span class="pill qp-cad">Cadence</span>' : it.acct ? `<span class="pill ${it.acct.type}">${it.acct.type === 'partner' ? 'Partner' : 'Prospect'}</span>` : '');
+
+  /** Actions done on a day: logged activities (not notes) plus finished planner tasks. */
+  function dayDone(d) {
+    const acts = state.accounts.reduce((n, a) => n + a.activities.filter((h) => h.date === d && h.kind !== 'Note').length, 0);
+    return acts + state.tasks.filter((x) => x.date === d && x.done).length;
+  }
+  const dailyGoal = () => Number(ui.dailyGoal) || 40;
+
+  /** Accounts nobody has touched in 30+ days (open deals and active partners). */
+  function staleAccounts() {
+    const t = today();
+    return state.accounts.filter((a) => !isClosedStage(a.stage) && a.stage !== 'Nurture' && a.stage !== 'Target')
+      .map((a) => ({ a, lt: lastTouchDate(a) })).filter(({ lt }) => !lt || daysBetween(lt, t) >= 30)
+      .sort((x, y) => (x.lt ? 1 : 0) - (y.lt ? 1 : 0) || (Number(y.a.value) || 0) - (Number(x.a.value) || 0));
+  }
+
+  /** The queue card: type tabs, goal, grouped rows with bulk actions. */
+  function queueCard(d) {
+    const t = today();
+    const all = workQueue(d);
+    const tab = QTABS[ui.qTab] ? ui.qTab : 'all';
+    const shown = all.filter((it) => tab === 'all' || it.tab === tab);
+    const counts = Object.fromEntries(Object.keys(QTABS).map((k) => [k, dueNow(all).filter((it) => k === 'all' || it.tab === k).length]));
+    const done = dayDone(d); const goal = dailyGoal();
+    const row = (it) => `
+      <div class="q-row ${it.late ? 'late' : ''}">
+        <input type="checkbox" data-act="q-check" data-key="${esc(it.key)}" aria-label="Done: ${esc(it.title)}">
+        ${stepIcon({ type: it.type })}
+        <div class="q-main"><div class="q-title">${esc(it.title)}</div><div class="q-sub">${esc(it.sub || it.why)}</div></div>
+        <div class="q-acct">${it.acct ? `<a href="#account/${it.acct.id}">${esc(it.acct.name)}</a><div class="small muted">${esc(it.acct.type === 'partner' ? `${stageShort(it.acct.stage)} partner` : stageShort(it.acct.stage))}</div>` : ''}</div>
+        <div class="q-due ${it.late ? 'late' : ''}">${it.late ? esc(plural(it.late, 'day') + ' overdue') : it.due === t ? 'Today' : esc(fmtDate(it.due, { weekday: 'short', month: 'short', day: 'numeric' }))}</div>
+        <button class="btn sm ${it.btn.primary ? '' : 'ghost'}" data-act="${it.btn.act}" ${it.btn.attrs}>${esc(it.btn.label)}</button>
+      </div>`;
+    const SHOW = 6;
+    const groups = Object.keys(QGROUPS).map((g) => ({ g, list: shown.filter((it) => it.group === g) })).filter((x) => x.list.length);
+    return `
+      <div class="card q-card">
+        <div class="section-head">
+          <div><h2 style="margin:0">${d === t ? "Today's queue" : `Queue · ${esc(fmtDate(d, { weekday: 'long' }))}`}</h2>
+            <div class="small muted">Built from cadence steps, follow-ups, revisits, key dates, stay-in-touch reminders, tasks and route stops.</div></div>
+          ${counts.all ? `<button class="btn" data-act="session-setup" data-type="${{ calls: 'call', emails: 'email', linkedin: 'linkedin' }[tab] || 'all'}">▶ Start session</button>` : ''}
+        </div>
+        <div class="q-tabs" role="tablist">${Object.entries(QTABS).filter(([k]) => k === 'all' || counts[k]).map(([k, l]) => `<button type="button" role="tab" class="q-tab ${tab === k ? 'active' : ''}" data-act="q-tab" data-tab="${k}">${l} <b>${counts[k]}</b></button>`).join('')}</div>
+        <div class="q-goal">
+          <div class="row spread small"><b>${done} complete</b><button type="button" class="link-btn small muted" data-act="q-goal" title="Change your daily goal">Goal: ${goal}</button></div>
+          <div class="progress"><div style="width:${Math.min(100, Math.round((done / goal) * 100))}%"></div></div>
+        </div>
+        ${groups.length ? groups.map(({ g, list }) => {
+          const cad = list.filter((it) => it.src === 'cadence').length;
+          const open = ui.qOpen && ui.qOpen[g];
+          return `<div class="q-group">
+            <div class="q-ghead"><span>${QGROUPS[g]} <span class="muted">(${list.length})</span></span>
+              ${g === 'late7' || g === 'late' ? `<span class="row q-bulk">
+                <button type="button" class="btn sm ghost" data-act="q-bulk" data-op="snooze" data-group="${g}">Snooze all to tomorrow</button>
+                ${cad ? `<button type="button" class="btn sm ghost" data-act="q-bulk" data-op="skip" data-group="${g}">Skip ${plural(cad, 'cadence step')}</button>` : ''}
+              </span>` : ''}</div>
+            ${list.slice(0, open ? list.length : SHOW).map(row).join('')}
+            ${list.length > SHOW ? `<button type="button" class="link-btn q-more" data-act="q-more" data-group="${g}">${open ? 'Show fewer' : `Show ${list.length - SHOW} more ▾`}</button>` : ''}
+          </div>`;
+        }).join('') : `<div class="empty-soft">${all.length ? 'Nothing in this tab.' : 'Nothing due. Nice work: add a task, or log extra activity below.'}</div>`}
+      </div>`;
+  }
+
+  /** Check a queue row: do the simple thing in place, open the form when a choice is needed. */
+  function queueCheck(key) {
+    const d = ui.lastView === 'planner' ? ui.plannerDate : today();
+    const it = workQueue(d).find((x) => x.key === key) || workQueue(today()).find((x) => x.key === key);
+    if (!it) return rerender();
+    const now = new Date().toISOString(); const t = today();
+    const a = it.acct;
+    if (it.src === 'cadence') return logStepForm(key.slice(4));
+    if (it.src === 'revisit' || it.src === 'route') return markVisited(t, a);
+    if (it.src === 'followup') {
+      const pc = primaryContact(a);
+      a.activities.push({ id: uid(), date: t, kind: pc ? channelKind(pc) : 'Call', summary: 'Follow-up', notes: '', contactId: pc ? pc.id : '', createdAt: now });
+      a.nextFollowUp = ''; touch(a); save(); rerender();
+      return toast(`${a.name}: follow-up logged. Set the next one on the account.`);
+    }
+    if (it.src === 'keydate') {
+      const k = a.keyDates.find((x) => 'kd:' + x.id === key); k.done = true;
+      a.activities.push({ id: uid(), date: t, kind: 'Note', summary: `Completed: ${k.label}`, notes: k.note || '', createdAt: now });
+      touch(a); save(); rerender(); return toast('Done');
+    }
+    if (it.src === 'stay') {
+      const c = a.contacts.find((x) => 'sit:' + x.id === key);
+      a.activities.push({ id: uid(), date: t, kind: channelKind(c), summary: `Stay in touch: ${c.name}`, notes: '', contactId: c.id, createdAt: now });
+      touch(a); save(); rerender(); return toast(`Touch with ${c.name} logged`);
+    }
+    if (it.src === 'task') { it.task.done = true; save(); rerender(); return toast('Task done'); }
+    return rerender();
+  }
+
+  /** Bulk snooze (to tomorrow) or skip (cadence steps) for one overdue group in the current tab. */
+  function queueBulk(op, group) {
+    const d = ui.plannerDate; const t = today();
+    const tab = QTABS[ui.qTab] ? ui.qTab : 'all';
+    const list = workQueue(d).filter((it) => it.group === group && (tab === 'all' || it.tab === tab));
+    const tomorrow = addDays(t, 1);
+    if (op === 'skip') {
+      const cads = list.filter((it) => it.src === 'cadence');
+      if (!cads.length || !confirm(`Skip ${plural(cads.length, 'cadence step')}? Each person moves on to their next step. A long list of the same step usually means the cadence needs a reset.`)) return;
+      for (const it of cads) {
+        const e = state.enrollments.find((x) => x.id === it.key.slice(4)); const p = enrollmentParts(e);
+        if (p) { e.history.push({ stepId: p.step.id, date: t, skipped: true }); advance(p, t); }
+      }
+      save(); rerender(); return toast(`Skipped ${plural(cads.length, 'step')}`);
+    }
+    if (!confirm(`Move ${plural(list.length, 'item')} to tomorrow?`)) return;
+    let n = 0;
+    for (const it of list) {
+      const a = it.acct;
+      if (it.src === 'cadence') { const e = state.enrollments.find((x) => x.id === it.key.slice(4)); const p = enrollmentParts(e); if (p) { e.dueDate = p.cad.skipWeekends ? nextWorkday(tomorrow) : tomorrow; n++; } }
+      else if (it.src === 'followup') { a.nextFollowUp = tomorrow; touch(a); n++; }
+      else if (it.src === 'revisit') { a.revisitDate = tomorrow; touch(a); n++; }
+      else if (it.src === 'keydate') { const k = a.keyDates.find((x) => 'kd:' + x.id === it.key); k.date = tomorrow; touch(a); n++; }
+      else if (it.src === 'stay') { const c = a.contacts.find((x) => 'sit:' + x.id === it.key); c.sitSnooze = tomorrow; touch(a); n++; }
+      else if (it.src === 'task') { it.task.date = tomorrow; n++; }
+    }
+    save(); rerender(); toast(`Moved ${plural(n, 'item')} to tomorrow`);
+  }
+
+  /** Stale accounts, one line each, minus anything already in today's queue. */
+  function staleCard(d) {
+    const inQueue = new Set(workQueue(d).map((it) => it.acct && it.acct.id).filter(Boolean));
+    const list = staleAccounts().filter(({ a }) => !inQueue.has(a.id));
+    const SHOW = 8;
+    return `<div class="card">
+      <div class="row spread"><h3 style="margin:0">Stale accounts</h3><span class="small muted">${list.length}</span></div>
+      <div class="small muted" style="margin:.15rem 0 .4rem">No touch in 30+ days and nothing scheduled. One line each.</div>
+      ${list.length ? `<ul class="list stale-list">${list.slice(0, ui.staleAll ? list.length : SHOW).map(({ a, lt }) => `<li>
+        <div class="grow"><a class="title" href="#account/${a.id}">${esc(a.name)}</a> <span class="small muted">· ${esc(a.type === 'partner' ? (a.partnerType || 'Partner') : stageShort(a.stage))} · ${lt ? esc(relDays(lt)) : 'never'}</span></div>
+        <button class="btn sm ghost" data-act="log" data-id="${a.id}">Log</button>
+      </li>`).join('')}</ul>${list.length > SHOW ? `<button type="button" class="link-btn small" data-act="stale-all">${ui.staleAll ? 'Show fewer' : `Show ${list.length - SHOW} more`}</button>` : ''}`
+        : '<div class="empty">Every open account has a recent touch or a next step.</div>'}
+    </div>`;
+  }
+
+  // ---------- planner (day) ----------
+  function renderPlanner() {
+    if (ui.calMode === 'week') return renderWeek();
+    const d = ui.plannerDate;
+    const t = today();
+    const day = getDay(d);
+    const items = workQueue(d);
+    const overdue = items.filter((it) => it.late > 0).length;
+    const done = dayDone(d);
+    const tasks = state.tasks.filter((x) => x.date === d);
+    const plan = getPlan(d);
+    const extraLogged = PLAN_SECTIONS.reduce((n, sec) => n + plan[sec.key].filter((r) => r.done).length, 0);
+    const wk = (n) => fmtDate(addDays(d, n), { weekday: 'short' });
+
+    $('#view').innerHTML = `
+      <div class="planner-head">
+        <div>
+          <h1 style="margin:0">${esc(fmtLongDate(d))}</h1>
+          <div class="muted">${d === t ? 'Today' : esc(relDays(d))} · ${done} of ${dailyGoal()} actions done${overdue ? ` · <span class="q-late">${overdue} overdue</span>` : ''}</div>
+        </div>
+        <div class="row">
+          ${calModeSwitch()}
+          <button class="btn ghost" data-act="day-shift" data-n="-1" title="Previous day">‹ ${esc(wk(-1))}</button>
+          <input type="date" id="planner-date" value="${d}" aria-label="Date">
+          <button class="btn ghost" data-act="day-shift" data-n="1" title="Next day">${esc(wk(1))} ›</button>
+          ${d !== t ? '<button class="btn ghost" data-act="day-today">Today</button>' : ''}
+          <button class="btn" data-act="new-task" data-date="${d}">+ Task</button>
+        </div>
+      </div>
+
+      <div class="pl2">
+        <div class="pl-main stack">
+          ${queueCard(d)}
+          <details class="card extra-card" id="extra-card" ${ui.extraOpen ? 'open' : ''}>
+            <summary><span><b>Extra activity</b> <span class="muted">${extraLogged} logged</span></span>
+              <span class="small muted extra-sub">Anything the queue didn't generate: cold calls, drop-ins, new names.</span></summary>
+            ${planSection(d)}
+          </details>
+        </div>
+
+        <div class="pl-side stack">
+          <div class="card priorities">
+            <h3>Top 3 priorities</h3>
+            ${[0, 1, 2].map((i) => `<input data-prio="${i}" placeholder="Priority ${i + 1}" value="${esc(day.priorities[i] || '')}">`).join('')}
+          </div>
+          <div class="card sched-col">
+            <div class="row spread" style="margin-bottom:.5rem">
+              <h3 style="margin:0">Schedule</h3>
+              <div class="row"><a class="btn sm ghost" href="#map/route/${d}">Plan route</a></div>
+            </div>
+            ${calLegend()}
+            ${calendarGrid([d], false, { noDue: true })}
+          </div>
+          ${staleCard(d)}
+          <div class="card">
+            <h3>Day notes</h3>
+            <textarea id="day-notes" rows="5" placeholder="Wins, blockers, ideas, things to remember…">${esc(day.notes)}</textarea>
+          </div>
+          ${tasks.some((x) => !x.done) ? `<button class="btn ghost" data-act="carry-over" style="width:100%">Move unfinished tasks to ${esc(fmtDate(addDays(d, 1), { weekday: 'short', month: 'short', day: 'numeric' }))}</button>` : ''}
+        </div>
+      </div>`;
+
+    $('#planner-date').addEventListener('change', (e) => { if (e.target.value) location.hash = `planner/${e.target.value}`; });
+    $$('[data-prio]').forEach((inp) => inp.addEventListener('input', (e) => {
+      const dd = { ...getDay(d) };
+      dd.priorities = [...dd.priorities];
+      dd.priorities[Number(e.target.dataset.prio)] = e.target.value;
+      state.days[d] = dd; save();
+    }));
+    $('#day-notes').addEventListener('input', (e) => { state.days[d] = { ...getDay(d), notes: e.target.value }; save(); });
+    $('#extra-card').addEventListener('toggle', (e) => { ui.extraOpen = e.target.open; savePrefs(); });
+    bindPlan(d);
+    bindCalendar();
+  }
+
+  // ---------- dashboard ----------
+  function renderDashboard() {
+    const t = today();
+    const items = workQueue(t);
+    const now = dueNow(items);
+    const overdue = now.filter((it) => it.late > 0).length;
+    const partners = state.accounts.filter((a) => a.type === 'partner');
+    const prospects = state.accounts.filter((a) => a.type === 'prospect');
+    const openDeals = prospects.filter(isOpenDeal);
+    const openPipeline = openDeals.reduce((s, a) => s + (Number(a.value) || 0), 0);
+    const stale = staleAccounts();
+    const done = dayDone(t); const goal = dailyGoal();
+    const bySrc = (s) => now.filter((it) => it.src === s).length;
+    const byTab = (k) => now.filter((it) => it.tab === k).length;
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    const recent = state.accounts.flatMap((a) => a.activities.map((h) => ({ ...h, account: a })))
+      .sort((x, y) => y.date.localeCompare(x.date) || (y.createdAt || '').localeCompare(x.createdAt || '')).slice(0, 6);
+    const sitSoon = stayList().filter((x) => daysBetween(t, x.next) <= 7).slice(0, 5);
+    const kpi = (href, label, value, sub) => `<a class="card kpi-card" href="${href}"><span class="kpi-label">${label}</span><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></a>`;
+    const dueBits = [bySrc('cadence') && plural(bySrc('cadence'), 'cadence step'), bySrc('followup') && plural(bySrc('followup'), 'follow-up'),
+      (bySrc('revisit') + bySrc('route')) && plural(bySrc('revisit') + bySrc('route'), 'visit'), (bySrc('task') + bySrc('keydate') + bySrc('stay')) && plural(bySrc('task') + bySrc('keydate') + bySrc('stay'), 'other item')].filter(Boolean);
+
+    // Priority accounts: open deals and active partners, weighted by value and time since the last touch.
+    const maxV = Math.max(1, ...state.accounts.map((a) => Number(a.value) || 0));
+    const nextStepOf = (a) => {
+      if (a.nextFollowUp) return a.nextFollowUp < t ? `Follow-up ${plural(daysBetween(a.nextFollowUp, t), 'day')} overdue` : `Follow up ${relDays(a.nextFollowUp)}`;
+      const task = state.tasks.filter((x) => x.accountId === a.id && !x.done).sort((x, y) => x.date.localeCompare(y.date))[0];
+      if (task) return task.title;
+      const p = liveEnrollments().find((q) => q.acct.id === a.id && q.e.status === 'active');
+      if (p) return `${stepType(p.step).label}: ${p.step.title || p.cad.name}`;
+      return '';
+    };
+    const prio = state.accounts.filter((a) => isOpenDeal(a) || (a.type === 'partner' && ['Engaged', 'Met', 'Committed', 'Producing', 'Dormant'].includes(a.stage)))
+      .map((a) => { const lt = lastTouchDate(a); const age = lt ? daysBetween(lt, t) : 90; return { a, lt, score: ((Number(a.value) || 0) / maxV) * 0.55 + (Math.min(age, 60) / 60) * 0.45, open: items.filter((it) => it.acct && it.acct.id === a.id).length }; })
+      .sort((x, y) => y.score - x.score).slice(0, 8);
+
+    $('#view').innerHTML = `
+      <div class="ov-head">
+        <div>
+          <h1 class="greeting">${greeting}<span class="brand-dot">.</span></h1>
+          <div class="muted">${esc(fmtLongDate(t))}</div>
+        </div>
+        <div class="row ov-actions">${dashSwitch('today')}<button class="btn" data-act="new-account">+ Add account</button></div>
+      </div>
+      ${!state.accounts.length ? `<div class="card welcome stack" style="margin-bottom:1rem">
+        <h2 style="margin:0">Welcome to Bbars OS</h2>
+        <p class="muted" style="margin:0">Add your first account, import a spreadsheet, or load sample data to look around.</p>
+        <div class="row"><button class="btn" data-act="new-account">+ Add account</button><button class="btn ghost" data-act="import-csv">Import a spreadsheet</button><button class="btn ghost" data-act="load-sample">Load sample data</button></div>
+      </div>` : ''}
+      <div class="kpi-grid4">
+        ${kpi('#accounts', 'Total accounts', state.accounts.length, `${plural(prospects.length, 'prospect')} · ${plural(partners.length, 'partner')}`)}
+        ${kpi('#accounts', 'Open pipeline', money(openPipeline), plural(openDeals.length, 'open opportunity', 'open opportunities'))}
+        ${kpi(`#planner/${t}`, 'Everything due', now.length, `${overdue ? `<span class="pill overdue">${overdue} overdue</span> ` : ''}${esc(dueBits.join(' · ')) || 'Nothing due'}`)}
+        ${kpi('#accounts', 'Stale accounts', stale.length, 'no touch in 30+ days')}
+      </div>
+      <div class="ov2">
+        <div class="stack">
+          <div class="card">
+            <div class="section-head"><div><h2 style="margin:0">Priority tasks</h2><div class="small muted">One ranked list from your cadences, follow-ups, visits and reminders.</div></div>
+              <div class="small"><b>${now.length}</b> due${overdue ? ` · <span class="q-late">${overdue} overdue</span>` : ''}</div></div>
+            ${items.length ? `<div class="pt2">
+              <div class="pt2-row pt2-th"><span></span><span>Action</span><span>Why it's here</span><span>Type</span><span></span></div>
+              ${foldQueue(items).slice(0, 8).map((it) => it.fold ? `<div class="pt2-row late fold">
+                ${stepIcon({ type: it.type })}
+                <div class="pt2-act"><div class="q-title">${esc(it.title)}</div><div class="small muted">${esc(it.sub)}</div></div>
+                <div class="pt2-why ${it.late ? 'q-late' : ''}">${esc(it.why)}</div>
+                <div><span class="pill qp-cad">Cadence</span></div>
+                <button class="btn sm" data-act="session-setup" data-cad="${it.cadId}" data-step="${it.stepNo}" data-type="${it.type}">Work them</button>
+              </div>` : `<div class="pt2-row ${it.late ? 'late' : ''}">
+                ${stepIcon({ type: it.type })}
+                <div class="pt2-act"><div class="q-title">${esc(it.title)}</div>${it.acct && !it.title.includes(it.acct.name) ? `<div class="small muted"><a href="#account/${it.acct.id}">${esc(it.acct.name)}</a></div>` : ''}</div>
+                <div class="pt2-why ${it.late ? 'q-late' : ''}">${esc(it.why)}</div>
+                <div>${qPill(it)}</div>
+                <button class="btn sm ${it.btn.primary ? '' : 'ghost'}" data-act="${it.btn.act}" ${it.btn.attrs}>${esc(it.btn.label)}</button>
+              </div>`).join('')}
+            </div><a class="small link-arrow" href="#planner/${t}">Open today's queue →</a>`
+              : '<div class="empty-soft">Nothing due. Your queue fills itself from cadences, follow-ups, revisits and reminders.</div>'}
+          </div>
+          <div class="card">
+            <div class="section-head"><div><h2 style="margin:0">Priority accounts</h2><div class="small muted">Open deals and active partners, ranked by value and time since the last touch.</div></div><a class="btn sm ghost" href="#accounts">View all accounts</a></div>
+            ${prio.length ? `<div class="pa-table">
+              <div class="pa-row pa-th"><span>Account</span><span>Stage</span><span>Value</span><span>Last touch</span><span>Next step</span><span>Open</span></div>
+              ${prio.map(({ a, lt, open }) => { const ns = nextStepOf(a); const old = !lt || daysBetween(lt, t) > 14; return `<div class="pa-row">
+                <a class="title" href="#account/${a.id}">${esc(a.name)}</a>
+                <span class="small">${esc(a.type === 'partner' ? `${a.stage} partner` : stageShort(a.stage))}</span>
+                <span>${a.value ? money(a.value) : '<span class="muted">—</span>'}</span>
+                <span class="${old ? 'q-late' : ''}">${lt ? esc(relDays(lt)) : 'never'}</span>
+                <span class="small ${!ns || /overdue/.test(ns) ? 'q-late' : ''}">${ns ? esc(ns) : 'No next step'}</span>
+                <a class="btn sm ghost" href="#account/${a.id}" title="${plural(open, 'open action')}">▶ ${open}</a>
+              </div>`; }).join('')}
+            </div>` : '<div class="empty">No open deals or active partners yet.</div>'}
+          </div>
+        </div>
+        <div class="stack">
+          <div class="card today-card">
+            <h2 style="margin:0">Today</h2>
+            <div class="small muted">Counts come from your data, not blank rows.</div>
+            <div class="today-counts">
+              ${[['calls', 'Calls due'], ['emails', 'Emails due'], ['linkedin', 'LinkedIn'], ['visits', 'Visits']].map(([k, l]) => `<a class="today-count" href="#planner/${t}" data-act="q-tab" data-tab="${k}" data-go="1"><b>${byTab(k)}</b><span>${l}</span></a>`).join('')}
+            </div>
+            ${byTab('other') ? `<div class="small muted">${plural(byTab('other'), 'other item')}: tasks, key dates and reminders</div>` : ''}
+            <div class="q-goal">
+              <div class="row spread small"><b>${done} complete</b><button type="button" class="link-btn small muted" data-act="q-goal">Goal: ${goal} actions today</button></div>
+              <div class="progress"><div style="width:${Math.min(100, Math.round((done / goal) * 100))}%"></div></div>
+            </div>
+            <div class="row">
+              ${byTab('calls') ? '<button class="btn" data-act="session-setup" data-type="call">▶ Start call session</button>' : now.length ? '<button class="btn" data-act="session-setup" data-type="all">▶ Start session</button>' : ''}
+              <a class="btn ghost" href="#planner/${t}">Open daily planner</a>
+            </div>
+          </div>
+          ${sitSoon.length ? `<div class="card">
+            <div class="section-head"><h2 style="margin:0">Stay in touch</h2><a class="small link-arrow" href="#contacts/stay">All →</a></div>
+            ${stayRowsHtml(sitSoon)}
+          </div>` : ''}
+          <div class="card">
+            <h2 style="margin:0 0 .5rem">Recent activity</h2>
+            ${recent.length ? `<ul class="feed">${recent.map((r) => `<li>
+              <div class="grow"><div class="title">${esc(r.summary)}</div><div class="small muted"><a href="#account/${r.account.id}">${esc(r.account.name)}</a> · ${esc(r.kind)}</div></div>
+              <span class="small muted nowrap">${esc(relDays(r.date))}</span>
+            </li>`).join('')}</ul>` : '<div class="empty">No activity logged yet.</div>'}
+          </div>
+        </div>
+      </div>
+      <footer class="ov-foot small muted"><span>Made for meaningful connections.</span><span>Bbars OS ✦ A little more organized.</span></footer>`;
+  }
+
   // ---------- routing ----------
   const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession, partners: renderPartners };
   const TAB_FOR = { account: 'accounts', report: 'dashboard', session: 'cadences' };
@@ -1659,208 +2079,6 @@
   window.addEventListener('hashchange', () => { if (!booted) return; ui.navs++; route(); window.scrollTo(0, 0); });
 
   // ---------- dashboard ----------
-  function renderDashboard() {
-    const t = today();
-    const items = upcomingItems();
-    const overdue = items.filter((i) => i.date < t);
-    const dueToday = items.filter((i) => i.date === t);
-    const upcoming = items.filter((i) => i.date > t && daysBetween(t, i.date) <= 14);
-    const todaysPlan = getPlan(t);
-    const planDone = PLAN_SECTIONS.reduce((n, sec) => n + planStats(todaysPlan, sec.key).done, 0);
-    const planTotal = PLAN_SECTIONS.reduce((n, sec) => n + planStats(todaysPlan, sec.key).target, 0);
-    const partners = state.accounts.filter((a) => a.type === 'partner');
-    const prospects = state.accounts.filter((a) => a.type === 'prospect');
-    const openProspects = prospects.filter(isOpenDeal);
-    const openPipeline = openProspects.reduce((s, a) => s + (Number(a.value) || 0), 0);
-    const recent = state.accounts
-      .flatMap((a) => a.activities.map((act) => ({ ...act, account: a })))
-      .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || ''))
-      .slice(0, 6);
-    // Accounts with a contact in a running cadence already have a next touch.
-    const inCadence = new Set(liveEnrollments().filter((p) => p.e.status !== 'finished').map((p) => p.acct.id));
-    const quiet = state.accounts
-      .filter((a) => !isClosedStage(a.stage) && !a.nextFollowUp && !inCadence.has(a.id))
-      .slice(0, 6);
-    const stepsDue = dueSteps(t);
-    const cadencePeople = liveEnrollments().filter((p) => p.e.status === 'active').length;
-    const hour = new Date().getHours();
-    const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-    const sitAll = stayList();
-    const sitDue = sitAll.filter((x) => x.next <= t);
-    const sitSoon = sitAll.filter((x) => daysBetween(t, x.next) <= 7).slice(0, 6);
-    const focusCount = overdue.length + dueToday.length + stepsDue.length + sitDue.length;
-    const pct = planTotal ? Math.round((planDone / planTotal) * 100) : 0;
-    const PLAN_SHORT = { outreach: 'Calls, emails & LinkedIn', visits: 'In-person visits', channel: 'Channel accounts', revisits: 'Revisits' };
-    const icon = (path) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${path}</svg>`;
-    const ICONS = {
-      accounts: '<path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M8 8h3M8 12h3M8 16h3M3 21h18"/>',
-      pipeline: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M8 6V4h8v2"/>',
-      clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-      send: '<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
-      arrow: '<path d="M7 17L17 7M8 7h9v9"/>',
-      calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
-      pulse: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
-      spark: '<path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/>',
-    };
-    const kpi = (href, tone, iconKey, label, value, sub) => `
-      <a class="card kpi-card" href="${href}">
-        <div class="row spread"><span class="kpi-label">${label}</span><span class="kpi-icon ${tone}">${icon(ICONS[iconKey])}</span></div>
-        <div class="row spread" style="align-items:flex-end"><div class="kpi-value">${value}</div><span class="kpi-go">${icon(ICONS.arrow)}</span></div>
-        <div class="kpi-sub">${sub}</div>
-      </a>`;
-
-    // Pipeline by stage (open prospect stages), shaded light → dark as deals progress.
-    const pipeStages = [...OPEN_DEAL_STAGES, 'Closed Won'];
-    const byStage = pipeStages.map((s) => {
-      const list = prospects.filter((a) => a.stage === s);
-      return { s, n: list.length, v: list.reduce((n, a) => n + (Number(a.value) || 0), 0) };
-    });
-    const maxN = Math.max(1, ...byStage.map((x) => x.n));
-    const ramp = ['#b9d6c4', '#9cc5ab', '#7fb293', '#5f9a77', '#477f60', '#2f6b52'];
-
-    $('#view').innerHTML = `
-      <div class="ov-head">
-        <div>
-          <div class="eyebrow">Your workspace, at a glance</div>
-          <h1 class="greeting">${greeting}<span class="brand-dot">.</span></h1>
-          <div class="muted">A fresh perspective on your relationships and what comes next.</div>
-        </div>
-        <div class="row ov-actions">
-          ${dashSwitch('today')}
-          <span class="date-pill">${icon(ICONS.calendar)} ${esc(fmtDate(t, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }))}</span>
-          <button class="btn" data-act="new-account">+ Add account</button>
-        </div>
-      </div>
-
-      ${state.accounts.length === 0 ? `
-        <div class="card stack" style="margin-bottom:1rem">
-          <h2>Welcome</h2>
-          <p class="muted">Add your first partner or prospect account, import a spreadsheet, or load sample data to explore.</p>
-          <div class="row">
-            <button class="btn" data-act="new-account">+ Add account</button>
-            <button class="btn ghost" data-act="import-csv">Import a spreadsheet</button>
-            <button class="btn ghost" data-act="load-sample">Load sample data</button>
-          </div>
-        </div>` : ''}
-
-      <section class="hero">
-        <div class="hero-text">
-          <div class="eyebrow"><i class="dot"></i>A little focus. A lot of forward.</div>
-          <h2>Great relationships.<br>One small step at a time.</h2>
-          <p>${focusCount ? `You have <strong>${plural(focusCount, 'item')}</strong> to follow up on today. Let's keep the momentum going.` : 'Nothing is overdue. A great day to start new conversations.'}</p>
-          <a class="btn hero-btn" href="#planner/${t}">Let's plan your day →</a>
-        </div>
-        <svg class="hero-art" viewBox="0 0 220 150" aria-hidden="true">
-          <ellipse cx="120" cy="138" rx="96" ry="7" fill="currentColor" opacity=".12"/>
-          <path d="M55 138V86a40 40 0 0 1 80 0v52" fill="none" stroke="currentColor" stroke-width="16" opacity=".18"/>
-          <rect x="86" y="96" width="24" height="42" rx="3" fill="#5f9a77"/>
-          <rect x="116" y="78" width="24" height="60" rx="3" fill="#477f60"/>
-          <rect x="146" y="52" width="24" height="86" rx="3" fill="#2f6b52"/>
-          <path d="M80 82l34-26 22 12 40-38" fill="none" stroke="#2f6b52" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M168 28l10 2-2 10" fill="none" stroke="#2f6b52" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="62" cy="48" r="11" fill="#fff"/><path d="M57 48l4 4 7-8" fill="none" stroke="#2f6b52" stroke-width="2.5" stroke-linecap="round"/>
-          <path d="M70 128c-6-10-2-20 6-24 2 9-1 18-6 24zm2 0c4-8 12-11 18-9-4 7-11 10-18 9z" fill="#477f60"/>
-          <path d="M196 64l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#2f6b52"/>
-          <circle cx="200" cy="110" r="3" fill="#2f6b52" opacity=".5"/><circle cx="102" cy="20" r="3" fill="#2f6b52" opacity=".5"/>
-        </svg>
-      </section>
-
-      <div class="kpi-grid4">
-        ${kpi('#accounts', 'sage', 'accounts', 'Total accounts', state.accounts.length, `<span class="pill prospect">${plural(prospects.length, 'prospect')}</span> ${plural(partners.length, 'partner')}`)}
-        ${kpi('#accounts', 'blue', 'pipeline', 'Open pipeline', money(openPipeline), `<i class="dot"></i>Across ${plural(openProspects.length, 'open opportunity', 'open opportunities')}`)}
-        ${kpi(`#planner/${t}`, 'peach', 'clock', 'Follow-ups & dates', overdue.length + dueToday.length, `${overdue.length ? `<span class="pill overdue">${overdue.length} overdue</span>` : ''} ${dueToday.length} due today`)}
-        ${kpi('#cadences', 'lavender', 'send', 'People in cadences', cadencePeople, `<i class="dot"></i>${plural(stepsDue.length, 'step')} ready for your next move`)}
-      </div>
-
-      <!-- Two independent columns on desktop so cards stack without row gaps; phones show one column in reading order. -->
-      <div class="ov-grid">
-        <div class="ov-col">
-          <div class="card ov-o1" data-ov="pipeline">
-            <div class="section-head"><div><h2 style="margin:0">Pipeline overview</h2><div class="small muted">A clear view of your next opportunities.</div></div><a class="small link-arrow" href="#accounts">View accounts →</a></div>
-            <div class="pipe-total">${money(openPipeline)} <span class="small muted"><i class="dot"></i>Open prospect pipeline</span></div>
-            <div class="viz-root pipe-chart">
-              <div class="viz-plot" role="img" aria-label="Prospects by stage">
-                <div class="viz-cols" style="grid-template-columns:repeat(${byStage.length},1fr);inset:0">
-                  ${byStage.map((x, i) => `
-                    <div class="viz-col" tabindex="0" data-tip="${esc(`${x.s}|${plural(x.n, 'account')}|${money(x.v)}`)}">
-                      <div class="viz-stack" style="height:${Math.max(3, (x.n / maxN) * 100)}%">
-                        <span class="viz-total">${x.n}</span>
-                        <div class="viz-seg" style="flex:1;background:${x.n ? ramp[i] : 'var(--border)'};border-radius:4px 4px 0 0"></div>
-                      </div>
-                      <div class="viz-x" title="${esc(x.s)}">${esc(stageShort(x.s))}</div>
-                    </div>`).join('')}
-                </div>
-              </div>
-              <div class="viz-tip" hidden></div>
-            </div>
-            <div class="row spread small muted pipe-foot"><span><i class="dot"></i>${plural(openProspects.length, 'prospect')} in your pipeline</span><span>Every conversation counts.</span></div>
-          </div>
-          <div class="card ov-o3" data-ov="attention">
-            <div class="section-head"><h2 style="margin:0">Needs a little attention ${overdue.length + dueToday.length ? `<span class="count-badge">${overdue.length + dueToday.length}</span>` : ''}</h2><span class="eyebrow" style="margin:0">Your next moves</span></div>
-            ${itemList([...overdue, ...dueToday], 'Nothing overdue or due today. Nicely done.')}
-          </div>
-          <div class="card ov-o6" data-ov="coming">
-            <div class="section-head"><div><h2 style="margin:0">Coming up next</h2><div class="small muted">On the horizon in the next 14 days.</div></div><span class="kpi-icon sage">${icon(ICONS.calendar)}</span></div>
-            ${itemList(upcoming, 'Nothing scheduled in the next two weeks.')}
-          </div>
-        </div>
-        <div class="ov-col">
-          <div class="card ov-o2" data-ov="momentum">
-            <div class="section-head"><div><h2 style="margin:0">Your daily momentum</h2><div class="small muted">Small actions add up to big things.</div></div><span class="kpi-icon sage">${icon(ICONS.spark)}</span></div>
-            <div class="momentum">
-              <svg class="ring" viewBox="0 0 80 80" aria-hidden="true">
-                <circle cx="40" cy="40" r="34" fill="none" stroke="var(--surface-2)" stroke-width="7"/>
-                <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round"
-                  stroke-dasharray="${(2 * Math.PI * 34 * pct) / 100} 999" transform="rotate(-90 40 40)"/>
-                <text x="40" y="40" text-anchor="middle" dominant-baseline="central" class="ring-text">${pct}%</text>
-              </svg>
-              <div>
-                <div class="kpi-value" style="font-size:1.4rem">${planDone} <span class="muted" style="font-size:1rem">/ ${planTotal}</span></div>
-                <div class="small muted">activities completed</div>
-                <div class="small" style="color:var(--accent);margin-top:.2rem">${planDone ? 'Keep it going ✦' : 'A good day starts with a plan ✦'}</div>
-              </div>
-            </div>
-            <div class="mom-bars">${PLAN_SECTIONS.map((sec) => {
-              const st = planStats(todaysPlan, sec.key);
-              return `<div class="mom-bar"><div class="row spread small"><span class="muted">${PLAN_SHORT[sec.key]}</span><b>${st.done} / ${st.target}</b></div><div class="progress"><div style="width:${Math.round((st.done / st.target) * 100)}%"></div></div></div>`;
-            }).join('')}</div>
-            <a class="row spread link-arrow mom-link" href="#planner/${t}"><span>Open daily planner</span><span>→</span></a>
-          </div>
-          <div class="card ov-o4" data-ov="stay">
-            <div class="section-head"><div><h2 style="margin:0">Stay in touch ${sitDue.length ? `<span class="count-badge">${sitDue.length}</span>` : ''}</h2><div class="small muted">The people you want to hear from regularly.</div></div><a class="small link-arrow" href="#contacts/stay">All →</a></div>
-            ${sitSoon.length ? stayRowsHtml(sitSoon)
-              : sitAll.length ? `<div class="empty-soft">No one is due this week.<br>Next up: ${esc(sitAll[0].c.name)}, ${esc(stayWhen(sitAll[0].next).toLowerCase())}.</div>`
-              : '<div class="empty-soft">Set a stay-in-touch reminder on your key contacts<br>(weekly, monthly, quarterly…) and they show up here when it\'s time.<br><a href="#contacts">Go to contacts →</a></div>'}
-          </div>
-          <div class="card ov-o5" data-ov="recent">
-            <div class="section-head"><h2 style="margin:0">Recent activity</h2><span class="kpi-icon sage">${icon(ICONS.pulse)}</span></div>
-            ${recent.length ? `<ul class="feed">${recent.map((r) => `
-              <li>
-                <span class="feed-ic">${icon(r.kind === 'Call' ? ICONS.pulse : r.kind === 'Visit' ? ICONS.accounts : ICONS.send)}</span>
-                <div class="grow">
-                  <div class="title">${esc(r.summary)}</div>
-                  <div class="small muted"><a href="#account/${r.account.id}">${esc(r.account.name)}</a> · ${esc(r.kind)}</div>
-                </div>
-                <span class="small muted nowrap">${esc(relDays(r.date))}</span>
-              </li>`).join('')}</ul>` : '<div class="empty">No activity logged yet.</div>'}
-          </div>
-          <div class="card ov-o7" data-ov="keep">
-            <div class="section-head"><div><h2 style="margin:0">Keep the conversation going</h2><div class="small muted">Active accounts without a follow-up.</div></div><span class="kpi-icon lavender">${icon(ICONS.send)}</span></div>
-            ${quiet.length ? `<ul class="list">${quiet.map((a) => `
-              <li>
-                <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span>
-                <div class="grow"><a class="title" href="#account/${a.id}">${esc(a.name)}</a>
-                  <div class="small muted">${esc(a.stage)} · last touch ${lastTouchDate(a) ? relDays(lastTouchDate(a)) : 'never'}</div></div>
-                <button class="btn sm ghost" data-act="log" data-id="${a.id}">Log / schedule</button>
-              </li>`).join('')}</ul>` : '<div class="empty-soft">Every active account has a next step.<br>That\'s a good place to be.</div>'}
-          </div>
-      
-        </div>
-      </div>
-      <footer class="ov-foot small muted"><span>Made for meaningful connections.</span><span>Bbars OS ✦ A little more organized.</span></footer>`;
-    bindChartTips();
-  }
-
   /** Remove every record. Tombstones carry the erase to other synced devices. */
   function eraseAll() {
     const typed = prompt(
@@ -1874,21 +2092,6 @@
     save(); toast('All data erased'); go('dashboard');
   }
 
-  function itemList(items, emptyMsg) {
-    if (!items.length) return `<div class="empty">${emptyMsg}</div>`;
-    return `<ul class="list">${items.map((i) => `
-      <li>
-        <div class="date-chip ${dueClass(i.date)}"><b>${fromISO(i.date).getDate()}</b>${fmtDate(i.date, { month: 'short' })}</div>
-        <div class="grow">
-          <div class="title">${esc(i.label)} — <a href="#account/${i.account.id}">${esc(i.account.name)}</a></div>
-          <div class="small muted"><span class="pill ${i.account.type}">${i.account.type === 'partner' ? 'Partner' : 'Prospect'}</span> ${relDays(i.date)}</div>
-        </div>
-        ${i.kind === 'followup' ? `<button class="btn sm ghost" data-act="log" data-id="${i.account.id}">Log</button>`
-          : i.kind === 'revisit' ? `<a class="btn sm ghost" href="#planner/${i.date > today() ? i.date : today()}">Planner</a>`
-          : i.kind === 'close' ? `<a class="btn sm ghost" href="#account/${i.account.id}">Open</a>`
-          : `<button class="btn sm ghost" data-act="keydate-done" data-id="${i.account.id}" data-kid="${i.keyDate.id}">Done</button>`}
-      </li>`).join('')}</ul>`;
-  }
 
   // ---------- accounts ----------
   const FAR = '9999-12-31';
@@ -2339,146 +2542,6 @@
   }
 
   // ---------- planner ----------
-  function renderPlanner() {
-    if (ui.calMode === 'week') return renderWeek();
-    const d = ui.plannerDate;
-    const t = today();
-    const day = getDay(d);
-    const tasks = state.tasks.filter((x) => x.date === d)
-      .sort((x, y) => (x.time || '99').localeCompare(y.time || '99'));
-    const unscheduled = tasks.filter((x) => !x.time);
-    const doneCount = tasks.filter((x) => x.done).length;
-    // Account items due this day; on today's page also pull in anything overdue.
-    const due = upcomingItems().filter((i) => i.kind !== 'revisit' && (i.date === d || (d === t && i.date < t)));
-    const nowHour = d === t ? new Date().getHours() : -1;
-
-    const hours = [];
-    for (let h = DAY_START; h <= DAY_END; h++) hours.push(h);
-    const tasksAt = (h) => tasks.filter((x) => x.time && Number(x.time.slice(0, 2)) === h);
-    const early = tasks.filter((x) => x.time && Number(x.time.slice(0, 2)) < DAY_START);
-    const late = tasks.filter((x) => x.time && Number(x.time.slice(0, 2)) > DAY_END);
-
-    $('#view').innerHTML = `
-      <div class="planner-head">
-        <div>
-          <h1 style="margin:0">${esc(fmtLongDate(d))}</h1>
-          <div class="muted">${d === t ? 'Today' : relDays(d)} · ${doneCount}/${tasks.length} tasks done</div>
-        </div>
-        <div class="row">
-          ${calModeSwitch()}
-          <button class="btn ghost" data-act="day-shift" data-n="-1" title="Previous day">‹</button>
-          <input type="date" id="planner-date" value="${d}">
-          <button class="btn ghost" data-act="day-shift" data-n="1" title="Next day">›</button>
-          ${d !== t ? '<button class="btn ghost" data-act="day-today">Today</button>' : ''}
-          <button class="btn" data-act="new-task">+ Task</button>
-        </div>
-      </div>
-
-      <div class="planner-grid">
-        <div class="plan-col">${planSection(d)}</div>
-        <div class="card sched-col">
-          <div class="row spread" style="margin-bottom:.5rem">
-            <h2 style="margin:0">Schedule</h2>
-            <span class="small muted">Click a time to add</span>
-          </div>
-          ${calLegend()}
-          ${calendarGrid([d], false)}
-        </div>
-
-        <div class="stack side-col">
-          <div class="card">
-            <h3>Progress</h3>
-            <div class="progress"><div style="width:${tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0}%"></div></div>
-          </div>
-
-          <div class="card priorities">
-            <h3>Top 3 priorities</h3>
-            ${[0, 1, 2].map((i) => `<input data-prio="${i}" placeholder="Priority ${i + 1}" value="${esc(day.priorities[i] || '')}">`).join('')}
-          </div>
-
-          <div class="card">
-            <div class="row spread"><h3 style="margin:0">Cadence steps due ${dueSteps(d).length ? `<span class="count-badge">${dueSteps(d).length}</span>` : ''}</h3>${d === today() && dueSteps(d).length ? '<button class="btn sm" data-act="session-setup">▶ Start session</button>' : '<a class="small" href="#cadences">Cadences →</a>'}</div>
-            ${(() => {
-              // Grouped by cadence: a count per cadence, the first few people, the rest one click away.
-              const steps = dueSteps(d);
-              if (!steps.length) return '<div class="empty">No cadence steps due.</div>';
-              const groups = new Map();
-              for (const p of steps) { if (!groups.has(p.cad.id)) groups.set(p.cad.id, []); groups.get(p.cad.id).push(p); }
-              const row = (p) => `
-                <div class="task cad-task" style="--c:${p.cad.color}">
-                  ${stepIcon(p.step)}
-                  <div class="t-main">
-                    <div class="t-title">${esc(p.contact.name)} <span class="muted">· ${esc(p.acct.name)}</span></div>
-                    <div class="t-sub">${esc(p.step.title || stepType(p.step).label)}${p.e.dueDate < d ? ` · <span class="pill overdue">${esc(relDays(p.e.dueDate))}</span>` : ''}</div>
-                  </div>
-                  <button class="btn sm" data-act="enr-log" data-eid="${p.e.id}">Do it</button>
-                </div>`;
-              const SHOW = 3;
-              return `<div class="cad-groups">${[...groups.values()].map((list) => {
-                const cad = list[0].cad;
-                const late = list.filter((p) => p.e.dueDate < d).length;
-                return `
-                <div class="cad-group" style="--c:${cad.color}">
-                  <div class="cad-group-head">
-                    <span class="cad-dot"></span>
-                    <a href="#cadences/${cad.id}" class="grow">${esc(cad.name)}</a>
-                    ${late ? `<span class="pill overdue">${late} overdue</span>` : ''}
-                    <span class="pill">${list.length} due</span>
-                  </div>
-                  <div class="stack">${list.slice(0, SHOW).map(row).join('')}</div>
-                  ${list.length > SHOW ? `<details class="cad-more"><summary>Show ${list.length - SHOW} more</summary><div class="stack">${list.slice(SHOW).map(row).join('')}</div></details>` : ''}
-                </div>`;
-              }).join('')}</div>`;
-            })()}
-          </div>
-
-          <div class="card">
-            <h3>Account follow-ups & dates ${d === t ? '<span class="small muted">(incl. overdue)</span>' : ''}</h3>
-            ${due.length ? `<div class="stack">${due.map((i) => `
-              <div class="task auto">
-                <div class="t-main">
-                  <div class="t-title">${esc(i.label)} — <a href="#account/${i.account.id}">${esc(i.account.name)}</a></div>
-                  <div class="t-sub">${i.date < d ? `<span class="pill overdue">overdue ${relDays(i.date).replace(' ago', '')}</span>` : ''} ${esc(i.account.stage)}${(() => { const c = primaryContact(i.account); return c ? ' · ' + esc(c.name) + (c.phone ? ' · ' + esc(c.phone) : '') : ''; })()}</div>
-                </div>
-                ${i.kind === 'followup'
-                  ? `<button class="btn sm ghost" data-act="log" data-id="${i.account.id}">Log</button>`
-                  : `<button class="btn sm ghost" data-act="keydate-done" data-id="${i.account.id}" data-kid="${i.keyDate.id}">Done</button>`}
-              </div>`).join('')}</div>` : '<div class="empty">Nothing due from your accounts.</div>'}
-          </div>
-
-          <div class="card">
-            <div class="row spread"><h3 style="margin:0">Anytime</h3><button class="btn sm ghost" data-act="new-task" data-time="">+ Add</button></div>
-            <div class="stack" style="margin-top:.5rem">${unscheduled.length ? unscheduled.map(taskCard).join('') : '<div class="empty">No unscheduled tasks.</div>'}</div>
-          </div>
-
-          <div class="card">
-            <h3>Day notes</h3>
-            <textarea id="day-notes" rows="6" placeholder="Wins, blockers, ideas, things to remember…">${esc(day.notes)}</textarea>
-          </div>
-
-          ${tasks.some((x) => !x.done) ? `
-          <button class="btn ghost" data-act="carry-over" style="width:100%">Move unfinished tasks to ${esc(fmtDate(addDays(d, 1), { weekday: 'short', month: 'short', day: 'numeric' }))}</button>` : ''}
-        </div>
-      </div>`;
-
-    $('#planner-date').addEventListener('change', (e) => { if (e.target.value) location.hash = `planner/${e.target.value}`; });
-    $$('[data-prio]').forEach((inp) => inp.addEventListener('input', (e) => {
-      const dd = { ...getDay(d) };
-      dd.priorities = [...dd.priorities];
-      dd.priorities[Number(e.target.dataset.prio)] = e.target.value;
-      state.days[d] = dd; save();
-    }));
-    $('#day-notes').addEventListener('input', (e) => {
-      state.days[d] = { ...getDay(d), notes: e.target.value }; save();
-    });
-    $$('.task input[type=checkbox]').forEach((cb) => cb.addEventListener('change', (e) => {
-      const task = state.tasks.find((x) => x.id === e.target.dataset.id);
-      task.done = e.target.checked; save(); renderPlanner();
-    }));
-    bindPlan(d);
-    bindCalendar();
-  }
-
   // ---------- daily activity plan ----------
   /** Accounts whose revisit falls on day d (or is overdue, on today's page) and aren't already listed. */
   function dueRevisits(d, rows) {
@@ -2488,21 +2551,8 @@
       .sort((x, y) => x.revisitDate.localeCompare(y.revisitDate));
   }
 
-  /** Revisit rows as displayed: due accounts are pre-filled into empty slots until you touch them. */
-  function revisitRows(d, plan) {
-    const rows = plan.revisits.map((r) => ({ ...r }));
-    for (const a of dueRevisits(d, plan.revisits)) {
-      const auto = { name: accountLabel(a), accountId: a.id, kind: 'Visit', note: a.revisitNote || '', done: false, auto: a.revisitDate };
-      const slot = rows.findIndex((r) => !r.name.trim() && !r.auto);
-      if (slot === -1) rows.push(auto); else rows[slot] = auto;
-    }
-    return rows;
-  }
-
   function planSection(d) {
     const plan = getPlan(d);
-    plan.revisits = revisitRows(d, plan);
-    plan.outreach = stayPlanRows(d, plan.outreach);
     const total = PLAN_SECTIONS.reduce((n, sec) => n + planStats(plan, sec.key).target, 0);
     const done = PLAN_SECTIONS.reduce((n, sec) => n + planStats(plan, sec.key).done, 0);
     const pending = PLAN_SECTIONS.some((sec) => plan[sec.key].some((r) => r.name.trim() && !r.done));
@@ -2530,7 +2580,6 @@
             <div class="small muted">Type an account name (suggestions come from your accounts). Checking off a row for an existing account logs it to that account's history.</div>
           </div>
           <div class="row">
-            <a class="btn sm ghost" href="#map/route/${d}">🗺 Plan route</a>
             <span class="pill" id="plan-count-total">${done}/${total} done</span>
             ${pending ? `<button class="btn sm ghost" data-act="plan-carry">Copy unfinished to ${esc(fmtDate(addDays(d, 1), { weekday: 'short', month: 'short', day: 'numeric' }))}</button>` : ''}
           </div>
@@ -5737,7 +5786,18 @@
       case 'cad-open': ui.cadenceId = el.dataset.cad; return go(`cadences/${el.dataset.cad}`);
       case 'cad-edit': return cadenceForm(cadenceById(ui.cadenceId));
       case 'cad-add-people': return addPeopleForm(cadenceById(ui.cadenceId));
-      case 'session-setup': return sessionSetupForm(el.dataset.cad ? { cadenceId: el.dataset.cad, type: 'all' } : {});
+      case 'session-setup': return sessionSetupForm({ ...(el.dataset.cad ? { cadenceId: el.dataset.cad, type: 'all' } : {}), ...(el.dataset.type ? { type: SESSION_TYPES[el.dataset.type] ? el.dataset.type : 'all' } : {}), ...(el.dataset.step ? { stepNo: el.dataset.step } : {}) });
+      case 'q-check': e.preventDefault(); return queueCheck(el.dataset.key);
+      case 'q-tab': ui.qTab = el.dataset.tab; if (el.dataset.go) { e.preventDefault(); ui.calMode = 'day'; return go(`planner/${today()}`); } return rerender();
+      case 'q-more': ui.qOpen = { ...(ui.qOpen || {}), [el.dataset.group]: !(ui.qOpen || {})[el.dataset.group] }; return rerender();
+      case 'q-bulk': return queueBulk(el.dataset.op, el.dataset.group);
+      case 'q-visit': return markVisited(today(), acct);
+      case 'q-goal': {
+        const v = prompt('Daily goal: how many actions (calls, emails, LinkedIn touches, visits, tasks) do you aim for each day?', String(dailyGoal()));
+        if (v !== null && Number(v) > 0) { ui.dailyGoal = Math.round(Number(v)); savePrefs(); rerender(); }
+        return;
+      }
+      case 'stale-all': ui.staleAll = !ui.staleAll; return rerender();
       case 'session-log': return sessionAct('log', el.dataset.outcome);
       case 'session-meeting': return sessionAct('meeting');
       case 'session-skip': return sessionAct('skip');
