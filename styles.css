@@ -2067,3 +2067,6 @@ tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 .side-item.terr-item { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; column-gap: .5rem; align-items: center; }
 .side-item.terr-item .small { grid-column: 2; }
 .side-item.terr-item .icon-btn { grid-column: 3; grid-row: 1 / span 2; }
+
+.cell-date-btn { cursor: pointer; text-align: left; min-width: 5.5rem; }
+.cell-date-btn.late { color: var(--danger); font-weight: 600; }

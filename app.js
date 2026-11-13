@@ -177,8 +177,14 @@
   const today = () => toISO(new Date());
   const addDays = (iso, n) => { const d = fromISO(iso); d.setDate(d.getDate() + n); return toISO(d); };
   const daysBetween = (a, b) => Math.round((fromISO(b) - fromISO(a)) / 86400000);
-  const fmtDate = (iso, opts = { month: 'short', day: 'numeric', year: 'numeric' }) =>
-    iso ? fromISO(iso).toLocaleDateString(undefined, opts) : '—';
+  const fmtCache = new Map();
+  const fmtDate = (iso, opts = { month: 'short', day: 'numeric', year: 'numeric' }) => {
+    if (!iso) return '—';
+    const key = iso + JSON.stringify(opts);
+    let v = fmtCache.get(key);
+    if (v === undefined) { if (fmtCache.size > 20000) fmtCache.clear(); v = fromISO(iso).toLocaleDateString(undefined, opts); fmtCache.set(key, v); }
+    return v;
+  };
   const fmtLongDate = (iso) =>
     fromISO(iso).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const fmtTime = (t) => {
@@ -423,6 +429,7 @@
 
   /** Save what changed. `track` stamps the edits so sync can merge them with other devices. */
   function save({ track = true } = {}) {
+    acctDirty = true; // the account index re-checks a miss once after any change
     if (track) persist(stampChanges()); else persist();
     if (track && cloudOn()) { setSyncStatus('pending'); scheduleSync(); }
     clearTimeout(save.countsTimer);
@@ -516,7 +523,20 @@
     return out;
   }
 
-  const getAccount = (id) => state.accounts.find((a) => a.id === id);
+  // Account lookup by id through a position index, checked on every hit, so adds, removals,
+  // replacements and a whole new state (sync, restore) can never return a stale account.
+  let acctPos = new Map(); let acctArr = null; let acctLen = -1; let acctDirty = false;
+  const getAccount = (id) => {
+    if (!id) return undefined;
+    const arr = state.accounts;
+    const fresh = acctArr === arr && acctLen === arr.length;
+    let i = fresh ? acctPos.get(id) : undefined;
+    if (i !== undefined && arr[i] && arr[i].id === id) return arr[i];
+    if (fresh && i === undefined && !acctDirty) return undefined; // not there: no need to rebuild
+    acctPos = new Map(arr.map((x, k) => [x.id, k])); acctArr = arr; acctLen = arr.length; acctDirty = false;
+    i = acctPos.get(id);
+    return i === undefined ? undefined : arr[i];
+  };
   const primaryContact = (a) => a.contacts.find((c) => c.primary) || a.contacts[0] || null;
   const tagList = (a) => (a.tags || '').split(',').map((x) => x.trim()).filter(Boolean);
   const allTags = () => [...new Set(state.accounts.flatMap((a) => tagList(a).map((x) => x.toLowerCase())))].sort();
@@ -2611,7 +2631,9 @@
       `This permanently deletes all ${state.accounts.length} accounts, tasks, planner days, lists and cadences` +
       `${cloudOn() ? ' on this device AND every synced device' : ' on this device'}.\n\nExport a backup first if you might need it.\n\nType DELETE to confirm.`);
     if ((typed || '').trim().toUpperCase() !== 'DELETE') { if (typed !== null) toast('Nothing was deleted'); return; }
-    state.accounts = []; state.tasks = []; state.lists = []; state.days = {}; state.cadences = []; state.enrollments = []; state.flows = []; state.compPlans = defaultCompPlans(); state.categories = defaultCategories();
+    // Every synced collection (so new ones can't be missed), then the editable defaults.
+    for (const [name] of COLLECTIONS) state[name] = [];
+    state.days = {}; state.compPlans = defaultCompPlans(); state.categories = defaultCategories();
     ui.listId = null;
     research = { target: '', hint: '', list: '', flows: ['hq', 'dm', 'hr'], custom: '', pasted: '' }; saveResearch();
     session = null; saveSession();
@@ -2869,11 +2891,12 @@
     const muted = '<span class="muted">—</span>';
     const view = ui.viewId && resolveList(ui.viewId);
     const fresh = view && !view.builtIn ? newInView(view) : null;
+    const lazy = list.length > 300; // a huge "Show all": stage pickers fill in when used
     const cell = (a, k) => {
       const live = isLive(a);
       switch (k) {
         case 'type': return `<td>${typePill(a)}</td>`;
-        case 'stage': return `<td><select class="cell-edit" data-inline="stage" data-id="${a.id}" aria-label="Stage for ${esc(a.name)}" title="${esc(STAGE_HINTS[a.stage] || '')}">${STAGES[a.type].map((s) => opt(s, stageShort(s), a.stage)).join('')}</select>${a.type === 'partner' && a.partnerType ? `<div class="small muted">${esc(a.partnerType)}</div>` : ''}</td>`;
+        case 'stage': return `<td><select class="cell-edit" data-inline="stage" data-id="${a.id}" aria-label="Stage for ${esc(a.name)}" title="${esc(STAGE_HINTS[a.stage] || '')}">${lazy ? opt(a.stage, stageShort(a.stage), a.stage) : STAGES[a.type].map((x) => opt(x, stageShort(x), a.stage)).join('')}</select>${a.type === 'partner' && a.partnerType ? `<div class="small muted">${esc(a.partnerType)}</div>` : ''}</td>`;
         case 'value': return `<td class="num"><input class="cell-edit cell-num" data-inline="value" data-id="${a.id}" type="text" inputmode="numeric" value="${a.value ? esc(money(a.value)) : ''}" placeholder="—" aria-label="Value for ${esc(a.name)}"></td>`;
         case 'employees': return `<td class="num">${a.employees ? esc(a.employees) : muted}</td>`;
         case 'vendor': return `<td>${vendorPills(a) || muted}</td>`;
@@ -2881,7 +2904,7 @@
         case 'touch': { const d = lastTouchDate(a); const late = live && (!d || daysBetween(d, t) > STALE_TOUCH); return `<td class="small ${late ? 'cell-bad' : ''}">${d ? `${daysBetween(d, t)} d` : 'never'}</td>`; }
         case 'instage': { const n = daysInStage(a); return `<td class="small ${live && n >= STALE_STAGE ? 'cell-bad' : ''}" title="Since ${esc(fmtDate(stageSince(a)))}">${n} d</td>`; }
         case 'next': { const ns = nextStepOf(a); return `<td class="small cell-next ${ns && ns.date < t ? 'cell-bad' : !ns && live ? 'cell-bad' : ''}">${ns ? `${esc(ns.label)} · ${esc(ns.date === t ? 'today' : shortDate(ns.date))}` : live ? 'No next step' : muted}</td>`; }
-        case 'followup': return `<td><input class="cell-edit cell-date ${a.nextFollowUp && a.nextFollowUp < t ? 'late' : ''}" data-inline="nextFollowUp" data-id="${a.id}" type="date" value="${esc(a.nextFollowUp || '')}" aria-label="Follow-up for ${esc(a.name)}"></td>`;
+        case 'followup': return `<td><button type="button" class="cell-edit cell-date-btn ${a.nextFollowUp && a.nextFollowUp < t ? 'late' : ''}" data-date-edit data-id="${a.id}" aria-label="Follow-up for ${esc(a.name)}: ${a.nextFollowUp ? esc(fmtDate(a.nextFollowUp)) : 'none'}. Change">${a.nextFollowUp ? esc(fmtDate(a.nextFollowUp, { month: 'short', day: 'numeric' })) : '<span class="muted">Set…</span>'}</button></td>`;
         case 'contact': { const p = primaryContact(a); return `<td>${p ? `${esc(p.name)}${p.title ? `<div class="small muted">${esc(p.title)}</div>` : ''}` : muted}</td>`; }
         case 'location': return `<td class="loc-cell">${a.location ? esc(a.location) : muted}</td>`;
         case 'close': return `<td>${dueChip(a.closeDate)}</td>`;
@@ -3178,6 +3201,32 @@
       renderAccounts();
     }));
     $$('.cell-edit').forEach((el) => el.addEventListener('change', () => inlineEdit(el)));
+    // Follow-up dates show as text and become a date picker when clicked (1,500 pickers slow the page down).
+    $$('[data-date-edit]').forEach((btn) => btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const a = getAccount(btn.dataset.id);
+      if (!a) return;
+      const inp = document.createElement('input');
+      inp.type = 'date'; inp.className = 'cell-edit cell-date'; inp.value = a.nextFollowUp || '';
+      inp.dataset.inline = 'nextFollowUp'; inp.dataset.id = a.id; inp.setAttribute('aria-label', `Follow-up for ${a.name}`);
+      btn.replaceWith(inp);
+      inp.addEventListener('click', (ev) => ev.stopPropagation());
+      inp.addEventListener('change', () => inlineEdit(inp));
+      inp.focus();
+      try { if (inp.showPicker) inp.showPicker(); } catch (x) { /* some browsers only open it on a direct tap */ }
+    }));
+    // Stage pickers carry only the current stage until used (1,500 full pickers slow the page down).
+    const fillStages = (e) => {
+      const el = e.currentTarget;
+      if (el.options.length > 1) return;
+      const a = getAccount(el.dataset.id);
+      if (a) el.innerHTML = STAGES[a.type].map((x) => opt(x, stageShort(x), a.stage)).join('');
+    };
+    $$('.cell-edit[data-inline=stage]').forEach((el) => {
+      el.addEventListener('mousedown', fillStages);
+      el.addEventListener('focus', fillStages);
+      el.addEventListener('touchstart', fillStages, { passive: true });
+    });
   }
 
   /** Pinned views as counts on the Overview. */
@@ -3574,21 +3623,6 @@
     return { next, copied };
   }
 
-  function taskCard(x) {
-    const acct = x.accountId && getAccount(x.accountId);
-    return `
-      <div class="task ${x.priority} ${x.done ? 'done' : ''}" data-act="task">
-        <input type="checkbox" data-id="${x.id}" ${x.done ? 'checked' : ''} aria-label="Done">
-        <div class="t-main">
-          <div class="t-title">${esc(x.title)}</div>
-          <div class="t-sub">${x.time ? fmtTime(x.time) : 'Anytime'}${x.duration ? ` · ${x.duration} min` : ''}${acct ? ` · <a href="#account/${acct.id}">${esc(acct.name)}</a>` : ''}${x.priority === 'high' ? ' · <span class="pill high">High</span>' : ''}</div>
-          ${x.notes ? `<div class="t-sub" style="white-space:pre-wrap">${esc(x.notes)}</div>` : ''}
-        </div>
-        <button class="icon-btn" data-act="edit-task" data-tid="${x.id}" title="Edit">✎</button>
-        <button class="icon-btn" data-act="del-task" data-tid="${x.id}" title="Delete">✕</button>
-      </div>`;
-  }
-
   // ---------- lists ----------
   // Saved lists are filters: an account matches when it meets every filled-in section and any
   // value ticked within a section. Built-in "vendor:<name>" lists group accounts by current vendor.
@@ -3774,13 +3808,22 @@
   const initials = (name) => (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join('');
 
   const isWeekend = (iso) => [0, 6].includes(fromISO(iso).getDay());
-  const nextWorkday = (iso) => { while (isWeekend(iso)) iso = addDays(iso, 1); return iso; };
+  // Pure date steps, cached: calendars and workload ask for the same few hundred dates thousands of times.
+  const dateMemo = new Map();
+  const memoDate = (key, fn) => {
+    let v = dateMemo.get(key);
+    if (v === undefined) { if (dateMemo.size > 50000) dateMemo.clear(); v = fn(); dateMemo.set(key, v); }
+    return v;
+  };
+  const nextWorkday = (iso) => memoDate('w' + iso, () => { let d = iso; while (isWeekend(d)) d = addDays(d, 1); return d; });
   /** Move n days forward, counting only weekdays when the cadence skips weekends. */
   function shiftDays(iso, n, skipWeekends) {
-    if (!skipWeekends) return addDays(iso, n);
-    let d = nextWorkday(iso);
-    for (let i = 0; i < n; i++) d = nextWorkday(addDays(d, 1));
-    return d;
+    if (!skipWeekends) return memoDate(`a${iso}|${n}`, () => addDays(iso, n));
+    return memoDate(`s${iso}|${n}`, () => {
+      let d = nextWorkday(iso);
+      for (let i = 0; i < n; i++) d = nextWorkday(addDays(d, 1));
+      return d;
+    });
   }
 
   /** The enrollment with its cadence, account and contact, or null if any of them is gone. */
@@ -4620,21 +4663,27 @@
     const cap = stepCap();
     const people = liveEnrollments().filter((p) => p.e.status === 'active' && p.e.dueDate);
     const shift = new Map();
-    const plan = (p) => projectSteps(p, shift.get(p.e.id) || 0);
+    // Each person's projected dates, and a running count of steps per day, updated only for who moves.
+    const sched = new Map(people.map((p) => [p.e.id, projectSteps(p)]));
+    const count = new Map();
+    const tally = (list, k) => { for (const x of list) count.set(x.date, (count.get(x.date) || 0) + k); };
+    for (const list of sched.values()) tally(list, 1);
     let d = nextWorkday(today());
     for (let k = 0; k < 40; k++, d = nextWorkdayAfter(d)) {
-      let n = people.reduce((s, p) => s + plan(p).filter((x) => x.date === d).length, 0);
-      if (n <= cap) continue;
+      if ((count.get(d) || 0) <= cap) continue;
       // Keep the most overdue where they are; move the most recently due first, an account at a time.
-      const movable = people.filter((p) => plan(p)[0].date === d)
+      const movable = people.filter((p) => sched.get(p.e.id)[0].date === d)
         .sort((a, b) => b.e.dueDate.localeCompare(a.e.dueDate) || b.acct.name.localeCompare(a.acct.name));
       for (const p of movable) {
-        if (n <= cap) break;
-        shift.set(p.e.id, (shift.get(p.e.id) || 0) + 1);
-        n -= 1;
+        if ((count.get(d) || 0) <= cap) break;
+        const n = (shift.get(p.e.id) || 0) + 1;
+        shift.set(p.e.id, n);
+        tally(sched.get(p.e.id), -1);
+        const next = projectSteps(p, n);
+        sched.set(p.e.id, next); tally(next, 1);
       }
     }
-    return people.filter((p) => shift.get(p.e.id)).map((p) => ({ p, to: plan(p)[0].date }));
+    return people.filter((p) => shift.get(p.e.id)).map((p) => ({ p, to: sched.get(p.e.id)[0].date }));
   }
 
   function rebalanceForm() {
@@ -5772,7 +5821,6 @@
     }
     return inside;
   }
-  const territoryOf = (a) => (hasGeo(a) ? (state.territories || []).find((t) => inPolygon(ll(a), t.points)) || null : null);
   const inTerritory = (t, a) => hasGeo(a) && inPolygon(ll(a), t.points);
   function drawTerritories(layer) {
     for (const t of state.territories || []) {
