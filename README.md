@@ -348,7 +348,9 @@ value first, then spends your time by tier
 
 **Look and feel**
 - Light, modern theme: a cool light-grey background, white cards with hairline borders and soft
-  shadows, and an emerald accent. Dark mode uses neutral charcoal (follows the device setting)
+  shadows, and an emerald accent. Dark mode uses neutral charcoal
+- **Settings → Appearance**: Match device, Light or Dark (saved on each device). The choice applies
+  before the page draws, so there's no flash, and the map tiles and browser bar follow it
 - Each section has its own icon color (Overview indigo, Accounts blue, Contacts cyan, Partners
   violet, Planner amber, Map green, Cadences orange)
 - Desktop: a light sidebar with page counts (accounts, cadence steps due), sync status and

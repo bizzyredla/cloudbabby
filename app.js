@@ -232,8 +232,26 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, theme: ui.theme })); } catch (e) { /* ignore */ }
   };
+
+  // ----- appearance: follow the device, or always light / always dark (per device) -----
+  const THEMES = { system: 'Match device', light: 'Light', dark: 'Dark' };
+  const isDark = () => (ui.theme === 'dark' ? true : ui.theme === 'light' ? false : matchMedia('(prefers-color-scheme: dark)').matches);
+  function applyTheme() {
+    const root = document.documentElement;
+    const fixed = ui.theme === 'light' || ui.theme === 'dark';
+    if (fixed) root.dataset.theme = ui.theme; else delete root.dataset.theme;
+    root.style.colorScheme = fixed ? ui.theme : '';
+    // The browser bar colour follows the chosen theme.
+    const metas = [...document.querySelectorAll('meta[name=theme-color]')];
+    metas.forEach((m, i) => {
+      const darkTag = i === 1;
+      if (fixed) { m.setAttribute('media', 'all'); m.setAttribute('content', ui.theme === 'dark' ? '#0c0e12' : '#f6f7f9'); }
+      else { m.setAttribute('media', `(prefers-color-scheme: ${darkTag ? 'dark' : 'light'})`); m.setAttribute('content', darkTag ? '#0c0e12' : '#f6f7f9'); }
+    });
+  }
+  applyTheme();
 
   function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], deleted: {} }; }
 
@@ -5661,7 +5679,7 @@
   /** Create (or recreate) the Leaflet map inside #map, keeping the previous view if there was one. */
   function mountMap() {
     const keep = mapState.keep;
-    const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+    const dark = isDark();
     const map = L.map('map', { zoomControl: true, attributionControl: true, doubleClickZoom: !mapState.drawing });
     addBaseTiles(map, dark);
     if (keep) map.setView(keep.c, keep.z); else map.setView(CA_CENTER, 6);
@@ -7652,6 +7670,11 @@
   function openSettings() {
     openModal('Settings', `
       <section class="set-sec">
+        <h3>Appearance</h3>
+        <div class="seg theme-seg" role="group" aria-label="Appearance">${Object.entries(THEMES).map(([k, l]) => `<button type="button" class="${(ui.theme || 'system') === k ? 'active' : ''}" data-theme-pick="${k}" aria-pressed="${(ui.theme || 'system') === k}">${l}</button>`).join('')}</div>
+        <p class="small muted" style="margin:.35rem 0 0">Saved on this device. "Match device" follows your phone or computer's light / dark setting.</p>
+      </section>
+      <section class="set-sec">
         <h3>Cloud sync</h3>
         <div id="sync-live">${syncStatusHtml()}</div>
         <button type="button" class="btn ghost sm" id="set-sync">${cloudOn() ? 'Sync settings' : 'Set up sync'}</button>
@@ -7675,6 +7698,12 @@
       </section>
       <p class="small muted" style="margin:0">Tip: press <kbd>/</kbd> to search from anywhere on a computer.</p>`, () => {}, 'Done');
     modalForm.querySelector('.modal-actions [data-close]').remove();
+    $$('[data-theme-pick]', modalForm).forEach((b) => b.addEventListener('click', () => {
+      ui.theme = b.dataset.themePick === 'system' ? '' : b.dataset.themePick;
+      savePrefs(); applyTheme();
+      $$('[data-theme-pick]', modalForm).forEach((x) => { x.classList.toggle('active', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+      if (location.hash.startsWith('#map')) rerender(); // map tiles darken with the theme
+    }));
     $('#set-sync').addEventListener('click', syncSettings);
     $('#set-export').addEventListener('click', exportBackup);
     $('#set-import').addEventListener('click', () => { modal.close(); $('#file-import').click(); });
