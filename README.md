@@ -223,6 +223,9 @@ No install, no build step: open `index.html` in a browser.
 - **Import duplicate check**: companies are matched on website domain first, then name, then the
   name without LLC / Inc. / punctuation. The import screen lists the likely duplicates ("Stale
   Widgets Incorporated → Stale Widgets LLC · website") and lets you merge or create anyway
+- **Corrected addresses**: when a file has address columns, the import can also replace the street
+  and city on accounts you already have ("Use this file's addresses on existing accounts too"); the
+  map then finds the new spot
 
 **Everywhere**
 - Search accounts and contacts from any screen (🔍, or press `/` or Ctrl/⌘-K on a computer)

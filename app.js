@@ -5441,6 +5441,12 @@
       };
       if (commit) {
         for (const [k, v] of Object.entries(fill)) if (v !== '' && v != null && !a[k]) a[k] = v;
+        // Corrected addresses: replace street and city on existing accounts (the map re-finds them).
+        if (opts.replaceAddr && !created && (r.address || r.location)) {
+          if (r.address) a.address = r.address;
+          if (r.location) a.location = r.location;
+          stats.addrUpdated = (stats.addrUpdated || 0) + 1;
+        }
         if (r.vendors.length && !a.vendors.length) a.vendors = r.vendors;
       }
       if (r.contact) addContact(a, r.contact);
@@ -5503,9 +5509,10 @@
         ${field('New accounts are', `<select name="type">${opt('prospect', 'Prospects', 'prospect')}${opt('partner', 'Partners', '')}</select>`)}
         ${field(col.leadSource !== undefined ? 'Lead source (rows without one)' : 'Lead source', `<select name="source"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, '')).join('')}</select>`)}
         ${field('Tag new accounts', `<input name="tag" value="${fromZoomInfo ? 'zoominfo' : 'import'}-${today().slice(5)}">`)}
+        ${col.address !== undefined || col.city !== undefined ? `<label class="row small span-3"><input type="checkbox" name="replaceAddr" style="width:auto"> Use this file's addresses on existing accounts too (replaces their street and city; the map finds the new spot)</label>` : ''}
       </div>`, (data) => {
-      const st2 = applyImport(records, { type: data.type, tag: data.tag.trim(), source: data.source, dupes: data.dupes || 'merge' }, true);
-      toast(`Imported: ${st2.newAccounts - st2.newPartners} new accounts${st2.newPartners ? `, ${st2.newPartners} partners` : ''}, ${st2.newContacts} contacts`);
+      const st2 = applyImport(records, { type: data.type, tag: data.tag.trim(), source: data.source, dupes: data.dupes || 'merge', replaceAddr: !!data.replaceAddr }, true);
+      toast(`Imported: ${st2.newAccounts - st2.newPartners} new accounts${st2.newPartners ? `, ${st2.newPartners} partners` : ''}, ${st2.newContacts} contacts${st2.addrUpdated ? `, ${plural(st2.addrUpdated, 'address', 'addresses')} updated` : ''}`);
       ui.typeFilter = 'all'; ui.stageFilter = 'all'; ui.vendorFilter = 'all'; ui.search = '';
       go('accounts');
     }, 'Import', { wide: true });
