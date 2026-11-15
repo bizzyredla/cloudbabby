@@ -2411,7 +2411,7 @@
           <div class="card sched-col">
             <div class="row spread" style="margin-bottom:.5rem">
               <h3 style="margin:0">Schedule</h3>
-              <div class="row"><a class="btn sm ghost" href="#map/route/${d}">Plan route</a></div>
+              <div class="row"><button type="button" class="btn sm ghost" data-act="day-recap" data-date="${d}" title="Today's activity, ready for Salesforce">End of day</button><a class="btn sm ghost" href="#map/route/${d}">Plan route</a></div>
             </div>
             ${calLegend()}
             ${calendarGrid([d], false, { noDue: true })}
@@ -2587,7 +2587,7 @@
     if (view === 'report') ui.reportWeek = weekStart(/^\d{4}-\d{2}-\d{2}$/.test(arg || '') ? arg : today());
     if (view === 'map') {
       const parts = location.hash.split('/');
-      ui.mapMode = parts[1] === 'route' ? 'route' : 'accounts';
+      ui.mapMode = parts[1] === 'route' ? 'route' : parts[1] === 'territories' ? 'territories' : 'accounts';
       if (ui.mapMode === 'route') ui.routeDate = /^\d{4}-\d{2}-\d{2}$/.test(parts[2] || '') ? parts[2] : (ui.routeDate || today());
     } else if (mapState.map) unmountMap(false);
     if (ui.lastView !== view) ui.showAll = false;
@@ -2658,8 +2658,9 @@
     instage: (x, y) => daysInStage(y) - daysInStage(x),
     next: (x, y) => ((nextStepOf(x) || {}).date || FAR).localeCompare((nextStepOf(y) || {}).date || FAR),
     updated: (x, y) => (y.updatedAt || '').localeCompare(x.updatedAt || ''),
+    terr: (x, y) => ((socalOf(x) || {}).n || 999) - ((socalOf(y) || {}).n || 999),
   };
-  const SORT_LABELS = { close: 'Expected close', followup: 'Next follow-up', revisit: 'Next revisit', renewal: 'Vendor renewal', name: 'Name', location: 'Location', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', instage: 'Days in stage', next: 'Next step', employees: 'Employees', updated: 'Recently updated' };
+  const SORT_LABELS = { close: 'Expected close', followup: 'Next follow-up', revisit: 'Next revisit', renewal: 'Vendor renewal', name: 'Name', location: 'Location', stage: 'Stage', value: 'Value', lasttouch: 'Last touch', instage: 'Days in stage', next: 'Next step', employees: 'Employees', updated: 'Recently updated', terr: 'Territory' };
   const sortAccounts = (list) => list.sort((x, y) => SORTERS[ui.sort](x, y) * ui.sortDir || x.name.localeCompare(y.name));
 
   function filteredAccounts() {
@@ -2863,9 +2864,9 @@
   const ACCT_COLS = {
     type: 'Type', stage: 'Stage', value: 'Value', employees: 'Employees', vendor: 'Current vendor', renewal: 'Renewal',
     touch: 'Last touch', instage: 'In stage', next: 'Next step', followup: 'Follow-up', contact: 'Primary contact',
-    location: 'Location', close: 'Close', revisit: 'Revisit', industry: 'Industry', source: 'Lead source', tags: 'Tags',
+    location: 'Location', close: 'Close', revisit: 'Revisit', industry: 'Industry', source: 'Lead source', tags: 'Tags', terr: 'Territory',
   };
-  const COL_SORT = { stage: 'stage', value: 'value', employees: 'employees', renewal: 'renewal', touch: 'lasttouch', instage: 'instage', next: 'next', followup: 'followup', location: 'location', close: 'close', revisit: 'revisit' };
+  const COL_SORT = { stage: 'stage', value: 'value', employees: 'employees', renewal: 'renewal', touch: 'lasttouch', instage: 'instage', next: 'next', followup: 'followup', location: 'location', close: 'close', revisit: 'revisit', terr: 'terr' };
   const DEFAULT_COLS = ['type', 'stage', 'value', 'employees', 'vendor', 'renewal', 'touch', 'instage', 'next', 'followup', 'location'];
   const acctCols = () => (Array.isArray(ui.acctCols) && ui.acctCols.length ? ui.acctCols.filter((k) => ACCT_COLS[k]) : DEFAULT_COLS);
 
@@ -2912,6 +2913,7 @@
         case 'industry': return `<td class="small">${a.industry ? esc(a.industry) : muted}</td>`;
         case 'source': return `<td class="small">${a.leadSource ? esc(a.leadSource) : muted}</td>`;
         case 'tags': return `<td class="small">${tagList(a).map((x) => '#' + esc(x)).join(' ') || muted}</td>`;
+        case 'terr': return `<td class="small" data-terr="${a.id}">${socalData ? esc(terrName(a)) || muted : '…'}</td>`;
         default: return '<td></td>';
       }
     };
@@ -3283,14 +3285,17 @@
 
         <div class="facts">
           ${a.type === 'prospect' || a.vendors.length ? `<div class="span-all"><span>Current vendors</span>${a.vendors.length ? vendorPills(a) : '—'}</div>` : ''}
-          <div class="span-all"><span>Address</span>${geoQuery(a) ? `${esc(geoQuery(a))}${hasGeo(a) ? ` · <a href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}</div>
+          <div class="span-all"><span>Address</span>${geoQuery(a) ? `${esc(geoQuery(a))}${hasGeo(a) ? ` · <a href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}${noDrop(a) ? ` <span class="pill med">${esc(noDrop(a))}: not a drop stop</span>` : ''}</div>
+          ${geoQuery(a) ? `<div><span>Field territory</span><span data-terr="${a.id}">${socalData ? esc(terrName(a) || (hasGeo(a) ? 'Outside the territories' : 'Not on the map yet')) : '…'}</span></div>` : ''}
           ${a.type === 'partner' ? (() => {
             const ref = lastReferralDate(a);
             const stale = ref && daysBetween(ref, today()) > 182;
             return `<div><span>Partner type</span>${esc(a.partnerType) || '—'}</div>
           <div><span>Last referral</span>${ref ? `${fmtDate(ref)} <span class="small muted">${relDays(ref)}</span>${stale && a.stage === 'Producing' ? '<div class="small" style="color:var(--warn)">Over 6 months: Dormant?</div>' : ''}` : 'None yet'}</div>`;
           })() : ''}
-          ${a.type === 'partner' && !a.vendorRenewal ? '' : `<div><span>Vendor renewal</span>${a.vendorRenewal ? `${fmtDate(a.vendorRenewal)} <span class="small muted">${relDays(a.vendorRenewal)}</span>` : '—'}</div>`}
+          ${a.type === 'partner' && !a.vendorRenewal ? '' : `<div><span>Vendor renewal</span>${a.vendorRenewal ? `${fmtDate(a.vendorRenewal)} <span class="small muted">${relDays(a.vendorRenewal)}</span>${yearly(a.vendorRenewal) !== a.vendorRenewal ? `<div class="small muted">Next: ${esc(fmtDate(yearly(a.vendorRenewal)))}</div>` : ''}` : '—'}</div>`}
+          ${a.benefitsRenewal ? `<div><span>Benefits renewal</span>${esc(fmtDate(yearly(a.benefitsRenewal)))} <span class="small muted">${relDays(yearly(a.benefitsRenewal))}</span></div>` : ''}
+          ${a.wcRenewal ? `<div><span>Workers' comp renewal</span>${esc(fmtDate(yearly(a.wcRenewal)))} <span class="small muted">${relDays(yearly(a.wcRenewal))}</span></div>` : ''}
           <div><span>Employees</span>${esc(a.employees) || '—'}</div>
           <div><span>Main phone</span>${a.mainPhone ? `<a href="tel:${esc(a.mainPhone)}">${esc(a.mainPhone)}</a>` : '—'}</div>
           <div><span>${a.type === 'partner' ? 'Annual value' : 'Deal value'}</span>${money(a.value)}</div>
@@ -3628,7 +3633,7 @@
   // value ticked within a section. Built-in "vendor:<name>" lists group accounts by current vendor.
   const VENDOR_LIST = 'vendor:';
   const emptyCriteria = () => ({ type: 'all', stages: [], tags: [], vendors: [], partnerTypes: [], text: '', renewalDays: 0,
-    empMin: 0, empMax: 0, place: '', industry: '', touchOlder: 0, noNext: false, noCadence: false, stageDays: 0, valueMin: 0, valueMax: 0, tiers: [] });
+    empMin: 0, empMax: 0, place: '', industry: '', touchOlder: 0, noNext: false, noCadence: false, stageDays: 0, valueMin: 0, valueMax: 0, tiers: [], terrs: [] });
   /** Is an account in a list? Hand-picked lists hold ids; the rest are filters. */
   const listHas = (l, a) => (l.kind === 'static' ? (l.ids || []).includes(a.id) : matchesCriteria(a, { ...emptyCriteria(), ...l.criteria }));
 
@@ -3645,6 +3650,7 @@
     if (c.valueMin && (Number(a.value) || 0) < c.valueMin) return false;
     if (c.valueMax && (Number(a.value) || 0) > c.valueMax) return false;
     if (c.tiers && c.tiers.length && !(a.type === 'partner' && c.tiers.includes(partnerTier(a)))) return false;
+    if (c.terrs && c.terrs.length && !c.terrs.includes(String((socalOf(a) || {}).n))) return false;
     if (c.type !== 'all' && a.type !== c.type) return false;
     if (c.stages.length && !c.stages.includes(a.stage)) return false;
     if (c.tags.length && !tagList(a).some((t) => c.tags.includes(t.toLowerCase()))) return false;
@@ -3689,6 +3695,7 @@
     if (c.noNext) parts.push('No next step');
     if (c.noCadence) parts.push('Not in a cadence');
     if (c.tiers && c.tiers.length) parts.push('Partner tier ' + c.tiers.join(' or '));
+    if (c.terrs && c.terrs.length) parts.push('Territory ' + c.terrs.map((n) => { const t = (socalData || []).find((x) => String(x.n) === n); return t ? `#${n} ${t.name}` : `#${n}`; }).join(' or '));
     return parts.length ? parts : ['All accounts'];
   }
 
@@ -3705,7 +3712,7 @@
     stages: fd.getAll('stages'), partnerTypes: fd.getAll('partnerTypes'), text: (fd.get('text') || '').trim(), renewalDays: Number(fd.get('renewalDays')) || 0,
     empMin: Number(fd.get('empMin')) || 0, empMax: Number(fd.get('empMax')) || 0, place: (fd.get('place') || '').trim(), industry: (fd.get('industry') || '').trim(),
     touchOlder: Number(fd.get('touchOlder')) || 0, noNext: !!fd.get('noNext'), noCadence: !!fd.get('noCadence'), stageDays: Number(fd.get('stageDays')) || 0,
-    valueMin: Number(fd.get('valueMin')) || 0, valueMax: Number(fd.get('valueMax')) || 0, tiers: fd.getAll('tiers'),
+    valueMin: Number(fd.get('valueMin')) || 0, valueMax: Number(fd.get('valueMax')) || 0, tiers: fd.getAll('tiers'), terrs: fd.getAll('terrs'),
   });
   /** Today's Accounts filters as view criteria, for "+ Save view". */
   const criteriaFromFilters = () => ({ ...emptyCriteria(), type: ui.typeFilter || 'all', stages: ui.stageFilter && ui.stageFilter !== 'all' ? [ui.stageFilter] : [],
@@ -3740,6 +3747,8 @@
         <div class="field"><span>Gaps</span><label class="row small"><input type="checkbox" name="noNext" style="width:auto" ${c.noNext ? 'checked' : ''}> No next step</label><label class="row small"><input type="checkbox" name="noCadence" style="width:auto" ${c.noCadence ? 'checked' : ''}> Not in a cadence</label></div>
       </div>
       <div class="field"><span>Partner tier is any of</span>${checks('tiers', ['A', 'B', 'C'], c.tiers || [], (t) => `${t} · ${TIERS[t].name}`)}</div>
+      ${socalData ? (() => { const by = socalMembers(); const ns = [...new Set([...by.keys()].map(String).concat(c.terrs || []))].sort((x, y) => x - y);
+        return ns.length ? `<div class="field"><span>Field territory is any of</span>${checks('terrs', ns, c.terrs || [], (n) => { const t = socalData.find((x) => String(x.n) === n); return t ? `#${n} ${t.name}` : `#${n}`; })}</div>` : ''; })() : ''}
       ${field('Account type', `<select name="type">${opt('all', 'Partners & prospects', c.type)}${opt('prospect', 'Prospects only', c.type)}${opt('partner', 'Partners only', c.type)}</select>`)}
       <div class="field"><span>Current vendor is any of</span>${checks('vendors', allVendors(), c.vendors)}</div>
       <div class="field"><span>Tagged with any of</span>${checks('tags', [...new Set([...allTags(), ...PARTNER_TAGS.map((t) => t.toLowerCase())])].sort(), c.tags, (t) => '#' + (PARTNER_TAGS.find((x) => x.toLowerCase() === t) || t))}</div>
@@ -5387,21 +5396,85 @@
   /** "Acme Dental, Inc." and "ACME DENTAL LLC" → "acme dental". */
   const companyKey = (n) => (n || '').toLowerCase().replace(/&/g, ' and ').replace(/[.,'’()"]/g, ' ').replace(CO_SUFFIX, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
   const domainOf = (u) => (u || '').toLowerCase().trim().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#\s]/)[0];
-  /** An existing account for an imported company: same website domain first, then same name, then a normalized name. */
+  // Words that say what kind of business it is, not which one ("Maxwell Agency Insurance Services").
+  const CO_GENERIC = new Set(['insurance', 'ins', 'services', 'service', 'svcs', 'agency', 'agencies', 'group', 'solutions', 'benefits', 'benefit',
+    'financial', 'advisors', 'advisory', 'associates', 'partners', 'consulting', 'consultants', 'brokerage', 'brokers', 'broker', 'and', 'of',
+    'firm', 'holdings', 'enterprises', 'management', 'risk', 'planning', 'administrators', 'hr', 'payroll', 'dba', 'aka']);
+  // Too common to suggest a match on by themselves.
+  const CO_COMMON = new Set(['pacific', 'west', 'western', 'california', 'socal', 'american', 'america', 'national', 'united', 'first', 'coast',
+    'coastal', 'golden', 'state', 'southern', 'los', 'angeles', 'san', 'diego', 'orange', 'county', 'valley', 'premier', 'global', 'new',
+    'best', 'one', 'pro', 'professional', 'home', 'health', 'care', 'medical', 'dental', 'law', 'legal', 'real', 'estate', 'capital']);
+  /** Every name a company goes by: "PCH Benefits (Thomas R. Means)" and "Thomas R. Means Inc. dba PCH Benefits" both give "pch benefits" and "thomas r means". */
+  function companyAliases(n) {
+    const raw = String(n || '');
+    const parts = new Set([raw, raw.replace(/\([^)]*\)/g, ' ')]);
+    for (const m of raw.matchAll(/\(([^)]*)\)/g)) parts.add(m[1]);
+    for (const x of [...parts]) for (const piece of x.split(/\s+(?:d\/b\/a|d\.?\s?b\.?\s?a\.?|a\/k\/a|a\.?k\.?a\.?)\s+|\s+[-–—|]\s+/i)) parts.add(piece);
+    return [...new Set([...parts].map(companyKey))].filter((k) => k.length >= 3);
+  }
+  /** One name is the other plus words that only describe the business: "Maxwell Agency" ↔ "Maxwell Agency Insurance Services". */
+  function sameButLonger(k1, k2) {
+    const [sh, lg] = k1.length <= k2.length ? [k1, k2] : [k2, k1];
+    if (!sh || sh === lg || !lg.startsWith(sh + ' ')) return false;
+    if (sh.split(' ').filter((w) => !CO_GENERIC.has(w)).join('').length < 4) return false;
+    return lg.slice(sh.length + 1).split(' ').every((w) => CO_GENERIC.has(w));
+  }
+  const coTokens = (n) => companyKey(n).split(' ').filter((w) => w.length >= 3 && !CO_GENERIC.has(w));
+  // Built once per accounts array (the import preview works on a copy) and topped up as an import adds
+  // accounts, so big books and big files stay fast.
+  const coIndexes = new WeakMap();
+  function coIndex() {
+    const arr = state.accounts;
+    let ix = coIndexes.get(arr);
+    if (!ix || ix.n > arr.length) { ix = { n: 0, keys: [], tokens: [], alias: new Map() }; coIndexes.set(arr, ix); }
+    for (let i = ix.n; i < arr.length; i++) {
+      const a = arr[i];
+      ix.keys.push([a, companyKey(a.name)]);
+      ix.tokens.push([a, coTokens(a.name)]);
+      for (const k of companyAliases(a.name)) { if (!ix.alias.has(k)) ix.alias.set(k, new Set()); ix.alias.get(k).add(a); }
+    }
+    ix.n = arr.length;
+    return ix;
+  }
+  /** An existing account for an imported company: same website domain first, then same name, a normalized name,
+   *  a name it also goes by (dba, parentheses), then the same name with extra words like "Insurance Services". */
   function matchExisting(name, website) {
     const dom = domainOf(website);
     if (dom && dom.includes('.')) { const a = state.accounts.find((x) => domainOf(x.website) === dom); if (a) return { a, how: 'website' }; }
     const exact = findAccountByName(name);
     if (exact) return { a: exact, how: 'name' };
     const k = companyKey(name);
-    if (k) { const a = state.accounts.find((x) => companyKey(x.name) === k); if (a) return { a, how: 'similar name' }; }
+    if (!k) return null;
+    const ix = coIndex();
+    const same = ix.keys.find(([, x]) => x === k);
+    if (same) return { a: same[0], how: 'similar name' };
+    const aka = new Set();
+    for (const al of companyAliases(name)) for (const a of ix.alias.get(al) || []) aka.add(a);
+    if (aka.size === 1) return { a: [...aka][0], how: 'also known as' };
+    const longer = ix.keys.filter(([, x]) => sameButLonger(k, x));
+    if (longer.length === 1) return { a: longer[0][0], how: 'same name, extra words' };
     return null;
+  }
+  /** A possible match for a company that would be created new: shares its distinctive words. Only a suggestion. */
+  function nearMatch(name) {
+    const t = coTokens(name);
+    if (!t.length) return null;
+    let best = null;
+    for (const [a, u] of coIndex().tokens) {
+      if (!u.length) continue;
+      const shared = t.filter((w) => u.includes(w));
+      if (!shared.some((w) => w.length >= 4 && !CO_COMMON.has(w))) continue;
+      const score = shared.length / Math.min(t.length, u.length);
+      if (score >= 0.6 && (!best || score > best.score)) best = { a, score };
+    }
+    return best && best.a;
   }
 
   function applyImport(records, opts, commit) {
+    coIndexes.delete(state.accounts); // fresh name index per import (accounts may have changed since the last one)
     const now = new Date().toISOString();
     const made = new Map(); // lower-case name -> new account (dry run keeps them here)
-    const stats = { newAccounts: 0, updatedAccounts: new Set(), newContacts: 0, skippedContacts: 0, newPartners: 0, fuzzy: new Map() };
+    const stats = { newAccounts: 0, updatedAccounts: new Set(), newContacts: 0, skippedContacts: 0, newPartners: 0, fuzzy: new Map(), created: [], near: new Map() };
     const addContact = (a, c) => {
       const dup = a.contacts.find((x) => (c.email && x.email && x.email.toLowerCase() === c.email.toLowerCase()) || x.name.toLowerCase() === c.name.toLowerCase());
       if (dup) { stats.skippedContacts++; return dup; }
@@ -5414,11 +5487,16 @@
       const key = name.toLowerCase();
       let a = made.get(key) || made.get('n:' + companyKey(name));
       if (!a) {
-        const m = opts.dupes === 'create' ? (findAccountByName(name) ? { a: findAccountByName(name), how: 'name' } : null) : matchExisting(name, website);
-        if (m && m.how !== 'name' && !stats.fuzzy.has(name)) stats.fuzzy.set(name, { to: m.a.name, how: m.how });
+        let m;
+        const picked = opts.mergeInto && opts.mergeInto.get(name);
+        if (picked && getAccount(picked)) m = { a: getAccount(picked), how: 'picked' };
+        else if (opts.dupes === 'create' || (opts.noMerge && opts.noMerge.has(name))) m = findAccountByName(name) ? { a: findAccountByName(name), how: 'name' } : null;
+        else m = matchExisting(name, website);
+        if (m && m.how !== 'name' && m.how !== 'picked' && !stats.fuzzy.has(name)) stats.fuzzy.set(name, { to: m.a.name, how: m.how, id: m.a.id });
         if (m) a = m.a;
       }
       if (a) return { a, created: false };
+      stats.created.push(name);
       a = migrateAccount({
         id: uid(), name, type, stage, tags: opts.tag, notes: '', vendors: [],
         contacts: [], activities: [], keyDates: [], leadSource: source, createdAt: now, updatedAt: now,
@@ -5463,6 +5541,8 @@
       }
       if (commit) touch(a);
     }
+    // Preview only: companies that would be created new but share their distinctive words with an account you have.
+    if (!commit) for (const n of stats.created) { const m = nearMatch(n); if (m) stats.near.set(n, { to: m.name, id: m.id }); }
     return stats;
   }
 
@@ -5500,18 +5580,27 @@
       </div>
       <p class="small muted" style="margin:0">From <strong>${esc(fileName)}</strong> (${records.length} rows). Columns recognized: ${[...new Set(found)].map((f) => `<span class="pill">${esc(f)}</span>`).join(' ')}</p>
       ${s.fuzzy.size ? `<div class="dup-review">
-        <b>${plural(s.fuzzy.size, 'company', 'companies')} look${s.fuzzy.size === 1 ? 's' : ''} like account${s.fuzzy.size === 1 ? '' : 's'} you already have</b> <span class="small muted">(matched on website or a similar name)</span>
-        <ul class="small">${[...s.fuzzy].slice(0, 8).map(([from, m]) => `<li>${esc(from)} → <b>${esc(m.to)}</b> <span class="muted">· ${esc(m.how)}</span></li>`).join('')}${s.fuzzy.size > 8 ? `<li class="muted">and ${s.fuzzy.size - 8} more</li>` : ''}</ul>
-        ${field('For these', `<select name="dupes">${opt('merge', 'Merge into the existing account', 'merge')}${opt('create', 'Create new accounts anyway', 'merge')}</select>`)}
+        <b>${plural(s.fuzzy.size, 'company', 'companies')} look${s.fuzzy.size === 1 ? 's' : ''} like account${s.fuzzy.size === 1 ? '' : 's'} you already have</b> <span class="small muted">(ticked ones are merged; untick to create a new account)</span>
+        <ul class="small dup-list">${[...s.fuzzy].map(([from, m], i) => `<li><label><input type="checkbox" name="merge" value="${i}" checked> <span>${esc(from)} → <b>${esc(m.to)}</b> <span class="muted">· ${esc(m.how)}</span></span></label></li>`).join('')}</ul>
       </div>` : ''}
-      <p class="small muted" style="margin:0">Existing accounts are matched by website domain first, then by name (ignoring LLC, Inc. and punctuation). Only empty fields are filled in, and contacts already on an account (same email or name) are skipped.</p>
+      ${s.near.size ? `<div class="dup-review near-review">
+        <b>${plural(s.near.size, 'new company', 'new companies')} might be account${s.near.size === 1 ? '' : 's'} you already have</b> <span class="small muted">(tick to merge instead of creating new)</span>
+        <ul class="small dup-list">${[...s.near].map(([from, m], i) => `<li><label><input type="checkbox" name="near" value="${i}"> <span>${esc(from)} → <b>${esc(m.to)}</b>?</span></label></li>`).join('')}</ul>
+      </div>` : ''}
+      ${s.created.length && s.updatedAccounts.size ? `<details class="small new-names"><summary>${plural(new Set(s.created).size, 'new account')} will be created</summary>
+        <div class="muted">${[...new Set(s.created)].map(esc).join(' · ')}</div></details>` : ''}
+      <p class="small muted" style="margin:0">Existing accounts are matched by website domain first, then by name (ignoring LLC, Inc. and punctuation), a name the company also goes by ("dba", parentheses), or the same name with extra words like "Insurance Services". Only empty fields are filled in, and contacts already on an account (same email or name) are skipped.</p>
       <div class="grid-3">
         ${field('New accounts are', `<select name="type">${opt('prospect', 'Prospects', 'prospect')}${opt('partner', 'Partners', '')}</select>`)}
         ${field(col.leadSource !== undefined ? 'Lead source (rows without one)' : 'Lead source', `<select name="source"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, '')).join('')}</select>`)}
         ${field('Tag new accounts', `<input name="tag" value="${fromZoomInfo ? 'zoominfo' : 'import'}-${today().slice(5)}">`)}
         ${col.address !== undefined || col.city !== undefined ? `<label class="row small span-3"><input type="checkbox" name="replaceAddr" style="width:auto"> Use this file's addresses on existing accounts too (replaces their street and city; the map finds the new spot)</label>` : ''}
-      </div>`, (data) => {
-      const st2 = applyImport(records, { type: data.type, tag: data.tag.trim(), source: data.source, dupes: data.dupes || 'merge', replaceAddr: !!data.replaceAddr }, true);
+      </div>`, (data, fd) => {
+      const keep = new Set(fd.getAll('merge').map(Number));
+      const noMerge = new Set([...s.fuzzy.keys()].filter((n, i) => !keep.has(i)));
+      const nearPicked = new Set(fd.getAll('near').map(Number));
+      const mergeInto = new Map([...s.near].filter((x, i) => nearPicked.has(i)).map(([n, m]) => [n, m.id]));
+      const st2 = applyImport(records, { type: data.type, tag: data.tag.trim(), source: data.source, dupes: 'merge', noMerge, mergeInto, replaceAddr: !!data.replaceAddr }, true);
       toast(`Imported: ${st2.newAccounts - st2.newPartners} new accounts${st2.newPartners ? `, ${st2.newPartners} partners` : ''}, ${st2.newContacts} contacts${st2.addrUpdated ? `, ${plural(st2.addrUpdated, 'address', 'addresses')} updated` : ''}`);
       ui.typeFilter = 'all'; ui.stageFilter = 'all'; ui.vendorFilter = 'all'; ui.search = '';
       go('accounts');
@@ -5652,23 +5741,64 @@
     return geocodeNominatim(q);
   }
 
+  /** The city and ZIP an address names ("…, Irvine, CA 92617"), to check a lookup landed in the right place. */
+  function cityZip(q) {
+    const zip = (String(q).match(/\b(\d{5})(?:-\d{4})?\s*$/) || [])[1] || '';
+    const city = ((String(q).match(/(?:^|,)\s*([A-Za-z][A-Za-z .'-]*?),\s*[A-Z]{2}\b[^,]*$/) || [])[1] || '').trim().toLowerCase();
+    return { zip, city };
+  }
+  /** Of several answers, the first in the address's ZIP, else its city, else the first. `check` when none is in either. */
+  function pickHit(hits, q, info) {
+    if (!hits.length) return null;
+    const want = cityZip(q);
+    const inZip = (h) => want.zip && info(h).zip === want.zip;
+    const inCity = (h) => want.city && info(h).cities.includes(want.city);
+    const pick = hits.find(inZip) || hits.find(inCity) || hits[0];
+    const i = info(pick);
+    // Flag only a real disagreement: the answer names a city or ZIP, and neither is the address's.
+    if ((want.zip || want.city) && (i.zip || i.cities.length) && !inZip(pick) && !inCity(pick)) {
+      return { h: pick, check: [i.cities[0] && i.cities[0].replace(/\b\w/g, (c) => c.toUpperCase()), i.zip].filter(Boolean).join(' ') || 'another area' };
+    }
+    return { h: pick };
+  }
+
   async function geocodeMapbox(q) {
-    const res = await fetch(`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(q)}&country=us&limit=1&permanent=true&access_token=${MAPBOX_TOKEN}`);
+    const res = await fetch(`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(q)}&country=us&limit=5&permanent=true&access_token=${MAPBOX_TOKEN}`);
     if (!res.ok) throw new Error(`Mapbox address lookup failed (${res.status})`);
-    const [hit] = (await res.json()).features || [];
-    if (!hit) return null;
-    const [lng, lat] = hit.geometry.coordinates;
+    const info = (h) => {
+      const c = (h.properties || {}).context || {};
+      return { zip: (c.postcode || {}).name || '', cities: [(c.place || {}).name, (c.locality || {}).name, (c.neighborhood || {}).name].filter(Boolean).map((x) => x.toLowerCase()) };
+    };
+    const got = pickHit((await res.json()).features || [], q, info);
+    if (!got) return null;
+    const [lng, lat] = got.h.geometry.coordinates;
     const coarse = ['place', 'locality', 'neighborhood', 'district', 'postcode', 'region', 'country'];
-    return { lat: Number(lat), lng: Number(lng), ...(coarse.includes((hit.properties || {}).feature_type) ? { approx: true } : {}) };
+    return { lat: Number(lat), lng: Number(lng), ...(coarse.includes((got.h.properties || {}).feature_type) ? { approx: true } : {}), ...(got.check ? { check: got.check } : {}) };
   }
 
   async function geocodeNominatim(q) {
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' } });
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=1&countrycodes=us&q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' } });
     if (!res.ok) throw new Error(`Address lookup failed (${res.status})`);
-    const [hit] = await res.json();
+    const info = (h) => { const ad = h.address || {}; return { zip: (ad.postcode || '').slice(0, 5), cities: [ad.city, ad.town, ad.village, ad.suburb, ad.hamlet].filter(Boolean).map((x) => x.toLowerCase()) }; };
+    const got = pickHit(await res.json(), q, info);
+    if (!got) return null;
     const coarse = ['city', 'town', 'village', 'hamlet', 'municipality', 'county', 'state', 'postcode', 'suburb', 'neighbourhood', 'quarter', 'region'];
-    return hit ? { lat: Number(hit.lat), lng: Number(hit.lon), ...(coarse.includes(hit.addresstype) ? { approx: true } : {}) } : null;
+    return { lat: Number(got.h.lat), lng: Number(got.h.lon), ...(coarse.includes(got.h.addresstype) ? { approx: true } : {}), ...(got.check ? { check: got.check } : {}) };
   }
+
+  // ----- addresses that aren't worth a drop: mailbox stores, homes, shared offices -----
+  const ADDR_KINDS = { office: 'An office you can walk into', mailbox: 'A mailbox (UPS Store, PMB, PO box)', home: 'A home', virtual: 'A shared or virtual office' };
+  /** What kind of place the address is: set by hand, or guessed from PMB / PO box / "Ste 107-315" / Apt. */
+  function addrKind(a) {
+    if (a.addrKind) return a.addrKind;
+    const t = a.address || '';
+    if (/\b(p\.?\s?o\.?\s*box|pmb|private mailbox)\b/i.test(t) || /\b(ste|suite|#)\s*\d+\s*-\s*\d+\b/i.test(t)) return 'mailbox';
+    if (/\b(apt|apartment)\b/i.test(t)) return 'home';
+    return '';
+  }
+  const NO_DROP_LABEL = { mailbox: 'Mailbox address', home: 'Home address', virtual: 'Shared / virtual office' };
+  /** Why this address isn't a drop stop, or ''. */
+  const noDrop = (a) => NO_DROP_LABEL[addrKind(a)] || '';
 
   /** Find coordinates for accounts with a new or changed address, one per second, while the map is open. */
   async function locateAccounts() {
@@ -5699,6 +5829,8 @@
     const err = mapState.locating && mapState.locating.error;
     mapState.locating = null;
     if (run === mapState.runId) { if (err) toast('Address lookup is unavailable right now. Try again later.'); rerenderMap(); }
+    // The map was redrawn mid-way (a filter, the territories arriving): carry on if it's still the accounts map.
+    else if (!err && mapState.view === 'accounts' && $('#map') && state.accounts.some(needsGeo)) setTimeout(locateAccounts, 50);
   }
 
   function updateLocateStatus() {
@@ -5760,13 +5892,25 @@
   const MAP_COLORS = { touch: 'Last touch', stage: 'Stage', type: 'Type', renewal: 'Renewal window' };
   const TOUCH_BANDS = [[30, '#2f9e44', 'Touched in 30 days'], [60, '#f08c00', '30–60 days'], [Infinity, '#e03131', '60+ days or never']];
   const RENEWAL_BANDS = [[60, '#e03131', 'Renews in 60 days'], [120, '#f08c00', '61–120 days'], [180, '#fab005', '121–180 days'], [Infinity, '#74c0fc', '180+ days out']];
-  /** The soonest upcoming renewal: the vendor renewal date, or an open key date mentioning "renew". */
-  function nextRenewal(a) {
-    const t = today();
-    const dates = [a.vendorRenewal, ...a.keyDates.filter((k) => !k.done && /renew/i.test(k.label || '')).map((k) => k.date)]
-      .filter((x) => x && x >= t).sort();
-    return dates[0] || '';
+  /** A yearly date's next occurrence on or after t: last year's renewal counts as this year's. */
+  function yearly(iso, t = today()) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || '')) return '';
+    if (iso >= t) return iso;
+    const md = iso.slice(5) === '02-29' ? '02-28' : iso.slice(5);
+    const y = Number(t.slice(0, 4));
+    return `${y}-${md}` >= t ? `${y}-${md}` : `${y + 1}-${md}`;
   }
+  /** Upcoming renewals, soonest first: PEO / vendor, benefits and workers' comp (yearly), plus open "renew" key dates. */
+  function renewalsOf(a, t = today()) {
+    const out = [];
+    if (a.vendorRenewal) out.push({ date: yearly(a.vendorRenewal, t), what: a.vendors && a.vendors.length ? a.vendors[0] : 'Vendor' });
+    if (a.benefitsRenewal) out.push({ date: yearly(a.benefitsRenewal, t), what: 'Benefits' });
+    if (a.wcRenewal) out.push({ date: yearly(a.wcRenewal, t), what: "Workers' comp" });
+    for (const k of a.keyDates) if (!k.done && /renew/i.test(k.label || '') && k.date >= t) out.push({ date: k.date, what: k.label });
+    return out.filter((x) => x.date).sort((x, y) => x.date.localeCompare(y.date));
+  }
+  /** The soonest upcoming renewal date, or ''. */
+  const nextRenewal = (a, t = today()) => (renewalsOf(a, t)[0] || {}).date || '';
   const STAGE_COLORS = {
     'S1 – Discovery Scheduled': '#a5d8ff', 'S2 – Qualified Opportunity': '#74c0fc', 'S3 – Solution & Quote Development': '#339af0',
     'S4 – Proposal Presented': '#1c7ed6', 'S5 – Decision / Negotiation': '#1864ab', 'Closed Won': '#2f9e44', 'Closed Lost': '#868e96', Nurture: '#be4bdb', Revisit: '#f08c00',
@@ -5883,11 +6027,41 @@
     const n = $('#draw-n'); if (n) n.textContent = dr.points.length;
     const fin = $('#draw-done'); if (fin) fin.disabled = dr.points.length < 3;
   }
-  /** Accounts worth a field-day stop: a revisit or follow-up due first, then longest-untouched (30+ days). */
+  /** Why an account is worth a drop on day d: a score (higher first) and the reasons, as short chips.
+   *  Due follow-ups and revisits, a renewal coming up, never dropped, gone cold, live deals, partners behind on touches. */
+  function dropScore(a, d) {
+    const why = []; let score = 0;
+    const lt = lastTouchDate(a);
+    const idle = lt ? daysBetween(lt, d) : null;
+    const due = a.revisitDate && a.revisitDate <= d ? 'Revisit due' : a.nextFollowUp && a.nextFollowUp <= d ? 'Follow-up due' : '';
+    if (due) { score += 40; why.push({ t: due, c: 'due' }); }
+    const rn = renewalsOf(a, d)[0];
+    const rDays = rn ? daysBetween(d, rn.date) : null;
+    if (rn && rDays <= 180) {
+      score += rDays <= 60 ? 35 : rDays <= 120 ? 25 : 12;
+      why.push({ t: `${rn.what} renews ${rDays <= 1 ? (rDays ? 'tomorrow' : 'today') : `in ${rDays} d`}`, c: 'renew' });
+    }
+    const dropped = a.activities.some((h) => h.kind === 'Visit');
+    if (!dropped) { score += 15; why.push({ t: 'Never dropped', c: 'never' }); }
+    if (idle === null) { score += 20; why.push({ t: 'Never touched', c: 'cold' }); }
+    else if (idle >= 30) { score += Math.min(30, 10 + Math.round((idle - 30) / 6)); why.push({ t: `Cold ${idle} d`, c: 'cold' }); }
+    if (a.type === 'partner') {
+      const g = touchGap(a);
+      if (g.late) { score += 25; why.push({ t: `${partnerTier(a)}-tier check-in due`, c: 'due' }); }
+    } else if (/^S[2-5]/.test(a.stage || '')) { score += 10; why.push({ t: stageShort(a.stage), c: 'stage' }); }
+    if (Number(a.value) > 0) score += Math.min(10, Math.round(Math.log10(Number(a.value))));
+    const nd = noDrop(a);
+    if (nd) { score -= 100; why.unshift({ t: nd, c: 'nodrop' }); }
+    return { score, why, due: !!due, idle, renew: rn && rDays <= 120 ? rn : null, dropped };
+  }
+  const whyChips = (why, max = 4) => why.slice(0, max).map((w) => `<span class="why-chip ${w.c}">${esc(w.t)}</span>`).join('');
+  /** Accounts worth a field-day stop, best first: due, renewing within 120 days, never dropped, or 30+ days cold.
+   *  Mailboxes and homes are left out. `n` is days since the last touch (9999 = never). */
   function fieldDayCandidates(members, d, exclude = new Set()) {
-    return members.filter((a) => !exclude.has(a.id) && !isClosedStage(a.stage))
-      .map((a) => { const lt = lastTouchDate(a); return { a, n: lt ? daysBetween(lt, d) : 9999, due: (a.revisitDate && a.revisitDate <= d) || (a.nextFollowUp && a.nextFollowUp <= d) }; })
-      .filter((x) => x.due || x.n >= 30).sort((x, y) => (y.due - x.due) || y.n - x.n);
+    return members.filter((a) => !exclude.has(a.id) && !isClosedStage(a.stage) && !noDrop(a))
+      .map((a) => { const x = dropScore(a, d); return { a, ...x, n: x.idle === null ? 9999 : x.idle }; })
+      .filter((x) => x.due || x.renew || !x.dropped || x.n >= 30)
+      .sort((x, y) => y.score - x.score || y.n - x.n);
   }
   /** Accounts in a drawn territory worth a stop: no touch in 30+ days, or a revisit or follow-up due. */
   const territorySuggestions = (t, d, exclude) => fieldDayCandidates(state.accounts.filter((a) => inTerritory(t, a)), d, exclude);
@@ -5902,24 +6076,74 @@
     socalLoading ||= fetch('socal-territories.json').then((r) => {
       if (!r.ok) throw new Error(`Territories failed to load (${r.status})`);
       return r.json();
-    }).then((j) => { socalData = j; return j; }).catch((e) => { socalLoading = null; mapState.socalFail = true; throw e; });
+    }).then((j) => {
+      for (const t of j) {
+        let b = [90, 180, -90, -180];
+        for (const poly of t.rings) for (const [y, x] of poly[0]) b = [Math.min(b[0], y), Math.min(b[1], x), Math.max(b[2], y), Math.max(b[3], x)];
+        t.box = b;
+        t.cities = String(t.areas || '').toLowerCase().split(/\s*,\s*/).filter(Boolean);
+      }
+      socalData = j; socalCache.clear(); return j;
+    }).catch((e) => { socalLoading = null; mapState.socalFail = true; throw e; });
     return socalLoading;
   }
   /** Inside any polygon of the territory: in its outer ring and not in a hole. */
   const inRings = (pt, rings) => rings.some((poly) => inPolygon(pt, poly[0]) && !poly.slice(1).some((h) => inPolygon(pt, h)));
+  const inBox = (pt, b, pad = 0) => pt[0] >= b[0] - pad && pt[0] <= b[2] + pad && pt[1] >= b[1] - pad && pt[1] <= b[3] + pad;
+  /** Miles from a point to a territory's nearest edge. */
+  function milesToEdge(pt, t) {
+    const k = Math.cos((pt[0] * Math.PI) / 180);
+    let best = Infinity;
+    for (const poly of t.rings) for (const r of poly) for (let i = 0; i < r.length; i++) {
+      const a = r[i], b = r[(i + 1) % r.length];
+      const ax = (a[1] - pt[1]) * k, ay = a[0] - pt[0], dx = (b[1] - a[1]) * k, dy = b[0] - a[0];
+      const len = dx * dx + dy * dy;
+      const u = len ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len)) : 0;
+      best = Math.min(best, Math.hypot(ax + u * dx, ay + u * dy) * 69);
+    }
+    return best;
+  }
+  /** The territory for a point: the outline it's inside; just outside every outline (an unincorporated pocket or a
+   *  simplified edge), the nearby territory that lists the address's city, else the closest one within 2 miles. */
+  function socalFind(pt, city) {
+    const inside = socalData.find((t) => inBox(pt, t.box) && inRings(pt, t.rings));
+    if (inside) return inside;
+    const near = socalData.filter((t) => inBox(pt, t.box, 0.1));
+    const named = city ? near.filter((t) => t.cities.includes(city)) : [];
+    const pool = named.length ? named : near;
+    let best = null;
+    for (const t of pool) { const m = milesToEdge(pt, t); if (!best || m < best.m) best = { t, m }; }
+    return best && (named.length || best.m <= 2) ? best.t : null;
+  }
   const socalCache = new Map();
   /** The built-in territory an account's pin falls in, or null. */
   function socalOf(a) {
     if (!socalData || !hasGeo(a)) return null;
-    const key = `${a.geo.lat},${a.geo.lng}`;
-    if (!socalCache.has(key)) socalCache.set(key, socalData.find((x) => inRings(ll(a), x.rings)) || null);
+    const city = cityZip(a.location || geoQuery(a)).city;
+    const key = `${a.geo.lat},${a.geo.lng},${city}`;
+    if (!socalCache.has(key)) socalCache.set(key, socalFind(ll(a), city));
     return socalCache.get(key);
   }
+  const terrName = (a) => { const t = socalOf(a); return t ? `#${t.n} ${t.name}` : ''; };
+  /** Every account by territory number, in one pass. */
+  function socalMembers() {
+    const by = new Map();
+    for (const a of state.accounts) { const t = socalOf(a); if (t) { if (!by.has(t.n)) by.set(t.n, []); by.get(t.n).push(a); } }
+    return by;
+  }
   const socalOn = () => ui.mapSocal !== false;
-  /** Load the layer soon and redraw the map screen once it's here (once; failures don't loop). */
+  /** Fill territory placeholders ([data-terr=accountId]) once the territories are here. */
+  function fillTerr() {
+    $$('[data-terr]').forEach((el) => { const a = getAccount(el.dataset.terr); if (a) el.textContent = terrName(a) || (hasGeo(a) ? 'Outside the territories' : 'Not on the map yet'); });
+  }
+  /** Load the territories soon (they also drive account assignment, so even when the layer is hidden), then refresh. */
   function socalSoon() {
-    if (!socalOn() || socalData || mapState.socalFail) return;
-    loadSocal().then(() => rerenderMap()).catch(() => { /* the map works without the layer */ });
+    if (socalData || mapState.socalFail || socalLoading) return;
+    loadSocal().then(() => {
+      fillTerr();
+      const busy = modal.open || (document.activeElement && document.activeElement.matches('input, textarea, select'));
+      if (/^#(map|accounts)/.test(location.hash) && !busy) rerender();
+    }).catch(() => { /* the app works without the layer */ });
   }
   function drawSocal(layer) {
     if (!socalOn() || !socalData || !mapState.map) return;
@@ -5932,64 +6156,228 @@
         .addTo(layer);
     }
   }
-  /** Territory scorecard: who's inside, what's cold or due, and the field-day picks. */
-  function socalCard(t) {
-    const d = today();
-    const rd = ui.routeDate || d;
-    const members = state.accounts.filter((a) => socalOf(a) === t);
+  /** A territory's numbers: who's inside, what's due, cold or renewing, and when you were last there. */
+  function socalStats(t, members, d = today()) {
     const open = members.filter((a) => !isClosedStage(a.stage));
     const due = open.filter((a) => (a.revisitDate && a.revisitDate <= d) || (a.nextFollowUp && a.nextFollowUp <= d));
     const cold = open.filter((a) => { const lt = lastTouchDate(a); return !lt || daysBetween(lt, d) >= 30; });
-    const lastVisit = members.flatMap((a) => a.activities.filter((h) => h.kind === 'Visit').map((h) => h.date)).sort().pop();
-    const cands = fieldDayCandidates(members, rd, new Set(routeStops(rd).map((s) => s.a.id))).slice(0, 10);
+    const renew = open.filter((a) => { const r = nextRenewal(a, d); return r && daysBetween(d, r) <= 90; });
+    let lastVisit = ''; let lastTouch = '';
+    for (const a of members) {
+      for (const h of a.activities) if (h.kind === 'Visit' && h.date > lastVisit && h.date <= d) lastVisit = h.date;
+      const lt = lastTouchDate(a); if (lt > lastTouch) lastTouch = lt;
+    }
+    return { t, members, open, due, cold, renew, lastVisit, lastTouch, sinceVisit: lastVisit ? daysBetween(lastVisit, d) : null, sinceTouch: lastTouch ? daysBetween(lastTouch, d) : null };
+  }
+  /** The day to plan a field day for: the route day on screen if it's not past, else the next workday. */
+  const planDay = () => (ui.routeDate && ui.routeDate >= today() ? ui.routeDate : nextWorkday(today()));
+  /** Put a territory's best stops on a day's route. */
+  function addFieldDay(t, d, n = 10) {
+    const members = state.accounts.filter((a) => socalOf(a) === t);
+    const picks = fieldDayCandidates(members, d, new Set(routeStops(d).map((s) => s.a.id))).slice(0, n);
+    if (!picks.length) { toast(`#${t.n} ${t.name}: nothing due, renewing or cold there right now`); return 0; }
+    const r = getRoute(d);
+    const ids = picks.map((x) => x.a.id).filter((id) => !r.extra.includes(id));
+    setRoute(d, { extra: [...r.extra, ...ids], removed: r.removed.filter((x) => !ids.includes(x)) });
+    toast(`#${t.n} ${t.name}: ${plural(ids.length, 'stop')} added to ${d === today() ? 'today' : fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' })}`);
+    return ids.length;
+  }
+  /** Territory scorecard: accounts, due, cold, renewals, last field day and last touch, and the ranked picks. */
+  function socalCard(t) {
+    let rd = planDay();
+    const members = state.accounts.filter((a) => socalOf(a) === t);
+    const st = socalStats(t, members);
+    const body = () => {
+      const cands = fieldDayCandidates(members, rd, new Set(routeStops(rd).map((s) => s.a.id))).slice(0, 10);
+      return `${cands.length ? `<div class="drop-list">${cands.map(({ a, why }) => `
+        <div class="drop-row"><div class="grow"><a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a> ${a.type === 'partner' ? '<span class="pill partner">Partner</span>' : ''}
+          <div class="why">${whyChips(why)}</div></div></div>`).join('')}</div>
+        <div class="row" style="gap:.4rem;flex-wrap:wrap">
+          <button type="button" class="btn" id="terr-card-add">Add these ${cands.length} to the route</button>
+          <button type="button" class="btn ghost" id="terr-card-pick">Choose stops…</button>
+        </div>`
+        : `<div class="empty">${st.open.length ? 'Nothing due, renewing or cold here right now.' : 'No mapped accounts in this territory yet.'}</div>`}`;
+    };
     openModal(`#${t.n} ${t.name}`, `
       <div class="small muted">${esc(t.region)} · ${esc(t.county)}</div>
       <p class="small" style="margin:.25rem 0">${esc(t.areas)}</p>
       <div class="route-summary terr-score">
-        <div><b>${open.length}</b><span>open accounts</span></div>
-        <div><b>${due.length}</b><span>due now</span></div>
-        <div><b>${cold.length}</b><span>cold 30+ days</span></div>
-        <div><b>${lastVisit ? esc(relDays(lastVisit)) : 'never'}</b><span>last visit</span></div>
+        <div><b>${st.open.length}</b><span>open accounts</span></div>
+        <div><b>${st.due.length}</b><span>due now</span></div>
+        <div><b>${st.cold.length}</b><span>cold 30+ days</span></div>
+        <div><b>${st.renew.length}</b><span>renew in 90 days</span></div>
+        <div><b>${st.lastVisit ? esc(relDays(st.lastVisit)) : 'never'}</b><span>last field day</span></div>
+        <div><b>${st.sinceTouch === null ? 'never' : `${st.sinceTouch} d`}</b><span>since last touch</span></div>
       </div>
-      ${cands.length ? `<h3 style="margin:.5rem 0 .25rem">Field day picks</h3>
-      <div class="side-list">${cands.map(({ a, n, due: dd }) => `
-        <div class="side-item"><a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a>
-          <span class="small muted">${dd ? 'due now' : n >= 9999 ? 'never touched' : `touched ${n} days ago`} · ${esc(stageShort(a.stage))}</span></div>`).join('')}</div>
-      <button type="button" class="btn sm" id="terr-card-add">Add ${cands.length} to the ${esc(fmtDate(rd, { month: 'short', day: 'numeric' }))} route</button>`
-      : `<div class="empty">${open.length ? 'Nothing due or cold here right now.' : 'No mapped accounts in this territory yet.'}</div>`}`,
+      <div class="row spread" style="margin:.5rem 0 .25rem;flex-wrap:wrap;gap:.4rem"><h3 style="margin:0">Field day picks</h3>
+        <label class="row small" style="gap:.3rem">for <input type="date" id="terr-card-day" value="${rd}" min="${today()}" style="width:auto"></label></div>
+      <div id="terr-card-body">${body()}</div>`,
     () => {}, 'Close', { wide: true });
     const cancel = modalForm.querySelector('.modal-actions [data-close]');
     if (cancel) cancel.remove();
-    const add = $('#terr-card-add');
-    if (add) add.addEventListener('click', () => {
-      const r = getRoute(rd);
-      const ids = cands.map((x) => x.a.id).filter((id) => !r.extra.includes(id));
-      setRoute(rd, { extra: [...r.extra, ...ids], removed: r.removed.filter((x) => !ids.includes(x)) });
-      modal.close(); toast(`#${t.n} ${t.name}: ${plural(ids.length, 'stop')} added`); go(`map/route/${rd}`);
-    });
+    const wire = () => {
+      const add = $('#terr-card-add');
+      if (add) add.addEventListener('click', () => { if (addFieldDay(t, rd)) { modal.close(); go(`map/route/${rd}`); } });
+      const pick = $('#terr-card-pick');
+      if (pick) pick.addEventListener('click', () => { ui.routeDate = rd; stopPickerForm(rd, `b:${t.n}`); });
+    };
+    $('#terr-card-day').addEventListener('change', (e) => { if (e.target.value) { rd = e.target.value; $('#terr-card-body').innerHTML = body(); wire(); } });
+    wire();
   }
 
-  // ----- day recap: a day's logged activity, ready to paste into Salesforce -----
-  function dayRecapForm(d) {
-    const rows = [];
-    for (const a of state.accounts) for (const h of a.activities) if (h.date === d) {
-      const c = a.contacts.find((x) => x.id === h.contactId);
-      rows.push(`${h.kind}${c ? ` with ${c.name}` : ''} - ${a.name}${h.summary ? ` - ${h.summary}` : ''}${h.notes ? `\n  ${String(h.notes).replace(/\n/g, '\n  ')}` : ''}`);
+  // ----- add stops, best first: every account ranked by why it's worth a drop that day -----
+  function stopPickerForm(d, scope) {
+    const stops = routeStops(d);
+    const onRoute = new Set(stops.map((s) => s.a.id));
+    const by = socalData ? socalMembers() : new Map();
+    // Default to the territory most of the day's stops are in.
+    if (scope === undefined) {
+      const tally = new Map();
+      for (const s of stops) { const t = socalOf(s.a); if (t) tally.set(t.n, (tally.get(t.n) || 0) + 1); }
+      const top = [...tally].sort((x, y) => y[1] - x[1])[0];
+      scope = top ? `b:${top[0]}` : stops.some((s) => hasGeo(s.a)) ? 'near' : '';
     }
-    const text = `${fmtDate(d, { weekday: 'long', month: 'long', day: 'numeric' })}\n\n${rows.join('\n')}`;
-    openModal(`Day recap · ${fmtDate(d, { month: 'short', day: 'numeric' })}`, rows.length ? `
-      <p class="small muted" style="margin:0">${plural(rows.length, 'activity', 'activities')} logged. Copy, then batch-log in Salesforce at shutdown.</p>
-      <textarea id="recap-text" rows="12" readonly>${esc(text)}</textarea>
-      <button type="button" class="btn sm" id="recap-copy">Copy</button>`
-      : '<div class="empty">Nothing logged on this day yet. Visits, calls and cadence steps all land here once logged.</div>', () => {}, 'Close');
+    const st = { scope, q: '', type: 'all', show: 30 };
+    let added = 0;
+    const stopPts = () => routeStops(d).filter((s) => hasGeo(s.a)).map((s) => ll(s.a));
+    const terrs = socalData ? socalData.filter((t) => by.has(t.n)) : [];
+    const zones = state.territories || [];
+    openModal(`Add stops · ${fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' })}`, `
+      <div class="picker-ctl">
+        <input type="search" id="pk-q" placeholder="Search by name or city" autocomplete="off" enterkeyhint="search">
+        <div class="row" style="gap:.4rem;flex-wrap:wrap">
+          <select id="pk-scope" aria-label="Where" style="flex:1;min-width:12rem">
+            ${opt('', 'Everywhere', st.scope)}
+            ${opt('near', 'Near this route (5 mi)', st.scope)}
+            ${mapState.me ? opt('me', 'Near me (2 mi)', st.scope) : ''}
+            ${terrs.length ? `<optgroup label="SoCal field territories">${terrs.map((t) => opt(`b:${t.n}`, `#${t.n} ${t.name} (${by.get(t.n).length})`, st.scope)).join('')}</optgroup>` : ''}
+            ${zones.length ? `<optgroup label="My zones">${zones.map((z) => opt(`z:${z.id}`, z.name, st.scope)).join('')}</optgroup>` : ''}
+          </select>
+          <div class="seg" role="group" aria-label="Type" id="pk-type">
+            <button type="button" class="active" data-type="all">All</button><button type="button" data-type="prospect">Prospects</button><button type="button" data-type="partner">Partners</button>
+          </div>
+        </div>
+      </div>
+      <div class="small muted" id="pk-sum"></div>
+      <div class="drop-list" id="pk-list"></div>`, () => {}, 'Done', { wide: true });
     const cancel = modalForm.querySelector('.modal-actions [data-close]');
     if (cancel) cancel.remove();
-    const btn = $('#recap-copy');
-    if (btn) btn.addEventListener('click', async () => {
-      const ta = $('#recap-text'); ta.select();
-      try { await navigator.clipboard.writeText(ta.value); } catch (e) { try { document.execCommand('copy'); } catch (e2) { /* selected; user can copy */ } }
-      btn.textContent = '✓ Copied';
+    if (matchMedia('(pointer: coarse)').matches && document.activeElement) document.activeElement.blur(); // no keyboard jump on phones
+    const draw = () => {
+      const q = st.q.trim().toLowerCase();
+      const pts = st.scope === 'near' ? stopPts() : st.scope === 'me' && mapState.me ? [mapState.me] : null;
+      const radius = st.scope === 'me' ? 2 : 5;
+      const zone = st.scope.startsWith('z:') && zones.find((z) => `z:${z.id}` === st.scope);
+      let pool = st.scope.startsWith('b:') ? by.get(Number(st.scope.slice(2))) || [] : state.accounts;
+      pool = pool.filter((a) => !onRoute.has(a.id) && (st.type === 'all' || a.type === st.type) && (q || !isClosedStage(a.stage)));
+      if (zone) pool = pool.filter((a) => inTerritory(zone, a));
+      if (q) pool = pool.filter((a) => `${a.name} ${a.location || ''} ${a.address || ''}`.toLowerCase().includes(q));
+      const rows = pool.map((a) => {
+        const dist = pts && hasGeo(a) && pts.length ? Math.min(...pts.map((p) => miles(p, ll(a)))) : null;
+        return { a, dist, ...dropScore(a, d) };
+      }).filter((x) => !pts || (x.dist !== null && x.dist <= radius))
+        .sort((x, y) => y.score - x.score || (x.dist ?? 0) - (y.dist ?? 0) || x.a.name.localeCompare(y.a.name));
+      $('#pk-sum').textContent = rows.length ? `${plural(rows.length, 'account')}, best first${added ? ` · ${added} added` : ''}` : '';
+      $('#pk-list').innerHTML = rows.slice(0, st.show).map(({ a, why, dist }) => `
+        <div class="drop-row ${noDrop(a) ? 'nodrop' : ''}">
+          <div class="grow"><strong>${esc(a.name)}</strong> ${a.type === 'partner' ? '<span class="pill partner">Partner stop</span>' : ''}
+            <div class="small muted">${esc([terrName(a), dist !== null ? `${fmtMiles(dist)} away` : '', hasGeo(a) ? '' : 'not on the map'].filter(Boolean).join(' · ') || a.location || '')}</div>
+            <div class="why">${whyChips(why)}</div></div>
+          <button type="button" class="btn sm" data-pick="${a.id}">+ Add</button>
+        </div>`).join('') + (rows.length > st.show ? `<button type="button" class="btn ghost sm" id="pk-more">Show ${Math.min(30, rows.length - st.show)} more</button>` : '')
+        || `<div class="empty">${q ? 'No account matches.' : pts ? 'Nothing else within reach here.' : 'Nothing to add here.'}</div>`;
+      const more = $('#pk-more');
+      if (more) more.addEventListener('click', () => { st.show += 30; draw(); });
+    };
+    $('#pk-q').addEventListener('input', (e) => { st.q = e.target.value; st.show = 30; draw(); });
+    $('#pk-scope').addEventListener('change', (e) => { st.scope = e.target.value; st.show = 30; draw(); });
+    $$('#pk-type [data-type]').forEach((b) => b.addEventListener('click', () => {
+      st.type = b.dataset.type; $$('#pk-type [data-type]').forEach((x) => x.classList.toggle('active', x === b)); draw();
+    }));
+    $('#pk-list').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-pick]');
+      if (!b || b.disabled) return;
+      const r = getRoute(d);
+      setRoute(d, { extra: r.extra.includes(b.dataset.pick) ? r.extra : [...r.extra, b.dataset.pick], removed: r.removed.filter((x) => x !== b.dataset.pick) });
+      onRoute.add(b.dataset.pick); added++;
+      b.textContent = '✓ Added'; b.disabled = true; b.classList.add('ghost');
+      $('#pk-sum').textContent = $('#pk-sum').textContent.replace(/( · \d+ added)?$/, ` · ${added} added`);
     });
+    modal.addEventListener('close', () => { if (added && location.hash.startsWith('#map')) rerender(); }, { once: true });
+    draw();
+  }
+
+  // ----- end of day: a day's logged activity, ready for batch entry into Salesforce -----
+  // One row per activity (Salesforce logs one task per call / visit / email). Tick rows off as you
+  // enter them; the tick is kept on the activity, so tomorrow you can see what's still missing.
+  const SF_TYPE = { Call: 'Call', Email: 'Email', Visit: 'Meeting', Meeting: 'Meeting', Demo: 'Meeting', LinkedIn: 'Other', Text: 'Other', Note: 'Other', Other: 'Other' };
+  function dayActivities(d) {
+    const rows = [];
+    for (const a of state.accounts) for (const h of a.activities) if (h.date === d && !(h.kind === 'Note' && /^Stage changed/.test(h.summary || ''))) {
+      const c = a.contacts.find((x) => x.id === h.contactId);
+      rows.push({ a, h, contact: c ? c.name : '', terr: h.terr || terrName(a) });
+    }
+    return rows.sort((x, y) => (x.h.createdAt || '').localeCompare(y.h.createdAt || '') || x.a.name.localeCompare(y.a.name));
+  }
+  const sfComments = (r) => [r.h.summary, r.h.notes].filter(Boolean).join('\n');
+  const tsvCell = (v) => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ').trim();
+  function dayRecapForm(d) {
+    let hide = false;
+    const rows = dayActivities(d);
+    const header = ['Date', 'Account', 'Contact', 'Type', 'Subject', 'Comments', 'Territory', 'Next follow-up'];
+    const line = (r) => [d, r.a.name, r.contact, SF_TYPE[r.h.kind] || 'Other', r.h.summary || r.h.kind, r.h.notes || '', r.terr, r.a.nextFollowUp || ''];
+    const text = () => `${fmtDate(d, { weekday: 'long', month: 'long', day: 'numeric' })}\n\n${rows.map((r) => `${r.h.kind}${r.contact ? ` with ${r.contact}` : ''} - ${r.a.name}${r.h.summary ? ` - ${r.h.summary}` : ''}${r.h.notes ? `\n  ${String(r.h.notes).replace(/\n/g, '\n  ')}` : ''}`).join('\n')}`;
+    const copy = async (str, btn, label) => {
+      try { await navigator.clipboard.writeText(str); }
+      catch (e) { const ta = Object.assign(document.createElement('textarea'), { value: str }); document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e2) { /* nothing more to try */ } ta.remove(); }
+      if (btn) { btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = label; }, 1500); }
+    };
+    const body = () => {
+      const done = rows.filter((r) => r.h.sf).length;
+      const shown = rows.filter((r) => !(hide && r.h.sf));
+      return `<div class="row spread" style="gap:.5rem;flex-wrap:wrap">
+          <span class="small"><b>${plural(rows.length, 'activity', 'activities')}</b> · ${done} entered · <b>${rows.length - done} to go</b></span>
+          <label class="row small" style="gap:.3rem"><input type="checkbox" id="eod-hide" style="width:auto" ${hide ? 'checked' : ''}> Hide entered</label>
+        </div>
+        <div class="eod-list">${shown.map((r) => `
+          <div class="eod-row ${r.h.sf ? 'entered' : ''}">
+            <label class="eod-tick" title="Entered in Salesforce"><input type="checkbox" data-sf="${r.h.id}" ${r.h.sf ? 'checked' : ''}></label>
+            <div class="grow">
+              <div><strong>${esc(r.a.name)}</strong> <span class="pill">${esc(SF_TYPE[r.h.kind] || 'Other')}</span>${r.contact ? ` <span class="small muted">· ${esc(r.contact)}</span>` : ''}</div>
+              <div class="small">${esc(r.h.summary || r.h.kind)}</div>
+              ${r.h.notes ? `<div class="small muted eod-notes">${esc(r.h.notes)}</div>` : ''}
+              <div class="small muted">${esc([r.terr, r.a.nextFollowUp ? `next follow-up ${fmtDate(r.a.nextFollowUp, { month: 'short', day: 'numeric' })}` : ''].filter(Boolean).join(' · '))}</div>
+            </div>
+            <button type="button" class="btn sm ghost" data-sf-copy="${r.h.id}" title="Copy subject and comments for this one">Copy</button>
+          </div>`).join('') || '<div class="empty">All entered. Done for the day.</div>'}</div>`;
+    };
+    openModal(`End of day · ${fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' })}`, rows.length ? `
+      <p class="small muted" style="margin:0">Everything you logged, one row per Salesforce task. Copy a row into Log a Call, or copy all as a table for a spreadsheet or Data Loader, then tick each off.</p>
+      <div class="row" style="gap:.4rem;flex-wrap:wrap">
+        <button type="button" class="btn sm" id="eod-tsv">Copy all as table</button>
+        <button type="button" class="btn sm ghost" id="eod-text">Copy as text</button>
+        <button type="button" class="btn sm ghost" id="eod-csv">Download CSV</button>
+      </div>
+      <div id="eod-body">${body()}</div>`
+      : '<div class="empty">Nothing logged on this day yet. Visits, calls and cadence steps all land here once logged.</div>', () => {}, 'Close', { wide: true });
+    const cancel = modalForm.querySelector('.modal-actions [data-close]');
+    if (cancel) cancel.remove();
+    if (!rows.length) return;
+    const wire = () => {
+      $('#eod-hide').addEventListener('change', (e) => { hide = e.target.checked; $('#eod-body').innerHTML = body(); wire(); });
+      $$('[data-sf]').forEach((cb) => cb.addEventListener('change', () => {
+        const r = rows.find((x) => x.h.id === cb.dataset.sf);
+        if (!r) return;
+        if (cb.checked) r.h.sf = true; else delete r.h.sf;
+        touch(r.a); save();
+        $('#eod-body').innerHTML = body(); wire();
+      }));
+      $$('[data-sf-copy]').forEach((b) => b.addEventListener('click', () => { const r = rows.find((x) => x.h.id === b.dataset.sfCopy); if (r) copy(sfComments(r), b, 'Copy'); }));
+    };
+    wire();
+    $('#eod-tsv').addEventListener('click', (e) => copy([header, ...rows.map(line)].map((x) => x.map(tsvCell).join('\t')).join('\n'), e.target, 'Copy all as table'));
+    $('#eod-text').addEventListener('click', (e) => copy(text(), e.target, 'Copy as text'));
+    $('#eod-csv').addEventListener('click', () => downloadFile(`activities-${d}.csv`, [header, ...rows.map(line)].map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n'), 'text/csv'));
   }
 
   // ----- saved routes -----
@@ -6020,21 +6408,38 @@
     ['Meeting set', 1], ['Asked to return', 7], ['Nobody available / no access', 14],
     ['Bad address / moved', 0], ['Not a fit', 0],
   ];
-  function visitLogForm(a) {
-    const d = today();
-    openModal(`Log visit · ${a.name}`, `
+  // Partner stops have their own quick keys; 'tier' means the partner's tier touch rhythm (A 30 days, B 90).
+  const PARTNER_VISIT_OUTCOMES = [
+    ['Met them - caught up', 'tier'], ['Dropped off materials', 'tier'], ['Got a referral', 3], ['Gave them a lead or intro', 'tier'],
+    ['Set a lunch & learn or meeting', 1], ['Nobody available', 7], ['Bad address / moved', 0],
+  ];
+  /** Log a drop: outcome quick keys, who, the next follow-up the outcome suggests, notes and a card photo.
+   *  The visit carries the account, its territory and the date; it ticks the plan and route stop. */
+  function visitLogForm(a, opts = {}) {
+    const d = opts.date && opts.date < today() ? opts.date : today();
+    const outcomes = a.type === 'partner' ? PARTNER_VISIT_OUTCOMES : VISIT_OUTCOMES;
+    const daysFor = (o) => { const x = (outcomes.find(([k]) => k === o) || ['', 3])[1]; return x === 'tier' ? ((TIERS[partnerTier(a)] || {}).days || 30) : x; };
+    // Numbers are workdays; a partner's tier rhythm is calendar days (A monthly, B quarterly), landing on a workday.
+    const nextFor = (o) => { const raw = (outcomes.find(([k]) => k === o) || ['', 3])[1]; const n = daysFor(o); return !n ? '' : raw === 'tier' ? nextWorkday(addDays(d, n)) : shiftDays(d, n, true); };
+    const terr = terrName(a);
+    openModal(`Log ${a.type === 'partner' ? 'partner stop' : 'drop'} · ${a.name}`, `
+      <div class="small muted" style="margin-top:-.4rem">${esc([terr, fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' }), noDrop(a)].filter(Boolean).join(' · '))}</div>
       <div class="field"><span>Outcome</span>
-        <div class="qk-grid">${VISIT_OUTCOMES.map(([o], i) => `<button type="button" class="btn sm ${i ? 'ghost' : ''}" data-qk="${esc(o)}">${esc(o)}</button>`).join('')}</div>
+        <div class="qk-grid">${outcomes.map(([o], i) => `<button type="button" class="btn sm ${i ? 'ghost' : ''}" data-qk="${esc(o)}">${esc(o)}</button>`).join('')}</div>
       </div>
-      <input type="hidden" name="outcome" value="${esc(VISIT_OUTCOMES[0][0])}">
+      <input type="hidden" name="outcome" value="${esc(outcomes[0][0])}">
       <div class="grid-2">
         ${field('Who', `<select name="contactId"><option value="">—</option>${a.contacts.filter(isActiveContact).map((c) => opt(c.id, `${c.name}${c.role ? ` (${c.role})` : ''}`, (primaryContact(a) || {}).id)).join('')}</select>`)}
-        ${field('Next follow-up', `<input name="next" type="date" value="${shiftDays(d, 3, true)}">`)}
+        ${field('Next follow-up', `<input name="next" type="date" value="${nextFor(outcomes[0][0])}">`)}
         ${field('Notes', '<textarea name="notes" rows="2" placeholder="What you learned, who to ask for next time…"></textarea>', 'span-2')}
         ${field('Business card or photo', `<input name="photo" type="file" accept="image/*" capture="environment">${cloudOn() ? '' : '<span class="small muted">Set up cloud sync to keep photos with the account.</span>'}`)}
       </div>`, (data, fd) => {
       const now = new Date().toISOString();
-      const act = { id: uid(), date: d, kind: 'Visit', summary: `Visit: ${data.outcome}`, notes: data.notes, contactId: data.contactId || '', createdAt: now };
+      const act = { id: uid(), date: d, kind: 'Visit', summary: `Visit: ${data.outcome}`, notes: data.notes, contactId: data.contactId || '', createdAt: now, ...(terr ? { terr } : {}) };
+      // Partner stops: a referral dates the partner's last referral; a lead you handed over counts as a give.
+      const gotReferral = a.type === 'partner' && /^got a referral/i.test(data.outcome);
+      if (gotReferral) a.lastReferralDate = d;
+      if (a.type === 'partner' && /^gave them/i.test(data.outcome)) act.give = 'Client intro';
       // A bad address goes back on the "fix" list so the pin doesn't keep lying.
       if (/^bad address/i.test(data.outcome) && geoQuery(a)) a.geo = { q: geoQuery(a), miss: true };
       a.activities.push(act);
@@ -6050,15 +6455,16 @@
       const photo = fd.get('photo');
       if (photo && photo.size && cloudOn()) setTimeout(() => addFiles(a.id, [new File([photo], `Business card ${a.name} ${d}.${(photo.name.split('.').pop() || 'jpg')}`, { type: photo.type })]), 50);
       toast(`${a.name}: visit logged${photo && photo.size && !cloudOn() ? ' (photo not kept: sync is off)' : ''}`);
+      // Got a referral: add the referred company now, already linked to this partner.
+      if (gotReferral) setTimeout(() => accountForm(null, { channelPartnerId: a.id, leadSource: LEAD_SOURCES.find((x) => /partner/i.test(x)) || '' }), 60);
     }, 'Log visit', { wide: true });
     // Outcome quick keys: tap to pick; the next follow-up default follows the outcome.
     const inp = modalForm.querySelector('input[name=outcome]');
     $$('.qk-grid [data-qk]', modalForm).forEach((b) => b.addEventListener('click', () => {
       inp.value = b.dataset.qk;
       $$('.qk-grid [data-qk]', modalForm).forEach((x) => x.classList.toggle('ghost', x !== b));
-      const days = (VISIT_OUTCOMES.find(([o]) => o === b.dataset.qk) || ['', 3])[1];
       const next = modalForm.querySelector('input[name=next]');
-      if (next) next.value = days ? shiftDays(today(), days, true) : '';
+      if (next) next.value = nextFor(b.dataset.qk);
     }));
   }
 
@@ -6095,16 +6501,17 @@
     return `<div class="map-pop">
       <strong>${esc(a.name)}</strong> ${typePill(a)}
       <div class="small muted">${esc(a.stage)}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</div>
-      ${geoQuery(a) ? `<div class="small">${esc(geoQuery(a))}${a.geo && a.geo.approx ? ' <span class="pill med" title="Pinned to the city, not the street address">approx.</span>' : ''}</div>` : ''}
+      ${geoQuery(a) ? `<div class="small">${esc(geoQuery(a))}${a.geo && a.geo.approx ? ' <span class="pill med" title="Pinned to the city, not the street address">approx.</span>' : ''}${a.geo && a.geo.check && !a.geo.manual ? ` <span class="pill med" title="The map found this street in ${esc(a.geo.check)}, not the city on the address">check: found in ${esc(a.geo.check)}</span>` : ''}</div>` : ''}
+      ${noDrop(a) ? `<div class="small warn-text">⚠ ${esc(noDrop(a))}: not a drop stop</div>` : ''}
       ${(() => { const t = socalOf(a); return t ? `<div class="small muted">Territory #${t.n} ${esc(t.name)} · ${esc(t.region)}</div>` : ''; })()}
-      ${(() => { const r = nextRenewal(a); return r ? `<div class="small">Renews ${esc(fmtDate(r, { month: 'short', day: 'numeric' }))} <span class="muted">${esc(relDays(r))}</span></div>` : ''; })()}
+      ${(() => { const r = renewalsOf(a)[0]; return r ? `<div class="small">${esc(r.what)} renews ${esc(fmtDate(r.date, { month: 'short', day: 'numeric' }))} <span class="muted">${esc(relDays(r.date))}</span></div>` : ''; })()}
       <div class="small muted">${(() => { const lt = lastTouchDate(a); return lt ? `Last touch ${esc(relDays(lt))}` : 'Never touched'; })()}</div>
       ${p ? `<div class="small">${esc(p.name)}${p.phone ? ` · <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : ''}</div>` : ''}
       ${a.revisitDate ? `<div class="small">Revisit ${dueChip(a.revisitDate)}</div>` : ''}
       <div class="row map-pop-actions">
         <a class="btn sm" href="#account/${a.id}">Open</a>
         <button type="button" class="btn sm ghost" data-pop="route" data-id="${a.id}">+ Today's route</button>
-        <button type="button" class="btn sm ghost" data-pop="visit" data-id="${a.id}">Log visit</button>
+        <button type="button" class="btn sm ghost" data-pop="visit" data-id="${a.id}">Log drop</button>
         <button type="button" class="btn sm ghost" data-pop="near" data-id="${a.id}">Nearby</button>
         <a class="btn sm ghost" href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>
       </div>
@@ -6115,10 +6522,11 @@
     if (!mapState.layer || !hasGeo(a) || mapState.view !== 'accounts') return;
     if (!mapFilter().includes(a)) return;
     const due = (a.revisitDate && a.revisitDate <= today()) || (a.nextFollowUp && a.nextFollowUp <= today());
-    const m = L.circleMarker(ll(a), {
-      radius: 8, weight: due ? 3 : 2, color: due ? '#e8590c' : '#fff', fillOpacity: 0.95,
-      fillColor: pinColor(a),
-    }).bindPopup(accountPopup(a), { minWidth: 240 }).bindTooltip(esc(a.name), { direction: 'top', offset: [0, -6] }).addTo(mapState.layer);
+    // Partners (brokers, CPAs) are diamonds, so they stand out from prospects in any colour mode.
+    const m = (a.type === 'partner'
+      ? L.marker(ll(a), { icon: L.divIcon({ className: `partner-pin ${due ? 'due' : ''}`, html: `<span style="background:${pinColor(a)}"></span>`, iconSize: [20, 20] }) })
+      : L.circleMarker(ll(a), { radius: 8, weight: due ? 3 : 2, color: due ? '#e8590c' : '#fff', fillOpacity: 0.95, fillColor: pinColor(a) }))
+      .bindPopup(accountPopup(a), { minWidth: 240, maxWidth: 320 }).bindTooltip(esc(a.name), { direction: 'top', offset: [0, -6] }).addTo(mapState.layer);
     mapState.markers.set(a.id, m);
   }
 
@@ -6140,7 +6548,7 @@
     const accts = mapFilter();
     const mapped = accts.filter(hasGeo);
     const missing = accts.filter((a) => !hasGeo(a));
-    const approx = mapped.filter((a) => a.geo.approx && !a.geo.manual);
+    const approx = mapped.filter((a) => (a.geo.approx || a.geo.check) && !a.geo.manual);
     const terrs = state.territories || [];
     const dr = mapState.drawing;
     const near = mapState.me ? mapped.map((a) => ({ a, d: miles(mapState.me, ll(a)) })).sort((x, y) => x.d - y.d).slice(0, 12) : null;
@@ -6149,8 +6557,13 @@
       ${mapHead('accounts')}
       <div class="map-layout">
         <aside class="card map-side">
+          <div class="layer-chips" role="group" aria-label="Show on the map">
+            <button type="button" class="chip-tog ${f.type !== 'partner' ? 'on' : ''}" data-layer="prospect" aria-pressed="${f.type !== 'partner'}">● Prospects</button>
+            <button type="button" class="chip-tog ${f.type !== 'prospect' ? 'on' : ''}" data-layer="partner" aria-pressed="${f.type !== 'prospect'}">◆ Partners</button>
+            <button type="button" class="chip-tog ${socalOn() ? 'on' : ''}" id="mf-socal" aria-pressed="${socalOn()}">▦ Territories${mapState.socalFail ? ' (failed to load)' : ''}</button>
+          </div>
+          <details class="map-filters" ${window.innerWidth > 900 || f.vendor !== 'all' || f.list || f.terr ? 'open' : ''}><summary class="small"><b>Filters and pin colours</b>${(() => { const n = [f.vendor !== 'all', !!f.list, !!f.terr, (ui.mapColor || 'touch') !== 'touch'].filter(Boolean).length; return n ? ` <span class="pill">${n} on</span>` : ''; })()}</summary>
           <div class="filters">
-            <select id="mf-type" aria-label="Type">${opt('all', 'All types', f.type)}${opt('prospect', 'Prospects', f.type)}${opt('partner', 'Partners', f.type)}</select>
             <select id="mf-vendor" aria-label="Vendor"><option value="all">All vendors</option>${allVendors().map((v) => opt(v, v, f.vendor)).join('')}</select>
             <select id="mf-list" aria-label="Saved view"><option value="">All accounts</option>${state.lists.map((l) => opt(l.id, l.name, f.list)).join('')}</select>
             ${terrs.length || socalData ? `<select id="mf-terr" aria-label="Territory"><option value="">All territories</option>
@@ -6158,11 +6571,10 @@
               ${socalData ? `<optgroup label="SoCal field territories">${socalData.map((t) => opt(`b:${t.n}`, `#${t.n} ${t.name}`, f.terr || '')).join('')}</optgroup>` : ''}</select>` : ''}
             <select id="mf-color" aria-label="Color pins by">${Object.entries(MAP_COLORS).map(([k, l]) => opt(k, `Color: ${l}`, MAP_COLORS[ui.mapColor] ? ui.mapColor : 'touch')).join('')}</select>
           </div>
-          <label class="row small" style="gap:.35rem"><input type="checkbox" id="mf-socal" style="width:auto" ${socalOn() ? 'checked' : ''}> Show SoCal field territories${mapState.socalFail ? ' <span class="muted">(failed to load)</span>' : ''}</label>
-          ${missing.length || approx.length ? `<div class="geo-flag small"><b>${missing.length ? `${plural(missing.length, 'account')} ${missing.length === 1 ? 'has' : 'have'} no map location` : ''}${missing.length && approx.length ? ' · ' : ''}${approx.length ? `${approx.length} pinned only to a city` : ''}</b> <button type="button" class="link-btn small" data-act="map-fix">Fix</button></div>` : ''}
+          </details>
+          ${missing.length || approx.length ? `<div class="geo-flag small"><b>${missing.length ? `${plural(missing.length, 'account')} ${missing.length === 1 ? 'has' : 'have'} no map location` : ''}${missing.length && approx.length ? ' · ' : ''}${approx.length ? `${approx.length} to check` : ''}</b> <button type="button" class="link-btn small" data-act="map-fix">Fix</button></div>` : ''}
           <div class="row spread">
             <span class="small muted">${mapped.length} of ${accts.length} on the map</span>
-            <button type="button" class="btn sm ghost" data-act="map-near">📍 Near me</button>
           </div>
           ${pinLegend()}
           <div class="terr-box">
@@ -6196,11 +6608,11 @@
                 </span>
               </div>`).join('')}</div>` : ''}
           ${approx.length ? `
-            <details class="approx-box" ${ui.mapFix ? 'open' : ''}><summary class="small"><b>Pinned only to a city (${approx.length})</b></summary>
+            <details class="approx-box" ${ui.mapFix ? 'open' : ''}><summary class="small"><b>Pins to check (${approx.length})</b> <span class="muted">· pinned to a city, or found in a different city</span></summary>
             <div class="side-list">${approx.map((a) => `
               <div class="side-item">
                 <a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a>
-                <span class="small muted">${esc(geoQuery(a))}</span>
+                <span class="small muted">${esc(geoQuery(a))}${a.geo.check ? ` · <b>found in ${esc(a.geo.check)}</b>` : ' · city only'}</span>
                 <span class="row" style="gap:.25rem">
                   <button type="button" class="btn sm ghost" data-act="edit-account" data-id="${a.id}">Address</button>
                   <button type="button" class="btn sm ghost" data-act="map-place" data-id="${a.id}">Drop pin</button>
@@ -6210,15 +6622,23 @@
         </aside>
         <div class="card map-card"><div id="map" class="map ${mapState.placing ? 'placing' : ''}"></div></div>
       </div>`;
-    $('#mf-type').addEventListener('change', (e) => { ui.mapFilter.type = e.target.value; rerender(); });
+    $$('.layer-chips [data-layer]').forEach((b) => b.addEventListener('click', () => {
+      const on = { prospect: ui.mapFilter.type !== 'partner', partner: ui.mapFilter.type !== 'prospect' };
+      on[b.dataset.layer] = !on[b.dataset.layer];
+      if (!on.prospect && !on.partner) on[b.dataset.layer === 'prospect' ? 'partner' : 'prospect'] = true; // never an empty map
+      ui.mapFilter.type = on.prospect && on.partner ? 'all' : on.prospect ? 'prospect' : 'partner';
+      rerender();
+    }));
     $('#mf-vendor').addEventListener('change', (e) => { ui.mapFilter.vendor = e.target.value; rerender(); });
     $('#mf-list').addEventListener('change', (e) => { ui.mapFilter.list = e.target.value; rerender(); });
     if ($('#mf-terr')) $('#mf-terr').addEventListener('change', (e) => { ui.mapFilter.terr = e.target.value; rerender(); });
     $('#mf-color').addEventListener('change', (e) => { ui.mapColor = e.target.value; savePrefs(); rerender(); });
-    $('#mf-socal').addEventListener('change', (e) => { ui.mapSocal = e.target.checked; savePrefs(); rerender(); });
+    $('#mf-socal').addEventListener('click', () => { ui.mapSocal = !socalOn(); savePrefs(); rerender(); });
     if (ui.mapFix) { ui.mapFix = false; const el = $('.map-side h3 + .side-list, .approx-box'); if (el) el.scrollIntoView({ block: 'center' }); }
+    const run = mapState.runId;
     loadLeaflet().then(() => {
-      if (mapState.view !== 'accounts' || !$('#map')) return;
+      // A newer render (filters, the territories arriving) owns the map now.
+      if (run !== mapState.runId || mapState.view !== 'accounts' || !$('#map')) return;
       const { map, restored } = mountMap();
       wirePopups(map);
       drawSocal(mapState.layer);
@@ -6233,12 +6653,14 @@
   }
 
   function mapHead(mode) {
-    return `<div class="page-head">
+    return `<div class="page-head map-head">
       <h1>Map</h1>
       <div class="seg" role="group" aria-label="Map mode">
         <button type="button" class="${mode === 'accounts' ? 'active' : ''}" data-act="map-mode" data-mode="accounts">Accounts</button>
-        <button type="button" class="${mode === 'route' ? 'active' : ''}" data-act="map-mode" data-mode="route">Route planner</button>
+        <button type="button" class="${mode === 'route' ? 'active' : ''}" data-act="map-mode" data-mode="route">Route<span class="hide-sm"> planner</span></button>
+        <button type="button" class="${mode === 'territories' ? 'active' : ''}" data-act="map-mode" data-mode="territories">Territories</button>
       </div>
+      <button type="button" class="btn sm near-btn" data-act="map-near">📍 Near me</button>
     </div>`;
   }
 
@@ -6265,7 +6687,7 @@
     for (const row of plan.revisits) add(rowAccount(row), 'Revisit');
     for (const a of dueRevisits(d, plan.revisits)) add(a, 'Revisit due');
     for (const p of dueSteps(d)) if (p.step.type === 'visit') add(p.acct, `${p.cad.name}: visit`);
-    for (const id of r.extra) add(getAccount(id), 'Added');
+    for (const id of r.extra) { const a = getAccount(id); add(a, a && a.type === 'partner' ? 'Partner stop' : 'Added'); }
     const all = [...stops.values()];
     const rank = (s) => { const i = r.order.indexOf(s.a.id); return i === -1 ? 1e6 : i; };
     return all.sort((x, y) => rank(x) - rank(y));
@@ -6296,6 +6718,46 @@
     save();
     toast(`${a.name}: visit logged`);
     if (secKey === 'revisits') nextRevisitForm(a, d); else rerender();
+  }
+
+  /** Near me now: accounts within half a mile (or 1, 2, 5) of where you're standing, closest first. */
+  function nearMeForm(radius = 0.5) {
+    let wired = false;
+    const show = (pt) => {
+      mapState.me = pt;
+      const d = today();
+      const onRoute = new Set(routeStops(d).map((s) => s.a.id));
+      const list = state.accounts.filter((a) => hasGeo(a) && !isClosedStage(a.stage)).map((a) => ({ a, m: miles(pt, ll(a)), ...dropScore(a, d) }))
+        .filter((x) => x.m <= radius).sort((x, y) => x.m - y.m);
+      const label = (r) => (r === 0.5 ? '½' : String(r));
+      openModal('Near me now', `
+        <div class="row spread" style="gap:.5rem;flex-wrap:wrap">
+          <div class="seg" role="group" aria-label="Distance" id="nm-r">${[0.5, 1, 2, 5].map((r) => `<button type="button" data-r="${r}" class="${r === radius ? 'active' : ''}">${label(r)} mi</button>`).join('')}</div>
+          <span class="small muted">${plural(list.length, 'account')} within ${label(radius)} mi</span>
+        </div>
+        <div class="drop-list">${list.map(({ a, m, why }) => `
+          <div class="drop-row ${noDrop(a) ? 'nodrop' : ''}">
+            <div class="grow"><a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a> ${a.type === 'partner' ? '<span class="pill partner">Partner</span>' : ''}
+              <div class="small muted">${esc(fmtMiles(m))} · ${esc(a.address || a.location || '')}</div>
+              <div class="why">${whyChips(why, 3)}</div></div>
+            <div class="drop-acts">
+              <a class="btn sm ghost" href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener" aria-label="Directions to ${esc(a.name)}">➤</a>
+              ${onRoute.has(a.id) ? '<span class="pill">On today\'s route</span>' : `<button type="button" class="btn sm ghost" data-nm-add="${a.id}">+ Today</button>`}
+              <button type="button" class="btn sm" data-nm-log="${a.id}">Log drop</button>
+            </div>
+          </div>`).join('') || `<div class="empty">Nobody within ${label(radius)} ${radius <= 1 ? 'mile' : 'miles'}.${radius < 5 ? ' Try a wider circle.' : ''}</div>`}</div>`,
+      () => {}, 'Done', { wide: true });
+      const cancel = modalForm.querySelector('.modal-actions [data-close]');
+      if (cancel) cancel.remove();
+      if (document.activeElement) document.activeElement.blur();
+      $$('#nm-r [data-r]').forEach((b) => b.addEventListener('click', () => { radius = Number(b.dataset.r); show(pt); }));
+      $$('[data-nm-add]').forEach((b) => b.addEventListener('click', () => { addRouteStop(d, b.dataset.nmAdd); b.replaceWith(Object.assign(document.createElement('span'), { className: 'pill', textContent: 'On today\'s route' })); }));
+      $$('[data-nm-log]').forEach((b) => b.addEventListener('click', () => visitLogForm(getAccount(b.dataset.nmLog))));
+      if (!wired) { wired = true; modal.addEventListener('close', () => { if (location.hash.startsWith('#map')) rerender(); }, { once: true }); }
+    };
+    if (mapState.me && Date.now() - (mapState.meAt || 0) < 120000) return show(mapState.me);
+    toast('Finding where you are…');
+    myLocation().then((pt) => { mapState.meAt = Date.now(); show(pt); }, (err) => toast(err.message));
   }
 
   /** Where the day starts. The device location is only requested when optimizing, then remembered. */
@@ -6449,7 +6911,6 @@
     const r = getRoute(d);
     const stops = routeStops(d);
     const mappedStops = stops.filter((s) => hasGeo(s.a));
-    const addable = state.accounts.filter((a) => !stops.some((s) => s.a.id === a.id)).sort((x, y) => x.name.localeCompare(y.name));
     const homeOk = !!ui.home;
     const wd = fromISO(d).getDay();
     const onDay = (state.territories || []).filter((t) => (t.days || []).includes(wd));
@@ -6458,16 +6919,32 @@
     const tpls = state.routeTemplates || [];
     $('#view').innerHTML = `
       ${mapHead('route')}
-      <div class="map-layout">
+      <div class="map-layout map-route">
         <aside class="card map-side">
+          ${(() => {
+            if (d !== today()) return '';
+            const nxt = stops.find((x) => !visitedRow(d, x.a));
+            if (!nxt) return stops.length ? '<div class="next-stop done small"><b>All stops logged.</b> Nice work. Day recap has everything ready for Salesforce.</div>' : '';
+            return `<div class="next-stop">
+              <div class="small muted">Next stop · ${stops.indexOf(nxt) + 1} of ${stops.length}${nxt.a.type === 'partner' ? ' · partner' : ''}</div>
+              <div><strong>${esc(nxt.a.name)}</strong></div>
+              <div class="small muted">${esc(geoQuery(nxt.a) || 'No address')}</div>
+              <div class="why">${whyChips(dropScore(nxt.a, d).why, 3)}</div>
+              <div class="row next-acts">
+                ${hasGeo(nxt.a) ? `<a class="btn ghost" href="${esc(navUrl(ll(nxt.a)))}" target="_blank" rel="noopener">➤ Navigate</a>` : ''}
+                <button type="button" class="btn" data-act="route-visited" data-id="${nxt.a.id}">✓ Log drop</button>
+              </div>
+            </div>`;
+          })()}
           <div class="row spread">
             <div class="row" style="gap:.3rem">
               <button class="btn ghost sm" data-act="route-day" data-n="-1" aria-label="Previous day">‹</button>
               <input type="date" id="route-date" value="${d}" style="width:auto">
               <button class="btn ghost sm" data-act="route-day" data-n="1" aria-label="Next day">›</button>
             </div>
-            <span class="row" style="gap:.6rem"><button type="button" class="link-btn small" data-act="day-recap">Day recap</button><a class="small" href="#planner/${d}">Planner →</a></span>
+            <span class="row" style="gap:.6rem"><button type="button" class="link-btn small" data-act="day-recap" data-date="${d}">End of day</button><a class="small" href="#planner/${d}">Planner →</a></span>
           </div>
+          <details class="route-settings" ${window.innerWidth > 900 ? 'open' : ''}><summary class="small"><b>Route settings</b> <span class="muted">· start, leave at, minutes per stop, home base</span></summary>
           <div class="grid-2 route-opts">
             ${field('Start from', `<select id="r-start">${opt('home', homeOk ? `Home base` : 'Home base (not set)', r.start)}${opt('gps', 'My current location', r.start)}${opt('first', 'First stop', r.start)}</select>`)}
             ${field('Leave at', `<input id="r-time" type="time" value="${esc(r.startTime)}">`)}
@@ -6475,6 +6952,7 @@
             <label class="row small" style="align-self:end"><input id="r-round" type="checkbox" style="width:auto" ${r.roundTrip ? 'checked' : ''}> Return to start</label>
           </div>
           <div class="small"><button type="button" class="link-btn" data-act="set-home">${homeOk ? `Home base: ${esc(ui.home.label)} · change` : 'Set your home base'}</button></div>
+          </details>
           <div class="row">
             <button class="btn" id="route-opt" data-act="route-optimize" ${mappedStops.length < 2 ? 'disabled' : ''}>${r.optKey ? 'Re-optimize' : 'Optimize route'}</button>
             <a class="btn ghost" id="route-gmaps" target="_blank" rel="noopener" ${mappedStops.length ? '' : 'hidden'}>Open in Google Maps</a>
@@ -6492,7 +6970,7 @@
                 </div>
                 <span class="stop-actions">
                   ${hasGeo(s.a) ? `<a class="icon-btn" href="${esc(navUrl(ll(s.a)))}" target="_blank" rel="noopener" title="Navigate">➤</a>` : ''}
-                  ${v ? '<span class="pill won">Visited</span>' : `<button class="btn sm ghost" data-act="route-visited" data-id="${s.a.id}">Visited</button>`}
+                  ${v ? '<span class="pill won">Visited</span>' : `<button class="btn sm ghost" data-act="route-visited" data-id="${s.a.id}" title="Log the drop">✓ Visited</button>`}
                   <button class="icon-btn" data-act="route-remove" data-id="${s.a.id}" title="Remove from this route">✕</button>
                 </span>
               </li>`;
@@ -6503,7 +6981,7 @@
             <div class="small muted">Due or not touched in 30+ days: ${list.map((x) => esc(x.a.name)).join(', ')}</div>
           </div>`).join('')}
           <div class="row">
-            <select id="route-add" style="flex:1"><option value="">+ Add a stop…</option>${addable.map((a) => `<option value="${a.id}">${esc(a.name)}${hasGeo(a) ? '' : ' (no address)'}</option>`).join('')}</select>
+            <button type="button" class="btn ghost grow" id="route-add" data-act="route-pick">+ Add stops <span class="small muted">· ranked: due, renewing, never dropped, cold</span></button>
           </div>
           ${socalData ? `<div class="row">
             <select id="route-fieldday" style="flex:1"><option value="">⚑ Field day: fill from a territory…</option>${socalData.map((t) => `<option value="${t.n}">#${t.n} ${esc(t.name)} · ${esc(t.region)}</option>`).join('')}</select>
@@ -6527,17 +7005,10 @@
     $('#r-time').addEventListener('change', (e) => { setRoute(d, { startTime: e.target.value }); rerender(); });
     $('#r-mins').addEventListener('change', (e) => { setRoute(d, { visitMins: Math.max(0, Number(e.target.value) || 0) }); rerender(); });
     $('#r-round').addEventListener('change', (e) => { setRoute(d, { roundTrip: e.target.checked }); rerender(); });
-    $('#route-add').addEventListener('change', (e) => { if (e.target.value) { addRouteStop(d, e.target.value); rerender(); } });
     if ($('#route-fieldday')) $('#route-fieldday').addEventListener('change', (e) => {
       const t = (socalData || []).find((x) => String(x.n) === e.target.value);
       if (!t) return;
-      const members = state.accounts.filter((a) => socalOf(a) === t);
-      const picks = fieldDayCandidates(members, d, new Set(routeStops(d).map((s) => s.a.id))).slice(0, 10);
-      if (!picks.length) { toast(`#${t.n} ${t.name}: nothing due or cold there right now`); e.target.value = ''; return; }
-      const r = getRoute(d);
-      const ids = picks.map((x) => x.a.id).filter((id) => !r.extra.includes(id));
-      setRoute(d, { extra: [...r.extra, ...ids], removed: r.removed.filter((x) => !ids.includes(x)) });
-      toast(`#${t.n} ${t.name}: ${plural(ids.length, 'stop')} added`); rerender();
+      if (addFieldDay(t, d)) rerender(); else e.target.value = '';
     });
 
     const run = mapState.runId;
@@ -6555,7 +7026,7 @@
       if (start) L.marker(start, { icon: L.divIcon({ className: 'home-pin', html: '⌂', iconSize: [26, 26] }) }).bindTooltip('Start').addTo(mapState.layer);
       mappedStops.forEach((s, i) => {
         const v = visitedRow(d, s.a);
-        L.marker(ll(s.a), { icon: L.divIcon({ className: `stop-pin ${v ? 'visited' : ''}`, html: String(stops.indexOf(s) + 1), iconSize: [26, 26] }) })
+        L.marker(ll(s.a), { icon: L.divIcon({ className: `stop-pin ${v ? 'visited' : ''} ${s.a.type === 'partner' ? 'partner' : ''}`, html: String(stops.indexOf(s) + 1), iconSize: [26, 26] }) })
           .bindPopup(accountPopup(s.a), { minWidth: 220 }).bindTooltip(esc(s.a.name)).addTo(mapState.layer);
       });
       wirePopups(map);
@@ -6622,7 +7093,69 @@
     unmountMap(mapState.screen === screen);
     mapState.screen = screen;
     mapState.view = ui.mapMode;
-    if (ui.mapMode === 'route') renderRoutePlanner(); else renderMapAccounts();
+    if (ui.mapMode === 'route') renderRoutePlanner(); else if (ui.mapMode === 'territories') renderTerritoryBoard(); else renderMapAccounts();
+  }
+
+  /** Every territory you have accounts in, most overdue first: when you were last there, what's due, cold or renewing. */
+  const TERR_SORTS = {
+    overdue: (x, y) => ((y.sinceVisit ?? 1e6) - (x.sinceVisit ?? 1e6)) || (y.due.length - x.due.length) || (y.open.length - x.open.length),
+    n: (x, y) => x.t.n - y.t.n,
+    open: (x, y) => y.open.length - x.open.length,
+    due: (x, y) => y.due.length - x.due.length,
+    cold: (x, y) => y.cold.length - x.cold.length,
+    renew: (x, y) => y.renew.length - x.renew.length,
+    touch: (x, y) => (y.sinceTouch ?? 1e6) - (x.sinceTouch ?? 1e6),
+  };
+  function renderTerritoryBoard() {
+    socalSoon();
+    const head = mapHead('territories');
+    if (!socalData) {
+      $('#view').innerHTML = `${head}<div class="card"><div class="empty">${mapState.socalFail ? 'The territory file failed to load. Check the connection and reload.' : 'Loading the 124 territories…'}</div></div>`;
+      return;
+    }
+    const by = socalMembers();
+    const region = ui.terrRegion || '';
+    const showEmpty = !!ui.terrEmpty;
+    const regions = [...new Set(socalData.map((t) => t.region))];
+    const all = socalData.filter((t) => (!region || t.region === region) && (showEmpty || by.has(t.n))).map((t) => socalStats(t, by.get(t.n) || []));
+    const key = TERR_SORTS[ui.terrSort] ? ui.terrSort : 'overdue';
+    const dir = ui.terrDir || 1;
+    all.sort((x, y) => TERR_SORTS[key](x, y) * dir || x.t.n - y.t.n);
+    const overdue = (x) => x.open.length && (x.sinceVisit === null || x.sinceVisit >= 30);
+    const top = all.filter(overdue).sort(TERR_SORTS.overdue)[0];
+    const mapped = state.accounts.filter(hasGeo);
+    const outside = mapped.filter((a) => !socalOf(a)).length;
+    const unmapped = state.accounts.filter((a) => !hasGeo(a)).length;
+    const th = (k, label, cls = '') => `<th class="${cls}"><button type="button" class="th-sort ${key === k ? 'on' : ''}" data-act="terr-sort" data-key="${k}" data-prev="${key}">${label}${key === k ? (dir > 0 ? ' ▼' : ' ▲') : ''}</button></th>`;
+    const pd = planDay();
+    $('#view').innerHTML = `${head}
+      <div class="card terr-board">
+        <div class="row spread" style="gap:.5rem;flex-wrap:wrap">
+          <div>${top ? `<b>Most overdue:</b> #${top.t.n} ${esc(top.t.name)}, ${plural(top.open.length, 'open account')}, ${top.lastVisit ? `last field day ${esc(relDays(top.lastVisit))}` : 'never visited'}` : '<b>No territory is overdue.</b> Every territory with open accounts had a field day in the last 30 days.'}</div>
+          <div class="row" style="gap:.4rem;flex-wrap:wrap">
+            <select id="tb-region" aria-label="Region" style="width:auto">${opt('', 'All regions', region)}${regions.map((r) => opt(r, r, region)).join('')}</select>
+            <label class="row small" style="gap:.3rem"><input type="checkbox" id="tb-empty" style="width:auto" ${showEmpty ? 'checked' : ''}> Show empty</label>
+          </div>
+        </div>
+        <p class="small muted" style="margin:.35rem 0 .5rem">Overdue = open accounts and no field day in 30+ days. <b>Plan</b> fills ${esc(pd === today() ? 'today' : fmtDate(pd, { weekday: 'short', month: 'short', day: 'numeric' }))}'s route with the territory's best stops. Tap a name for its scorecard.</p>
+        <div class="table-wrap"><table class="table terr-table">
+          <thead><tr>${th('n', '#')}<th>Territory</th>${th('open', 'Open')}${th('due', 'Due')}${th('cold', 'Cold 30+', 'col-opt')}${th('renew', 'Renew 90d', 'col-opt')}${th('overdue', 'Last field day')}${th('touch', 'Last touch', 'col-opt')}<th></th></tr></thead>
+          <tbody>${all.map((x) => `<tr class="${overdue(x) ? 'terr-overdue' : ''}">
+            <td class="num"><span class="terr-sw" style="background:${x.t.color}"></span>${x.t.n}</td>
+            <td><button type="button" class="link-btn" data-act="terr-open" data-n="${x.t.n}"><strong>${esc(x.t.name)}</strong></button><div class="small muted">${esc(x.t.region)}</div></td>
+            <td class="num">${x.open.length}${x.members.length !== x.open.length ? `<span class="small muted">/${x.members.length}</span>` : ''}</td>
+            <td class="num ${x.due.length ? 'cell-warn' : ''}">${x.due.length || '<span class="muted">0</span>'}</td>
+            <td class="num col-opt">${x.cold.length || '<span class="muted">0</span>'}</td>
+            <td class="num col-opt ${x.renew.length ? 'cell-warn' : ''}">${x.renew.length || '<span class="muted">0</span>'}</td>
+            <td class="${overdue(x) ? 'cell-bad' : ''}">${x.lastVisit ? `${esc(fmtDate(x.lastVisit, { month: 'short', day: 'numeric' }))} <span class="small muted">${x.sinceVisit} d</span>` : '<span class="small">never</span>'}</td>
+            <td class="small col-opt">${x.sinceTouch === null ? 'never' : `${x.sinceTouch} d ago`}</td>
+            <td>${x.open.length ? `<button type="button" class="btn sm ghost" data-act="terr-plan" data-n="${x.t.n}">Plan</button>` : ''}</td>
+          </tr>`).join('') || `<tr><td colspan="9"><div class="empty">${region ? 'No accounts in this region yet.' : 'No mapped accounts in any territory yet. Accounts land in a territory once they\'re on the map.'}</div></td></tr>`}</tbody>
+        </table></div>
+        ${outside || unmapped ? `<p class="small muted" style="margin:.5rem 0 0">${[outside ? `${plural(outside, 'mapped account')} outside the 124 territories` : '', unmapped ? `${plural(unmapped, 'account')} not on the map yet` : ''].filter(Boolean).join(' · ')} · <a href="#map">Map</a></p>` : ''}
+      </div>`;
+    $('#tb-region').addEventListener('change', (e) => { ui.terrRegion = e.target.value; rerender(); });
+    $('#tb-empty').addEventListener('change', (e) => { ui.terrEmpty = e.target.checked; rerender(); });
   }
 
   // ---------- weekly activity report ----------
@@ -7224,6 +7757,7 @@
         ${field('Street address', `<input name="address" value="${esc(a.address)}" placeholder="e.g. 1200 J St" autocomplete="street-address">`)}
         ${field('City, State ZIP', `<input name="location" value="${esc(a.location)}" placeholder="e.g. Sacramento, CA 95814">`)}
         ${field('Main phone', `<input name="mainPhone" type="tel" value="${esc(a.mainPhone)}" placeholder="e.g. 310-555-0147" autocomplete="tel">`)}
+        ${field('The address is', `<select name="addrKind"><option value="">Guess from the address${!a.addrKind && addrKind(a) ? ` (now: ${esc(NO_DROP_LABEL[addrKind(a)].toLowerCase())})` : ''}</option>${Object.entries(ADDR_KINDS).map(([k, l]) => opt(k, l, a.addrKind || '')).join('')}</select>`)}
         ${field('Lead source', `<select name="leadSource"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, a.leadSource)).join('')}</select>`)}
       </div></fieldset>
       ${existing ? '' : `
@@ -7236,6 +7770,9 @@
       <fieldset class="form-sec only-prospect"><legend>Current vendor</legend><div class="grid-3">
         <div class="field span-2"><span>Current vendors</span>${vendorPicker(a.vendors || [])}</div>
         ${field('Vendor renewal date', `<input name="vendorRenewal" type="date" value="${esc(a.vendorRenewal)}">`)}
+        ${field('Benefits renewal', `<input name="benefitsRenewal" type="date" value="${esc(a.benefitsRenewal || '')}">`)}
+        ${field("Workers' comp renewal", `<input name="wcRenewal" type="date" value="${esc(a.wcRenewal || '')}">`)}
+        <span class="small muted span-2" style="align-self:end">Renewals repeat yearly: a past date counts as the same day next year (map pins, drop-day picks).</span>
       </div></fieldset>
       <fieldset class="form-sec"><legend>Next steps</legend><div class="grid-3">
         ${field('Expected close', `<input name="closeDate" type="date" value="${esc(a.closeDate)}">`, 'only-prospect')}
@@ -7419,6 +7956,15 @@
     }, 'Save', { wide: true });
   }
 
+  // Outcome quick picks on the activity form: [outcome, workdays to the next follow-up (0 = none)].
+  const ACT_OUTCOMES = {
+    Call: [['Connected - interested', 2], ['Connected - not now', 30], ['Left voicemail', 2], ['No answer', 1], ['Meeting set', 1], ['Not a fit', 0]],
+    Email: [['Sent', 3], ['Replied - interested', 1], ['Replied - not now', 30], ['Bounced', 0]],
+    LinkedIn: [['Connection sent', 5], ['Message sent', 3], ['Replied', 1]],
+    Text: [['Sent', 2], ['Replied', 1]],
+    Meeting: [['Held - next step set', 2], ['Held - proposal next', 3], ['No-show', 1]],
+    Demo: [['Held - next step set', 2], ['Held - proposal next', 3], ['No-show', 1]],
+  };
   function activityForm(acct, existing, preset = null) {
     const h = existing || { date: today(), kind: 'Call', ...(preset || {}) };
     openModal(`${existing ? 'Edit' : 'Log'} activity — ${acct.name}`, `
@@ -7426,6 +7972,7 @@
         ${field('Date', `<input name="date" type="date" required value="${esc(h.date)}">`)}
         ${field('Type', `<select name="kind">${ACTIVITY_KINDS.map((k) => opt(k, k, h.kind)).join('')}</select>`)}
         ${acct.contacts.length ? field('With contact', `<select name="contactId"><option value="">—</option>${acct.contacts.map((c) => opt(c.id, c.name, h.contactId ?? (primaryContact(acct) || {}).id)).join('')}</select>`, 'span-2') : ''}
+        ${existing ? '' : '<div class="field span-2"><span>Outcome <span class="muted">(sets the next follow-up)</span></span><div class="qk-grid act-qk" id="act-qk"></div></div>'}
         ${field('Summary *', `<input name="summary" required placeholder="e.g. Discovery call with VP Sales" value="${esc(h.summary)}">`, 'span-2')}
         ${field('Notes', `<textarea name="notes" rows="5" placeholder="What was discussed, decisions, objections, next steps…">${esc(h.notes)}</textarea>`, 'span-2')}
         ${existing ? '' : `
@@ -7448,6 +7995,25 @@
       touch(acct);
       toast(existing ? 'Activity updated' : 'Activity logged');
     });
+    if (existing) return;
+    // Outcome quick picks follow the type; picking one fills the summary (if empty) and the next follow-up.
+    const kindSel = modalForm.querySelector('[name=kind]');
+    const sum = modalForm.querySelector('[name=summary]');
+    const next = modalForm.querySelector('[name=nextFollowUp]');
+    let auto = '';
+    const fill = () => {
+      const list = ACT_OUTCOMES[kindSel.value] || (kindSel.value === 'Visit' ? VISIT_OUTCOMES : []);
+      $('#act-qk').innerHTML = list.map(([o]) => `<button type="button" class="btn sm ghost" data-ao="${esc(o)}">${esc(o)}</button>`).join('') || '<span class="small muted">No quick outcomes for this type.</span>';
+      $$('#act-qk [data-ao]').forEach((b) => b.addEventListener('click', () => {
+        $$('#act-qk [data-ao]').forEach((x) => x.classList.toggle('ghost', x !== b));
+        const days = (list.find(([o]) => o === b.dataset.ao) || ['', 0])[1];
+        const base = modalForm.querySelector('[name=date]').value || today();
+        next.value = days ? shiftDays(base > today() ? base : today(), days, true) : '';
+        if (!sum.value.trim() || sum.value === auto) { auto = `${kindSel.value}: ${b.dataset.ao}`; sum.value = auto; }
+      }));
+    };
+    kindSel.addEventListener('change', fill);
+    fill();
   }
 
   function keyDateForm(acct, existing) {
@@ -7550,7 +8116,7 @@
       case 'set-view': ui.accountView = el.dataset.mode; savePrefs(); return rerender();
       case 'acct-nearby': return nearbyForm(acct);
       case 'map-fix': ui.mapFix = true; return rerender();
-      case 'day-recap': return dayRecapForm(ui.routeDate || today());
+      case 'day-recap': return dayRecapForm(el.dataset.date || ui.routeDate || today());
       case 'map-draw': mapState.drawing = { points: [] }; mapState.placing = null; return rerender();
       case 'draw-cancel': mapState.drawing = null; return rerender();
       case 'draw-done': if (mapState.drawing && mapState.drawing.points.length >= 3) territoryForm(null, mapState.drawing.points.slice()); return undefined;
@@ -7780,10 +8346,16 @@
         return;
       }
       case 'map-geo-retry': mapState.geoPausedUntil = 0; return rerender();
-      case 'map-mode': return go(el.dataset.mode === 'route' ? `map/route/${ui.routeDate || today()}` : 'map');
-      case 'map-near':
-        myLocation().then((pt) => { mapState.me = pt; rerender(); if (mapState.map) mapState.map.setView(pt, 11); }, (err) => toast(err.message));
-        return;
+      case 'map-mode': return go(el.dataset.mode === 'route' ? `map/route/${ui.routeDate || today()}` : el.dataset.mode === 'territories' ? 'map/territories' : 'map');
+      case 'terr-open': { const t = (socalData || []).find((x) => String(x.n) === el.dataset.n); return t ? socalCard(t) : undefined; }
+      case 'terr-plan': {
+        const t = (socalData || []).find((x) => String(x.n) === el.dataset.n);
+        const d = planDay();
+        if (t && addFieldDay(t, d)) go(`map/route/${d}`);
+        return undefined;
+      }
+      case 'terr-sort': ui.terrSort = el.dataset.key; ui.terrDir = ui.terrSort === el.dataset.prev ? -(ui.terrDir || 1) : 1; return rerender();
+      case 'map-near': return nearMeForm();
       case 'map-focus': {
         const a = getAccount(id); const m = mapState.markers.get(id);
         if (a && mapState.map && hasGeo(a)) { mapState.map.setView(ll(a), 14); if (m) m.openPopup(); $('#map').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
@@ -7798,7 +8370,8 @@
         setRoute(ui.routeDate, { removed: [...r.removed, id], extra: r.extra.filter((x) => x !== id) });
         return rerender();
       }
-      case 'route-visited': return markVisited(ui.routeDate, acct);
+      case 'route-visited': return visitLogForm(acct, { date: ui.routeDate });
+      case 'route-pick': return stopPickerForm(ui.routeDate);
       case 'route-optimize': return optimizeRoute(ui.routeDate);
       case 'route-day': return go(`map/route/${addDays(ui.routeDate, Number(el.dataset.n))}`);
       case 'set-home': return homeBaseForm();
@@ -8600,5 +9173,7 @@
     await startCloud();
     route();
     syncNow();
+    // Territories (assignment, columns, filters) load when the browser is idle, so the first screen isn't slowed.
+    if (window.requestIdleCallback) requestIdleCallback(socalSoon, { timeout: 4000 }); else setTimeout(socalSoon, 1200);
   })();
 })();

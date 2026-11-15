@@ -54,6 +54,10 @@ No install, no build step: open `index.html` in a browser.
 - **Key dates** (renewals, contract end, QBRs, decision dates, etc.) that can be marked done
 - **History timeline** of calls, emails, meetings, demos and notes. Logging an activity can also
   set the next follow-up, update the stage, and add the follow-up to your planner
+- **Outcome quick picks** when you log an activity: pick the type, then tap what happened (Call:
+  Connected - interested, Connected - not now, Left voicemail, No answer, Meeting set, Not a fit;
+  Email, LinkedIn, Text, Meeting and Demo have their own). It fills the summary ("Call: Left
+  voicemail") and sets the next follow-up (voicemail → 2 workdays, not now → 30, not a fit → none)
 - Search (including contacts and vendors), filter by type, stage or vendor, and sort by next
   follow-up, name, last update or value
 
@@ -140,11 +144,18 @@ No install, no build step: open `index.html` in a browser.
 - **Copy summary**: a plain-text recap to paste into an email; **Export activities (CSV)**
 
 **Map & route planner**
+- Three screens: **Accounts** (the map), **Route** (the day's stops) and **Territories** (which
+  territory is overdue). **📍 Near me** is in the header of all three
 - **Accounts map**: every account with an address is pinned. **Color pins by** last touch (green
   within 30 days, amber 30–60, red 60+ or never: the red pins are your prospecting plan), by
-  stage, or by type; an orange ring means a follow-up or revisit is due. Filter by type, vendor,
-  saved view or territory. **Near me** lists the closest accounts for drop-in visits
-- Tap a pin to open the account, add it to today's route, **Log visit** (outcome, who you met,
+  stage, by type or by renewal window; an orange ring means a follow-up or revisit is due.
+  **Partners** (brokers, CPAs) are diamonds, prospects are dots, and the **Prospects / Partners /
+  Territories** chips turn each layer on or off. Filter by vendor, saved view or territory (folded
+  away on a phone)
+- **Near me now**: uses your location and lists accounts within ½ mile (or 1, 2, 5), closest
+  first, with why each is worth a stop. ➤ directions, **+ Today** adds it to today's route, and
+  **Log drop** logs it on the spot
+- Tap a pin to open the account, add it to today's route, **Log drop** (outcome, who you met,
   notes, next follow-up and a photo of their business card, saved to the account's attachments;
   it counts on today's plan and ticks the route stop), see who's **Nearby**, or get directions
 - **Nearby** (from a pin or the account page): accounts within 1, 2, 5 or 10 miles with their last
@@ -152,37 +163,77 @@ No install, no build step: open `index.html` in a browser.
 - **SoCal field territories**: a built-in layer of 124 color-coded drop territories covering
   LA, Orange, Ventura, Inland Empire, San Diego, Kern, Santa Barbara, SLO and Imperial counties
   (`socal-territories.json`, built from public city and LA Times neighborhood boundaries; static,
-  not synced). Every mapped account is assigned to its territory automatically (shown in its pin
-  popup), the territory dropdown filters by any of the 124, and the layer can be hidden with the
-  "Show SoCal field territories" toggle. **Tap a territory** for its scorecard: open accounts,
-  due now, cold 30+ days, last visit, and the top 10 **field day picks** with one tap to add
-  them to the route
+  not synced). Every mapped account is assigned to its territory automatically. An address just
+  outside every outline (an unincorporated pocket, or a simplified edge) goes to the nearby
+  territory that lists its city, else the closest one within 2 miles. The territory shows in the
+  pin popup, on the account page, as an Accounts table **Territory** column (sortable) and as a
+  saved-view filter ("Field territory is any of"). The territory dropdown filters the map by any
+  of the 124, and the **Territories** chip hides the layer. **Tap a territory** for its
+  scorecard: open accounts, due now, cold 30+ days, renewals in 90 days, last field day, days
+  since the last touch, and the top 10 **field day picks** with their reasons, for any day you
+  pick; add them all to that day's route or **Choose stops…**
 - **Renewal window** pin colors: red renews within 60 days, orange 61–120, yellow 121–180, blue
-  further out, gray no renewal date (from the vendor renewal field and open key dates mentioning
-  "renew"). The popup shows the next renewal date
-- **Outcome quick keys** on Log visit: Met the decision maker, Gatekeeper - left materials,
+  further out, gray no renewal date. Renewals come from the vendor (PEO) renewal, **Benefits
+  renewal** and **Workers' comp renewal** dates on the account, plus open key dates mentioning
+  "renew". The three account dates repeat yearly, so last year's date counts as this year's. The
+  popup shows the next one ("Benefits renews May 1")
+- **Drop-day ranking**: every account gets a score and reasons for a given day: follow-up or
+  revisit due, a renewal within 60 / 120 / 180 days, never dropped, never touched or cold 30+
+  days, a live deal (S2–S5), a partner behind on its tier's touches, and deal value. Mailboxes and
+  homes sink to the bottom and are never auto-picked
+- **Add stops** (route planner) replaces the old dropdown: a ranked list with the reasons as
+  chips ("Follow-up due", "Benefits renews in 40 d", "Never dropped", "Cold 75 d"), opening on
+  the territory most of the day's stops are in. Switch to everywhere, near this route (5 mi), near
+  you, any territory or any drawn zone; search by name or city; Prospects / Partners; add several
+  without closing it
+- **Field day** (route planner): pick any of the 124 territories to fill the day's route with
+  its 10 best picks
+- **Outcome quick keys** on Log drop: Met the decision maker, Gatekeeper - left materials,
   Left at door, Meeting set, Asked to return, Nobody available / no access, Bad address / moved,
   Not a fit. Each sets a fitting default next follow-up (Meeting set → next workday, Asked to
-  return → a week, etc.), and Bad address puts the account back on the map's Fix list
-- **Day recap** (route planner): every activity logged that day across all accounts in one
-  copy-ready text block, for batch-logging into Salesforce at shutdown
-- **Field day picker** (route planner): pick any of the 124 territories to fill the day's route
-  with its due and coldest accounts
+  return → a week, etc.), and Bad address puts the account back on the map's Fix list. The
+  visit is saved with the account, its territory and the date
+- **Partner stops**: partners on a route show as "Partner stop" (and square pins), and their
+  drop logger has partner outcomes: Met them - caught up, Dropped off materials, Got a referral
+  (dates the partner's last referral and opens a new account already linked to them), Gave them
+  a lead or intro (also counts as a give), Set a lunch & learn or meeting, Nobody available, Bad
+  address. Their next follow-up defaults to the partner's tier rhythm (A monthly, B quarterly)
+- **Not a drop stop**: addresses with a PMB, PO box or a "Ste 107-315" style suite are treated as
+  mailboxes, and "Apt" as a home; set it by hand on the account ("The address is …") for the rest
+  (a UPS Store "#3222", a shared office). They're flagged in popups, the account page and the
+  picker, and left out of field-day picks
+- **End of day** (route planner and the planner's Schedule): every activity logged that day,
+  one row per Salesforce task (Call, Email, Meeting for visits, Other) with the account, contact,
+  subject, comments, territory and next follow-up. **Copy** one row's subject and comments for
+  Log a Call, **Copy all as table** (paste into a spreadsheet or Data Loader), **Copy as text** or
+  **Download CSV**, then tick each one entered; the ticks are kept, and "Hide entered" shows what's
+  left
+- **Territories board** (Map → Territories): every territory you have accounts in, most overdue
+  first. Overdue means open accounts and no field day in 30+ days. Columns: open accounts, due,
+  cold 30+, renewals in 90 days, last field day and last touch, all sortable, with a region
+  filter. **Plan** fills the next field day's route with that territory's best stops; tap a name
+  for its scorecard
+- **On a phone**: the route planner opens with a **Next stop** card (➤ Navigate, ✓ Log drop) above
+  the map; route settings and map filters fold away; buttons and quick keys are full-size tap
+  targets
 - **Territories (drawn)**: draw your own zones on the map and pick the weekdays you're
   usually there. On those days the route planner suggests the zone's accounts that are due or
   haven't been touched in 30+ days ("Wednesday is Westside · Add these 6"). Synced
 - **Saved routes**: save a day's stops as a named route ("Westside loop") and load it onto any
   day; it re-optimizes for that day. Synced
-- Addresses are looked up when you save an account (and again whenever the map opens). The map
-  says how many accounts have no location or are pinned only to a city, with a Fix list: correct
-  the address or **Drop pin** by hand
+- Addresses are looked up when you save an account (and again whenever the map opens). The lookup
+  takes the answer in the address's ZIP or city; if the only answers are in another city (an
+  "E Huntington Dr" in Monrovia instead of Arcadia), the pin is kept but flagged "found in Monrovia
+  91016". The map says how many accounts have no location or need a check (pinned only to a city,
+  or found in a different city), with a Fix list: correct the address or **Drop pin** by hand
 - **Route planner** for any day: stops come in automatically from that day's planner Visits and
   Revisits, due revisit dates and cadence Visit steps. Add or remove stops as needed. The route
   re-optimizes itself whenever stops change, using real drive times (OSRM), from your home base
   or current location, optionally returning to the start. You get arrival times per stop (with
   your minutes-per-visit), total drive time and miles, **Open in Google Maps** for the whole
-  route, and ➤ to navigate to each stop (Apple Maps on iPhone). **Visited** logs the visit to the
-  account and your daily plan, and revisits ask when to go back
+  route, and ➤ to navigate to each stop (Apple Maps on iPhone). **✓ Visited** opens the drop
+  logger, so the route and logging are one motion: the visit lands on the account (with its
+  territory) and your daily plan, and the stop is ticked
 - Accounts have a street address field; CSV import reads street address and ZIP columns
 - Map: Leaflet (bundled in `vendor/leaflet`, BSD-2 license), map tiles © OpenStreetMap contributors (Esri World Street Map as a backup); no API key needed
 
@@ -240,8 +291,13 @@ No install, no build step: open `index.html` in a browser.
 - **Vendor scoreboard**: every incumbent with account count, open deals and pipeline, average
   employees, renewals in the next 90 days and wins. Click one to open its accounts
 - **Import duplicate check**: companies are matched on website domain first, then name, then the
-  name without LLC / Inc. / punctuation. The import screen lists the likely duplicates ("Stale
-  Widgets Incorporated → Stale Widgets LLC · website") and lets you merge or create anyway
+  name without LLC / Inc. / punctuation, then a name the company also goes by ("PCH Benefits
+  (Thomas R. Means)" ↔ "Thomas R. Means Inc. dba PCH Benefits"), then the same name with extra
+  words that only describe the business ("Maxwell Agency" ↔ "Maxwell Agency Insurance Services").
+  The import screen lists each likely duplicate with a tick box (untick one to create it new
+  instead), offers **possible matches** for companies that would be new ("Petra Risk Solutions
+  San Diego → Petra Risk Solutions?", only merged if you tick it), and lists the names it will
+  create, so a near-miss is easy to spot before you import
 - **Corrected addresses**: when a file has address columns, the import can also replace the street
   and city on accounts you already have ("Use this file's addresses on existing accounts too"); the
   map then finds the new spot
