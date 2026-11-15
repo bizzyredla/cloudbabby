@@ -238,7 +238,7 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, theme: ui.theme })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, mapSocal: ui.mapSocal, theme: ui.theme })); } catch (e) { /* ignore */ }
   };
 
   // ----- appearance: follow the device, or always light / always dark (per device) -----
@@ -5756,9 +5756,17 @@
 
   function rerenderMap() { if (location.hash.startsWith('#map')) rerender(); }
 
-  // ----- pins that mean something: colour by last touch, stage or type -----
-  const MAP_COLORS = { touch: 'Last touch', stage: 'Stage', type: 'Type' };
+  // ----- pins that mean something: colour by last touch, stage, type or renewal window -----
+  const MAP_COLORS = { touch: 'Last touch', stage: 'Stage', type: 'Type', renewal: 'Renewal window' };
   const TOUCH_BANDS = [[30, '#2f9e44', 'Touched in 30 days'], [60, '#f08c00', '30–60 days'], [Infinity, '#e03131', '60+ days or never']];
+  const RENEWAL_BANDS = [[60, '#e03131', 'Renews in 60 days'], [120, '#f08c00', '61–120 days'], [180, '#fab005', '121–180 days'], [Infinity, '#74c0fc', '180+ days out']];
+  /** The soonest upcoming renewal: the vendor renewal date, or an open key date mentioning "renew". */
+  function nextRenewal(a) {
+    const t = today();
+    const dates = [a.vendorRenewal, ...a.keyDates.filter((k) => !k.done && /renew/i.test(k.label || '')).map((k) => k.date)]
+      .filter((x) => x && x >= t).sort();
+    return dates[0] || '';
+  }
   const STAGE_COLORS = {
     'S1 – Discovery Scheduled': '#a5d8ff', 'S2 – Qualified Opportunity': '#74c0fc', 'S3 – Solution & Quote Development': '#339af0',
     'S4 – Proposal Presented': '#1c7ed6', 'S5 – Decision / Negotiation': '#1864ab', 'Closed Won': '#2f9e44', 'Closed Lost': '#868e96', Nurture: '#be4bdb', Revisit: '#f08c00',
@@ -5766,6 +5774,12 @@
   const PARTNER_PIN = '#0ca678';
   function pinColor(a) {
     const mode = MAP_COLORS[ui.mapColor] ? ui.mapColor : 'touch';
+    if (mode === 'renewal') {
+      const r = nextRenewal(a);
+      if (!r) return '#adb5bd';
+      const n = daysBetween(today(), r);
+      return RENEWAL_BANDS.find(([max]) => n <= max || max === Infinity)[1];
+    }
     if (mode === 'type') return a.type === 'partner' ? '#0f8a6a' : '#8a4bd6';
     if (mode === 'stage') return a.type === 'partner' ? PARTNER_PIN : STAGE_COLORS[a.stage] || '#868e96';
     if (isClosedStage(a.stage)) return '#adb5bd';
@@ -5778,7 +5792,8 @@
     const item = (c, l) => `<span><i style="background:${c}"></i>${esc(l)}</span>`;
     const rows = mode === 'type' ? [item('#8a4bd6', 'Prospect'), item('#0f8a6a', 'Partner')]
       : mode === 'stage' ? [...Object.entries(STAGE_COLORS).map(([s, c]) => item(c, stageShort(s))), item(PARTNER_PIN, 'Partner')]
-        : [...TOUCH_BANDS.map(([, c, l]) => item(c, l)), item('#adb5bd', 'Closed')];
+        : mode === 'renewal' ? [...RENEWAL_BANDS.map(([, c, l]) => item(c, l)), item('#adb5bd', 'No renewal date')]
+          : [...TOUCH_BANDS.map(([, c, l]) => item(c, l)), item('#adb5bd', 'Closed')];
     return `<div class="legend small">${rows.join('')}<span><i class="due"></i>Due now</span></div>`;
   }
 
@@ -5868,11 +5883,113 @@
     const n = $('#draw-n'); if (n) n.textContent = dr.points.length;
     const fin = $('#draw-done'); if (fin) fin.disabled = dr.points.length < 3;
   }
-  /** Accounts in a territory worth a stop: no touch in 30+ days, or a revisit or follow-up due. */
-  function territorySuggestions(t, d, exclude) {
-    return state.accounts.filter((a) => inTerritory(t, a) && !exclude.has(a.id) && !isClosedStage(a.stage))
+  /** Accounts worth a field-day stop: a revisit or follow-up due first, then longest-untouched (30+ days). */
+  function fieldDayCandidates(members, d, exclude = new Set()) {
+    return members.filter((a) => !exclude.has(a.id) && !isClosedStage(a.stage))
       .map((a) => { const lt = lastTouchDate(a); return { a, n: lt ? daysBetween(lt, d) : 9999, due: (a.revisitDate && a.revisitDate <= d) || (a.nextFollowUp && a.nextFollowUp <= d) }; })
       .filter((x) => x.due || x.n >= 30).sort((x, y) => (y.due - x.due) || y.n - x.n);
+  }
+  /** Accounts in a drawn territory worth a stop: no touch in 30+ days, or a revisit or follow-up due. */
+  const territorySuggestions = (t, d, exclude) => fieldDayCandidates(state.accounts.filter((a) => inTerritory(t, a)), d, exclude);
+
+  // ----- SoCal field territories: the built-in 124-territory layer -----
+  // Loaded once from socal-territories.json (a static file in the repo, not synced). Each territory
+  // carries multipolygon rings as [lat, lng] plus a label point; accounts are assigned to a
+  // territory by point-in-polygon and the answer is cached per pin location.
+  let socalData = null; let socalLoading = null;
+  function loadSocal() {
+    if (socalData) return Promise.resolve(socalData);
+    socalLoading ||= fetch('socal-territories.json').then((r) => {
+      if (!r.ok) throw new Error(`Territories failed to load (${r.status})`);
+      return r.json();
+    }).then((j) => { socalData = j; return j; }).catch((e) => { socalLoading = null; mapState.socalFail = true; throw e; });
+    return socalLoading;
+  }
+  /** Inside any polygon of the territory: in its outer ring and not in a hole. */
+  const inRings = (pt, rings) => rings.some((poly) => inPolygon(pt, poly[0]) && !poly.slice(1).some((h) => inPolygon(pt, h)));
+  const socalCache = new Map();
+  /** The built-in territory an account's pin falls in, or null. */
+  function socalOf(a) {
+    if (!socalData || !hasGeo(a)) return null;
+    const key = `${a.geo.lat},${a.geo.lng}`;
+    if (!socalCache.has(key)) socalCache.set(key, socalData.find((x) => inRings(ll(a), x.rings)) || null);
+    return socalCache.get(key);
+  }
+  const socalOn = () => ui.mapSocal !== false;
+  /** Load the layer soon and redraw the map screen once it's here (once; failures don't loop). */
+  function socalSoon() {
+    if (!socalOn() || socalData || mapState.socalFail) return;
+    loadSocal().then(() => rerenderMap()).catch(() => { /* the map works without the layer */ });
+  }
+  function drawSocal(layer) {
+    if (!socalOn() || !socalData || !mapState.map) return;
+    // Territories sit in their own pane under the pins, so pins stay clickable.
+    if (!mapState.map.getPane('socal')) mapState.map.createPane('socal').style.zIndex = 350;
+    for (const t of socalData) {
+      L.polygon(t.rings, { pane: 'socal', color: t.color, weight: 1.2, fillColor: t.color, fillOpacity: 0.08, interactive: !mapState.drawing && !mapState.placing })
+        .bindTooltip(`#${t.n} ${esc(t.name)} · ${esc(t.region)}`, { sticky: true })
+        .on('click', () => { if (!mapState.drawing && !mapState.placing) socalCard(t); })
+        .addTo(layer);
+    }
+  }
+  /** Territory scorecard: who's inside, what's cold or due, and the field-day picks. */
+  function socalCard(t) {
+    const d = today();
+    const rd = ui.routeDate || d;
+    const members = state.accounts.filter((a) => socalOf(a) === t);
+    const open = members.filter((a) => !isClosedStage(a.stage));
+    const due = open.filter((a) => (a.revisitDate && a.revisitDate <= d) || (a.nextFollowUp && a.nextFollowUp <= d));
+    const cold = open.filter((a) => { const lt = lastTouchDate(a); return !lt || daysBetween(lt, d) >= 30; });
+    const lastVisit = members.flatMap((a) => a.activities.filter((h) => h.kind === 'Visit').map((h) => h.date)).sort().pop();
+    const cands = fieldDayCandidates(members, rd, new Set(routeStops(rd).map((s) => s.a.id))).slice(0, 10);
+    openModal(`#${t.n} ${t.name}`, `
+      <div class="small muted">${esc(t.region)} · ${esc(t.county)}</div>
+      <p class="small" style="margin:.25rem 0">${esc(t.areas)}</p>
+      <div class="route-summary terr-score">
+        <div><b>${open.length}</b><span>open accounts</span></div>
+        <div><b>${due.length}</b><span>due now</span></div>
+        <div><b>${cold.length}</b><span>cold 30+ days</span></div>
+        <div><b>${lastVisit ? esc(relDays(lastVisit)) : 'never'}</b><span>last visit</span></div>
+      </div>
+      ${cands.length ? `<h3 style="margin:.5rem 0 .25rem">Field day picks</h3>
+      <div class="side-list">${cands.map(({ a, n, due: dd }) => `
+        <div class="side-item"><a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a>
+          <span class="small muted">${dd ? 'due now' : n >= 9999 ? 'never touched' : `touched ${n} days ago`} · ${esc(stageShort(a.stage))}</span></div>`).join('')}</div>
+      <button type="button" class="btn sm" id="terr-card-add">Add ${cands.length} to the ${esc(fmtDate(rd, { month: 'short', day: 'numeric' }))} route</button>`
+      : `<div class="empty">${open.length ? 'Nothing due or cold here right now.' : 'No mapped accounts in this territory yet.'}</div>`}`,
+    () => {}, 'Close', { wide: true });
+    const cancel = modalForm.querySelector('.modal-actions [data-close]');
+    if (cancel) cancel.remove();
+    const add = $('#terr-card-add');
+    if (add) add.addEventListener('click', () => {
+      const r = getRoute(rd);
+      const ids = cands.map((x) => x.a.id).filter((id) => !r.extra.includes(id));
+      setRoute(rd, { extra: [...r.extra, ...ids], removed: r.removed.filter((x) => !ids.includes(x)) });
+      modal.close(); toast(`#${t.n} ${t.name}: ${plural(ids.length, 'stop')} added`); go(`map/route/${rd}`);
+    });
+  }
+
+  // ----- day recap: a day's logged activity, ready to paste into Salesforce -----
+  function dayRecapForm(d) {
+    const rows = [];
+    for (const a of state.accounts) for (const h of a.activities) if (h.date === d) {
+      const c = a.contacts.find((x) => x.id === h.contactId);
+      rows.push(`${h.kind}${c ? ` with ${c.name}` : ''} - ${a.name}${h.summary ? ` - ${h.summary}` : ''}${h.notes ? `\n  ${String(h.notes).replace(/\n/g, '\n  ')}` : ''}`);
+    }
+    const text = `${fmtDate(d, { weekday: 'long', month: 'long', day: 'numeric' })}\n\n${rows.join('\n')}`;
+    openModal(`Day recap · ${fmtDate(d, { month: 'short', day: 'numeric' })}`, rows.length ? `
+      <p class="small muted" style="margin:0">${plural(rows.length, 'activity', 'activities')} logged. Copy, then batch-log in Salesforce at shutdown.</p>
+      <textarea id="recap-text" rows="12" readonly>${esc(text)}</textarea>
+      <button type="button" class="btn sm" id="recap-copy">Copy</button>`
+      : '<div class="empty">Nothing logged on this day yet. Visits, calls and cadence steps all land here once logged.</div>', () => {}, 'Close');
+    const cancel = modalForm.querySelector('.modal-actions [data-close]');
+    if (cancel) cancel.remove();
+    const btn = $('#recap-copy');
+    if (btn) btn.addEventListener('click', async () => {
+      const ta = $('#recap-text'); ta.select();
+      try { await navigator.clipboard.writeText(ta.value); } catch (e) { try { document.execCommand('copy'); } catch (e2) { /* selected; user can copy */ } }
+      btn.textContent = '✓ Copied';
+    });
   }
 
   // ----- saved routes -----
@@ -5896,19 +6013,30 @@
   }
 
   // ----- log a visit from the pin -----
-  const VISIT_OUTCOMES = ['Met the decision maker', 'Met someone else', 'Dropped off materials', 'Nobody available', 'Not a fit'];
+  // Outcome quick keys for field drops. Each sets a sensible default next follow-up (workdays);
+  // 0 means no follow-up by default.
+  const VISIT_OUTCOMES = [
+    ['Met the decision maker', 3], ['Gatekeeper - left materials', 3], ['Left at door', 5],
+    ['Meeting set', 1], ['Asked to return', 7], ['Nobody available / no access', 14],
+    ['Bad address / moved', 0], ['Not a fit', 0],
+  ];
   function visitLogForm(a) {
     const d = today();
     openModal(`Log visit · ${a.name}`, `
+      <div class="field"><span>Outcome</span>
+        <div class="qk-grid">${VISIT_OUTCOMES.map(([o], i) => `<button type="button" class="btn sm ${i ? 'ghost' : ''}" data-qk="${esc(o)}">${esc(o)}</button>`).join('')}</div>
+      </div>
+      <input type="hidden" name="outcome" value="${esc(VISIT_OUTCOMES[0][0])}">
       <div class="grid-2">
-        ${field('Outcome', `<select name="outcome">${VISIT_OUTCOMES.map((o) => opt(o, o, VISIT_OUTCOMES[0])).join('')}</select>`)}
         ${field('Who', `<select name="contactId"><option value="">—</option>${a.contacts.filter(isActiveContact).map((c) => opt(c.id, `${c.name}${c.role ? ` (${c.role})` : ''}`, (primaryContact(a) || {}).id)).join('')}</select>`)}
-        ${field('Notes', '<textarea name="notes" rows="2" placeholder="What you learned, who to ask for next time…"></textarea>', 'span-2')}
         ${field('Next follow-up', `<input name="next" type="date" value="${shiftDays(d, 3, true)}">`)}
+        ${field('Notes', '<textarea name="notes" rows="2" placeholder="What you learned, who to ask for next time…"></textarea>', 'span-2')}
         ${field('Business card or photo', `<input name="photo" type="file" accept="image/*" capture="environment">${cloudOn() ? '' : '<span class="small muted">Set up cloud sync to keep photos with the account.</span>'}`)}
       </div>`, (data, fd) => {
       const now = new Date().toISOString();
       const act = { id: uid(), date: d, kind: 'Visit', summary: `Visit: ${data.outcome}`, notes: data.notes, contactId: data.contactId || '', createdAt: now };
+      // A bad address goes back on the "fix" list so the pin doesn't keep lying.
+      if (/^bad address/i.test(data.outcome) && geoQuery(a)) a.geo = { q: geoQuery(a), miss: true };
       a.activities.push(act);
       // Count it on today's plan (and tick the route stop) without logging it twice.
       const plan = getPlan(d, true);
@@ -5923,6 +6051,15 @@
       if (photo && photo.size && cloudOn()) setTimeout(() => addFiles(a.id, [new File([photo], `Business card ${a.name} ${d}.${(photo.name.split('.').pop() || 'jpg')}`, { type: photo.type })]), 50);
       toast(`${a.name}: visit logged${photo && photo.size && !cloudOn() ? ' (photo not kept: sync is off)' : ''}`);
     }, 'Log visit', { wide: true });
+    // Outcome quick keys: tap to pick; the next follow-up default follows the outcome.
+    const inp = modalForm.querySelector('input[name=outcome]');
+    $$('.qk-grid [data-qk]', modalForm).forEach((b) => b.addEventListener('click', () => {
+      inp.value = b.dataset.qk;
+      $$('.qk-grid [data-qk]', modalForm).forEach((x) => x.classList.toggle('ghost', x !== b));
+      const days = (VISIT_OUTCOMES.find(([o]) => o === b.dataset.qk) || ['', 3])[1];
+      const next = modalForm.querySelector('input[name=next]');
+      if (next) next.value = days ? shiftDays(today(), days, true) : '';
+    }));
   }
 
   /** Look up a new or changed address right after saving, so accounts don't silently miss the map. */
@@ -5948,8 +6085,9 @@
     const f = ui.mapFilter;
     const list = f.list ? resolveList(f.list) : null;
     const ids = list ? new Set(listAccounts(list).map((a) => a.id)) : null;
-    const terr = f.terr && (state.territories || []).find((t) => t.id === f.terr);
-    return state.accounts.filter((a) => (f.type === 'all' || a.type === f.type) && (f.vendor === 'all' || a.vendors.includes(f.vendor)) && (!ids || ids.has(a.id)) && (!terr || inTerritory(terr, a)));
+    const bt = f.terr && f.terr.startsWith('b:') && socalData ? socalData.find((t) => String(t.n) === f.terr.slice(2)) : null;
+    const terr = !bt && f.terr && (state.territories || []).find((t) => t.id === f.terr);
+    return state.accounts.filter((a) => (f.type === 'all' || a.type === f.type) && (f.vendor === 'all' || a.vendors.includes(f.vendor)) && (!ids || ids.has(a.id)) && (!terr || inTerritory(terr, a)) && (!bt || socalOf(a) === bt));
   };
 
   function accountPopup(a) {
@@ -5958,6 +6096,8 @@
       <strong>${esc(a.name)}</strong> ${typePill(a)}
       <div class="small muted">${esc(a.stage)}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</div>
       ${geoQuery(a) ? `<div class="small">${esc(geoQuery(a))}${a.geo && a.geo.approx ? ' <span class="pill med" title="Pinned to the city, not the street address">approx.</span>' : ''}</div>` : ''}
+      ${(() => { const t = socalOf(a); return t ? `<div class="small muted">Territory #${t.n} ${esc(t.name)} · ${esc(t.region)}</div>` : ''; })()}
+      ${(() => { const r = nextRenewal(a); return r ? `<div class="small">Renews ${esc(fmtDate(r, { month: 'short', day: 'numeric' }))} <span class="muted">${esc(relDays(r))}</span></div>` : ''; })()}
       <div class="small muted">${(() => { const lt = lastTouchDate(a); return lt ? `Last touch ${esc(relDays(lt))}` : 'Never touched'; })()}</div>
       ${p ? `<div class="small">${esc(p.name)}${p.phone ? ` · <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : ''}</div>` : ''}
       ${a.revisitDate ? `<div class="small">Revisit ${dueChip(a.revisitDate)}</div>` : ''}
@@ -5996,6 +6136,7 @@
   }
 
   function renderMapAccounts() {
+    socalSoon();
     const accts = mapFilter();
     const mapped = accts.filter(hasGeo);
     const missing = accts.filter((a) => !hasGeo(a));
@@ -6012,9 +6153,12 @@
             <select id="mf-type" aria-label="Type">${opt('all', 'All types', f.type)}${opt('prospect', 'Prospects', f.type)}${opt('partner', 'Partners', f.type)}</select>
             <select id="mf-vendor" aria-label="Vendor"><option value="all">All vendors</option>${allVendors().map((v) => opt(v, v, f.vendor)).join('')}</select>
             <select id="mf-list" aria-label="Saved view"><option value="">All accounts</option>${state.lists.map((l) => opt(l.id, l.name, f.list)).join('')}</select>
-            ${terrs.length ? `<select id="mf-terr" aria-label="Territory"><option value="">All territories</option>${terrs.map((t) => opt(t.id, t.name, f.terr || '')).join('')}</select>` : ''}
+            ${terrs.length || socalData ? `<select id="mf-terr" aria-label="Territory"><option value="">All territories</option>
+              ${terrs.length ? `<optgroup label="My zones">${terrs.map((t) => opt(t.id, t.name, f.terr || '')).join('')}</optgroup>` : ''}
+              ${socalData ? `<optgroup label="SoCal field territories">${socalData.map((t) => opt(`b:${t.n}`, `#${t.n} ${t.name}`, f.terr || '')).join('')}</optgroup>` : ''}</select>` : ''}
             <select id="mf-color" aria-label="Color pins by">${Object.entries(MAP_COLORS).map(([k, l]) => opt(k, `Color: ${l}`, MAP_COLORS[ui.mapColor] ? ui.mapColor : 'touch')).join('')}</select>
           </div>
+          <label class="row small" style="gap:.35rem"><input type="checkbox" id="mf-socal" style="width:auto" ${socalOn() ? 'checked' : ''}> Show SoCal field territories${mapState.socalFail ? ' <span class="muted">(failed to load)</span>' : ''}</label>
           ${missing.length || approx.length ? `<div class="geo-flag small"><b>${missing.length ? `${plural(missing.length, 'account')} ${missing.length === 1 ? 'has' : 'have'} no map location` : ''}${missing.length && approx.length ? ' · ' : ''}${approx.length ? `${approx.length} pinned only to a city` : ''}</b> <button type="button" class="link-btn small" data-act="map-fix">Fix</button></div>` : ''}
           <div class="row spread">
             <span class="small muted">${mapped.length} of ${accts.length} on the map</span>
@@ -6071,11 +6215,13 @@
     $('#mf-list').addEventListener('change', (e) => { ui.mapFilter.list = e.target.value; rerender(); });
     if ($('#mf-terr')) $('#mf-terr').addEventListener('change', (e) => { ui.mapFilter.terr = e.target.value; rerender(); });
     $('#mf-color').addEventListener('change', (e) => { ui.mapColor = e.target.value; savePrefs(); rerender(); });
+    $('#mf-socal').addEventListener('change', (e) => { ui.mapSocal = e.target.checked; savePrefs(); rerender(); });
     if (ui.mapFix) { ui.mapFix = false; const el = $('.map-side h3 + .side-list, .approx-box'); if (el) el.scrollIntoView({ block: 'center' }); }
     loadLeaflet().then(() => {
       if (mapState.view !== 'accounts' || !$('#map')) return;
       const { map, restored } = mountMap();
       wirePopups(map);
+      drawSocal(mapState.layer);
       drawTerritories(mapState.layer);
       if (dr && dr.points.length) { dr.shape = null; const pts = dr.points; dr.points = []; pts.forEach((x) => drawClick({ latlng: { lat: x[0], lng: x[1] } })); }
       mapped.forEach(addAccountMarker);
@@ -6298,6 +6444,7 @@
   }
 
   function renderRoutePlanner() {
+    socalSoon();
     const d = ui.routeDate;
     const r = getRoute(d);
     const stops = routeStops(d);
@@ -6319,7 +6466,7 @@
               <input type="date" id="route-date" value="${d}" style="width:auto">
               <button class="btn ghost sm" data-act="route-day" data-n="1" aria-label="Next day">›</button>
             </div>
-            <a class="small" href="#planner/${d}">Planner →</a>
+            <span class="row" style="gap:.6rem"><button type="button" class="link-btn small" data-act="day-recap">Day recap</button><a class="small" href="#planner/${d}">Planner →</a></span>
           </div>
           <div class="grid-2 route-opts">
             ${field('Start from', `<select id="r-start">${opt('home', homeOk ? `Home base` : 'Home base (not set)', r.start)}${opt('gps', 'My current location', r.start)}${opt('first', 'First stop', r.start)}</select>`)}
@@ -6358,6 +6505,9 @@
           <div class="row">
             <select id="route-add" style="flex:1"><option value="">+ Add a stop…</option>${addable.map((a) => `<option value="${a.id}">${esc(a.name)}${hasGeo(a) ? '' : ' (no address)'}</option>`).join('')}</select>
           </div>
+          ${socalData ? `<div class="row">
+            <select id="route-fieldday" style="flex:1"><option value="">⚑ Field day: fill from a territory…</option>${socalData.map((t) => `<option value="${t.n}">#${t.n} ${esc(t.name)} · ${esc(t.region)}</option>`).join('')}</select>
+          </div>` : ''}
           <div class="saved-routes">
             <div class="row spread"><h3 style="margin:0">Saved routes</h3>${stops.length ? '<button type="button" class="btn sm ghost" data-act="route-save">Save this route</button>' : ''}</div>
             ${tpls.length ? `<div class="side-list">${tpls.map((x) => `<div class="side-item"><strong>${esc(x.name)}</strong>
@@ -6378,6 +6528,17 @@
     $('#r-mins').addEventListener('change', (e) => { setRoute(d, { visitMins: Math.max(0, Number(e.target.value) || 0) }); rerender(); });
     $('#r-round').addEventListener('change', (e) => { setRoute(d, { roundTrip: e.target.checked }); rerender(); });
     $('#route-add').addEventListener('change', (e) => { if (e.target.value) { addRouteStop(d, e.target.value); rerender(); } });
+    if ($('#route-fieldday')) $('#route-fieldday').addEventListener('change', (e) => {
+      const t = (socalData || []).find((x) => String(x.n) === e.target.value);
+      if (!t) return;
+      const members = state.accounts.filter((a) => socalOf(a) === t);
+      const picks = fieldDayCandidates(members, d, new Set(routeStops(d).map((s) => s.a.id))).slice(0, 10);
+      if (!picks.length) { toast(`#${t.n} ${t.name}: nothing due or cold there right now`); e.target.value = ''; return; }
+      const r = getRoute(d);
+      const ids = picks.map((x) => x.a.id).filter((id) => !r.extra.includes(id));
+      setRoute(d, { extra: [...r.extra, ...ids], removed: r.removed.filter((x) => !ids.includes(x)) });
+      toast(`#${t.n} ${t.name}: ${plural(ids.length, 'stop')} added`); rerender();
+    });
 
     const run = mapState.runId;
     // Keep the best order automatically whenever the stops or start change (GPS waits until location is known).
@@ -6389,6 +6550,7 @@
       if (run !== mapState.runId || !$('#map')) return;
       const { map, restored } = mountMap();
       const pts = mappedStops.map((s) => ll(s.a));
+      drawSocal(mapState.layer);
       drawTerritories(mapState.layer);
       if (start) L.marker(start, { icon: L.divIcon({ className: 'home-pin', html: '⌂', iconSize: [26, 26] }) }).bindTooltip('Start').addTo(mapState.layer);
       mappedStops.forEach((s, i) => {
@@ -7388,6 +7550,7 @@
       case 'set-view': ui.accountView = el.dataset.mode; savePrefs(); return rerender();
       case 'acct-nearby': return nearbyForm(acct);
       case 'map-fix': ui.mapFix = true; return rerender();
+      case 'day-recap': return dayRecapForm(ui.routeDate || today());
       case 'map-draw': mapState.drawing = { points: [] }; mapState.placing = null; return rerender();
       case 'draw-cancel': mapState.drawing = null; return rerender();
       case 'draw-done': if (mapState.drawing && mapState.drawing.points.length >= 3) territoryForm(null, mapState.drawing.points.slice()); return undefined;

@@ -2070,3 +2070,9 @@ tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 
 .cell-date-btn { cursor: pointer; text-align: left; min-width: 5.5rem; }
 .cell-date-btn.late { color: var(--danger); font-weight: 600; }
+
+/* ---------- SoCal territories, visit quick keys, day recap ---------- */
+.qk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.35rem; }
+.qk-grid .btn { text-align: left; }
+.terr-score { margin: 0.25rem 0 0.5rem; }
+#recap-text { width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; }

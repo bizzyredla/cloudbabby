@@ -149,7 +149,26 @@ No install, no build step: open `index.html` in a browser.
   it counts on today's plan and ticks the route stop), see who's **Nearby**, or get directions
 - **Nearby** (from a pin or the account page): accounts within 1, 2, 5 or 10 miles with their last
   touch, one tap to add each to today's route, or "add this + the 3 closest"
-- **Territories**: draw zones on the map (Westside, South Bay, DTLA) and pick the weekdays you're
+- **SoCal field territories**: a built-in layer of 124 color-coded drop territories covering
+  LA, Orange, Ventura, Inland Empire, San Diego, Kern, Santa Barbara, SLO and Imperial counties
+  (`socal-territories.json`, built from public city and LA Times neighborhood boundaries; static,
+  not synced). Every mapped account is assigned to its territory automatically (shown in its pin
+  popup), the territory dropdown filters by any of the 124, and the layer can be hidden with the
+  "Show SoCal field territories" toggle. **Tap a territory** for its scorecard: open accounts,
+  due now, cold 30+ days, last visit, and the top 10 **field day picks** with one tap to add
+  them to the route
+- **Renewal window** pin colors: red renews within 60 days, orange 61–120, yellow 121–180, blue
+  further out, gray no renewal date (from the vendor renewal field and open key dates mentioning
+  "renew"). The popup shows the next renewal date
+- **Outcome quick keys** on Log visit: Met the decision maker, Gatekeeper - left materials,
+  Left at door, Meeting set, Asked to return, Nobody available / no access, Bad address / moved,
+  Not a fit. Each sets a fitting default next follow-up (Meeting set → next workday, Asked to
+  return → a week, etc.), and Bad address puts the account back on the map's Fix list
+- **Day recap** (route planner): every activity logged that day across all accounts in one
+  copy-ready text block, for batch-logging into Salesforce at shutdown
+- **Field day picker** (route planner): pick any of the 124 territories to fill the day's route
+  with its due and coldest accounts
+- **Territories (drawn)**: draw your own zones on the map and pick the weekdays you're
   usually there. On those days the route planner suggests the zone's accounts that are due or
   haven't been touched in 30+ days ("Wednesday is Westside · Add these 6"). Synced
 - **Saved routes**: save a day's stops as a named route ("Westside loop") and load it onto any
