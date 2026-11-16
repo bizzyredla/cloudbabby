@@ -852,6 +852,7 @@
     const f = CONTACT_FILTERS[ui.contactFilter] ? ui.contactFilter : 'all';
     const rows = state.accounts.flatMap((a) => a.contacts.map((c) => ({ a, c, s: stayInfo(a, c), last: lastContacted(a, c) })))
       .filter(({ a, c, s, last }) => {
+        if (q ? bookFilter() === 'reserve' && !isReserve(a) : !inBook(a)) return false;
         if (ui.contactType !== 'all' && a.type !== ui.contactType) return false;
         const active = isActiveContact(c);
         if (f === 'left' ? active : f !== 'all' && f !== 'quiet' && !active) return false;
@@ -878,7 +879,7 @@
   function renderContacts() {
     const t = today();
     const rows = contactRows();
-    const all = state.accounts.flatMap((a) => a.contacts.map((c) => ({ a, c })));
+    const all = state.accounts.filter((a) => inBook(a)).flatMap((a) => a.contacts.map((c) => ({ a, c })));
     const total = all.length;
     const shown = rows.slice(0, ui.contactLimit);
     const f = CONTACT_FILTERS[ui.contactFilter] ? ui.contactFilter : 'all';
@@ -896,6 +897,7 @@
           <div class="muted small">Roles, last touch per person, and who you haven't reached yet.</div>
         </div>
       </div>
+      ${bookBar()}
       <div class="view-tabs">${tabs.map((k) => `<button type="button" class="q-tab ${f === k ? 'active' : ''}" data-act="ct-filter" data-f="${k}">${esc(CONTACT_FILTERS[k])} <span>${counts[k]}</span></button>`).join('')}</div>
       <div class="filters">
         <input type="search" id="ct-search" placeholder="Search name, title, email, account…" value="${esc(ui.contactSearch)}">
@@ -1346,7 +1348,7 @@
     if (state.tasks.length !== n0) made = true;
     for (const p of partners()) {
       const tier = partnerTier(p);
-      if (ruleOn('quiet') && (tier === 'A' || tier === 'B') && touchGap(p, tier).late
+      if (ruleOn('quiet') && !isReserve(p) && (tier === 'A' || tier === 'B') && touchGap(p, tier).late
         && !state.tasks.some((x) => x.accountId === p.id && x.rule === 'reengage' && !x.done)) {
         const lt = lastTouchDate(p);
         state.tasks.push({ id: uid(), date: t, time: '', title: `Re-engage ${p.name}`, accountId: p.id, priority: tier === 'A' ? 'high' : 'med', done: false, rule: 'reengage', categoryId: 'cat-partner',
@@ -1378,10 +1380,10 @@
   const PT_COLS = [['name', 'Partner'], ['tier', 'Tier'], ['type', 'Type'], ['refs', 'Referrals 12 mo'], ['pipe', 'Referred pipeline'], ['comp', 'Est. comp won / open'], ['give', 'Given / got'], ['touch', 'Last touch'], ['next', 'Next step']];
   function renderPartners() {
     if (runPartnerRules()) save();
-    const all = partners();
+    const q = (ui.ptSearch || '').trim().toLowerCase();
+    const all = partners().filter((p) => (q ? bookFilter() !== 'reserve' || isReserve(p) : inBook(p)));
     const t = today();
     const data = all.map(partnerRowData);
-    const q = (ui.ptSearch || '').trim().toLowerCase();
     const quick = PT_QUICK[ui.ptQuick] ? ui.ptQuick : 'all';
     const test = {
       all: () => true, A: (r) => r.tier === 'A', B: (r) => r.tier === 'B', C: (r) => r.tier === 'C',
@@ -1441,6 +1443,7 @@
           <button class="btn" data-act="new-partner">+ New partner</button>
         </div>
       </div>
+      ${bookBar()}
       <div class="kpi-grid4 pt-kpis">
         ${tile('A', `<span class="kpi-label">${tierPill('A')} Tier A · Producing</span><div class="kpi-value">${okA} <span class="kpi-of">of ${A.length}</span></div><div class="kpi-sub">touched in the last 30 days</div>${bar(okA, A.length)}`)}
         ${tile('B', `<span class="kpi-label">${tierPill('B')} Tier B · Warm</span><div class="kpi-value">${okB} <span class="kpi-of">of ${B.length}</span></div><div class="kpi-sub">touched in the last 90 days${B.length - inB ? ` · <button type="button" class="link-btn small" data-act="pt-enroll" data-tier="B">${B.length - inB} not in value-share cadence</button>` : ''}</div>${bar(okB, B.length)}`)}
@@ -2238,7 +2241,7 @@
   /** Accounts nobody has touched in 30+ days (open deals and active partners). */
   function staleAccounts() {
     const t = today();
-    return state.accounts.filter((a) => !isClosedStage(a.stage) && a.stage !== 'Nurture' && a.stage !== 'Target')
+    return state.accounts.filter((a) => !isReserve(a) && !isClosedStage(a.stage) && a.stage !== 'Nurture' && a.stage !== 'Target')
       .map((a) => ({ a, lt: lastTouchDate(a) })).filter(({ lt }) => !lt || daysBetween(lt, t) >= 30)
       .sort((x, y) => (x.lt ? 1 : 0) - (y.lt ? 1 : 0) || (Number(y.a.value) || 0) - (Number(x.a.value) || 0));
   }
@@ -2446,8 +2449,8 @@
     const items = workQueue(t);
     const now = dueNow(items);
     const overdue = now.filter((it) => it.late > 0).length;
-    const partners = state.accounts.filter((a) => a.type === 'partner');
-    const prospects = state.accounts.filter((a) => a.type === 'prospect');
+    const partners = state.accounts.filter((a) => a.type === 'partner' && !isReserve(a));
+    const prospects = state.accounts.filter((a) => a.type === 'prospect' && !isReserve(a));
     const openDeals = prospects.filter(isOpenDeal);
     const openPipeline = openDeals.reduce((s, a) => s + (Number(a.value) || 0), 0);
     const stale = staleAccounts();
@@ -2616,7 +2619,7 @@
     updateCounts();
   }
   function updateCounts() {
-    $('#nc-accounts').textContent = state.accounts.length || '';
+    $('#nc-accounts').textContent = state.accounts.filter((a) => !isReserve(a)).length || '';
     const due = dueSteps(today()).length;
     $('#nc-cadences').textContent = due ? `${due} due` : '';
     const sit = stayDue().length;
@@ -2673,11 +2676,63 @@
       if (ui.stageFilter !== 'all' && a.stage !== ui.stageFilter) return false;
       if (ui.vendorFilter !== 'all' && !a.vendors.includes(ui.vendorFilter)) return false;
       if (ui.partnerTypeFilter && ui.partnerTypeFilter !== 'all' && !(a.type === 'partner' && a.partnerType === ui.partnerTypeFilter)) return false;
+      // Searching reaches Reserve too (unless you're looking at Reserve only).
+      if (q ? bookFilter() === 'reserve' && !isReserve(a) : !inBook(a)) return false;
       return !q || haystack(a).includes(q);
     }));
   }
 
-  const typePill = (a) => `<span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span>`;
+  // ----- Book: Active or Reserve -----
+  // Active is the book you work (targets: 150 partners, 300 prospects); Reserve is the layer behind it.
+  // Reserve accounts stay searchable, open and editable, and their follow-ups and revisits still come up
+  // in the planner. They're left out of the default lists, counts, map pins and drop-day picks.
+  const BOOK_TARGETS = { partner: 150, prospect: 300 };
+  const LIVE_PARTNER = ['Engaged', 'Met', 'Committed', 'Producing'];
+  /** The closest fit for an account that has no book yet: open deals, live partners and anything dated,
+   *  in a cadence or touched in the last 90 days are Active; closed and quiet accounts are Reserve. */
+  function defaultBook(a) {
+    if (a.stage === 'Closed Won' || a.stage === 'Closed Lost' || (a.type === 'partner' && a.stage === 'Closed')) return 'reserve';
+    if (a.type === 'partner' ? LIVE_PARTNER.includes(a.stage) : /^S[1-5]/.test(a.stage || '')) return 'active';
+    if (a.nextFollowUp || a.revisitDate || inCadence(a)) return 'active';
+    const lt = lastTouchDate(a);
+    return lt && daysBetween(lt, today()) <= 90 ? 'active' : 'reserve';
+  }
+  /** An account's book. One that has none yet (made elsewhere, or synced from an older version) gets its
+   *  closest fit once and keeps it, so later stage changes never move it out of Active by surprise. */
+  const bookOf = (a) => {
+    if (a.book !== 'active' && a.book !== 'reserve') a.book = defaultBook(a);
+    return a.book;
+  };
+  const isReserve = (a) => bookOf(a) === 'reserve';
+  const bookFilter = () => (['active', 'reserve', 'all'].includes(ui.bookFilter) ? ui.bookFilter : 'active');
+  /** Does an account show under the book switch (Active by default)? */
+  const inBook = (a, f = bookFilter()) => (f === 'all' ? true : f === 'reserve' ? isReserve(a) : !isReserve(a));
+  const bookLabel = (a) => (isReserve(a) ? 'Reserve' : a.type === 'partner' ? 'Active Partner' : 'Active Prospect');
+  /** A follow-up or revisit due by day d: Reserve accounts still surface for these. */
+  const dueBy = (a, d = today()) => (a.nextFollowUp && a.nextFollowUp <= d) || (a.revisitDate && a.revisitDate <= d);
+  function bookCounts() {
+    let p = 0, q = 0, r = 0;
+    for (const a of state.accounts) { if (isReserve(a)) r++; else if (a.type === 'partner') p++; else q++; }
+    return { p, q, r };
+  }
+  /** Active / Reserve / All switch with soft counters against the targets (never blocks anything). */
+  function bookBar() {
+    const f = bookFilter();
+    const { p, q, r } = bookCounts();
+    const meter = (n, max, label) => `<span class="book-meter ${n > max ? 'over' : ''}" title="${n > max ? `${n - max} over your target of ${max}` : `${max - n} under your target of ${max}`}"><b>${n}</b> / ${max} ${label}</span>`;
+    return `<div class="book-bar">
+      <div class="seg" role="group" aria-label="Book">${[['active', 'Active'], ['reserve', 'Reserve'], ['all', 'All']].map(([k, l]) => `<button type="button" class="${f === k ? 'active' : ''}" data-act="book-filter" data-f="${k}">${l}${k === 'reserve' ? ` <span class="muted">${r}</span>` : ''}</button>`).join('')}</div>
+      <span class="small book-meters">${meter(p, BOOK_TARGETS.partner, 'active partners')} <span class="muted">·</span> ${meter(q, BOOK_TARGETS.prospect, 'active prospects')}</span>
+    </div>`;
+  }
+  /** One-time: give every account without a book its closest fit (runs at start; no-op once set). */
+  function migrateBooks() {
+    let n = 0;
+    for (const a of state.accounts) if (a.book !== 'active' && a.book !== 'reserve') { a.book = defaultBook(a); n++; }
+    if (n) save();
+    return n;
+  }
+  const typePill = (a) => `<span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span>${isReserve(a) ? ' <span class="pill reserve" title="Reserve: out of your active lists">Reserve</span>' : ''}`;
   const dueChip = (iso) => iso
     ? `<span class="pill ${dueClass(iso)}" title="${esc(relDays(iso))}">${fmtDate(iso, { month: 'short', day: 'numeric' })}</span>`
     : '<span class="muted">—</span>';
@@ -3011,7 +3066,7 @@
   }
 
   // ----- verbs: act on a whole view or the rows you ticked -----
-  const ACCT_ACTIONS = { enroll: 'Enroll in a cadence', route: 'Add to a route', session: 'Start a call session', stage: 'Set stage', tag: 'Add a tag', list: 'Add to a hand-picked list', csv: 'Export accounts (CSV)', contacts: 'Export contacts for ZoomInfo / Apollo' };
+  const ACCT_ACTIONS = { book: 'Move to Active / Reserve', enroll: 'Enroll in a cadence', route: 'Add to a route', session: 'Start a call session', stage: 'Set stage', tag: 'Add a tag', list: 'Add to a hand-picked list', csv: 'Export accounts (CSV)', contacts: 'Export contacts for ZoomInfo / Apollo' };
   function actionTargets() {
     const sel = ui.acctSel || new Set();
     const shown = filteredAccounts();
@@ -3079,6 +3134,16 @@
         toast(`${plural(n, 'account')} moved to ${data.stage}`);
       }, 'Set stage');
     }
+    if (kind === 'book') {
+      const { p, q } = bookCounts();
+      return openModal(`Book · ${scope}`, `
+        ${field('Move to', `<select name="book">${opt('active', 'Active', isReserve(list[0]) ? 'active' : 'reserve')}${opt('reserve', 'Reserve', isReserve(list[0]) ? 'active' : 'reserve')}</select>`)}
+        <p class="small muted" style="margin:0">Now ${p} active partners (target ${BOOK_TARGETS.partner}) and ${q} active prospects (target ${BOOK_TARGETS.prospect}). Reserve accounts keep their follow-ups and revisits.</p>`, (data) => {
+        let n = 0;
+        for (const a of list) if (bookOf(a) !== data.book) { a.book = data.book; touch(a); n++; }
+        toast(`${plural(n, 'account')} moved to ${data.book === 'active' ? 'Active' : 'Reserve'}`);
+      }, 'Move');
+    }
     if (kind === 'tag') {
       const tag = (prompt(`Tag to add to ${scope}:`) || '').trim().replace(/^#/, '');
       if (!tag) return;
@@ -3132,9 +3197,10 @@
         </div>
         <div class="row">${viewSwitcher()}<button class="btn ghost" data-act="import-csv" title="Import accounts and contacts from a ZoomInfo or spreadsheet CSV">Import</button><button class="btn ghost" data-act="accounts-csv" title="Export the accounts shown">Export CSV</button><button class="btn" data-act="new-account">+ New account</button></div>
       </div>
+      ${bookBar()}
       <div class="view-tabs">
-        ${tab(null, 'All', state.accounts.length)}
-        ${state.lists.map((l) => { const d = deltaText(l); return tab(l.id, `${l.pinned ? '★ ' : ''}${l.name}`, state.accounts.filter((a) => listHas(l, a)).length, d ? ` <em class="view-delta">${d}</em>` : ''); }).join('')}
+        ${tab(null, 'All', state.accounts.filter((a) => inBook(a)).length)}
+        ${state.lists.map((l) => { const d = deltaText(l); return tab(l.id, `${l.pinned ? '★ ' : ''}${l.name}`, state.accounts.filter((a) => inBook(a) && listHas(l, a)).length, d ? ` <em class="view-delta">${d}</em>` : ''); }).join('')}
         ${vendors.length ? `<select id="vendor-view" class="view-select ${ui.viewId && ui.viewId.startsWith(VENDOR_LIST) ? 'on' : ''}" aria-label="Vendor views"><option value="">By vendor…</option>${vendors.map(([v, n]) => `<option value="${esc(VENDOR_LIST + v)}" ${ui.viewId === VENDOR_LIST + v ? 'selected' : ''}>${esc(v)} (${n})</option>`).join('')}</select>` : ''}
         ${tab('scoreboard', 'Vendor scoreboard', vendors.length)}
         <button type="button" class="btn ghost sm" data-act="save-view">+ Save view</button>
@@ -3172,7 +3238,7 @@
       </div>
       <div class="act-bar ${sel.size ? 'on' : ''}">
         <span class="small"><b>${sel.size ? `${sel.size} selected` : `${list.length} shown`}</b>${sel.size ? ' · <button type="button" class="link-btn small" data-act="acct-clear">Clear</button>' : ''}</span>
-        ${['enroll', 'session', 'route', 'stage', 'tag', 'list'].map((k) => `<button type="button" class="btn ghost sm" data-act="acct-action" data-kind="${k}">${esc(ACCT_ACTIONS[k])}</button>`).join('')}
+        ${['book', 'enroll', 'session', 'route', 'stage', 'tag', 'list'].map((k) => `<button type="button" class="btn ghost sm" data-act="acct-action" data-kind="${k}">${esc(ACCT_ACTIONS[k])}</button>`).join('')}
         <select id="acct-export" class="view-select" aria-label="Export"><option value="">Export…</option><option value="csv">${ACCT_ACTIONS.csv}</option><option value="contacts">${ACCT_ACTIONS.contacts}</option></select>
       </div>
       ${accountCollection(list, view ? (view.kind === 'static' ? 'Nothing in this list yet. Tick accounts and use "Add to a hand-picked list".' : 'No accounts match this view yet.') : state.accounts.length ? 'No accounts match these filters.' : 'No accounts yet. Click "+ New account" to add one.')}`}`;
@@ -3287,6 +3353,7 @@
         <div class="facts">
           ${a.type === 'prospect' || a.vendors.length ? `<div class="span-all"><span>Current vendors</span>${a.vendors.length ? vendorPills(a) : '—'}</div>` : ''}
           <div class="span-all"><span>Address</span>${geoQuery(a) ? `${esc(geoQuery(a))}${hasGeo(a) ? ` · <a href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}${noDrop(a) ? ` <span class="pill med">${esc(noDrop(a))}: not a drop stop</span>` : ''}</div>
+          <div><span>Book</span>${esc(bookLabel(a))} <button type="button" class="link-btn small" data-act="book-toggle" data-id="${a.id}">${isReserve(a) ? 'Move to Active' : 'Move to Reserve'}</button></div>
           ${geoQuery(a) ? `<div><span>Field territory</span><span data-terr="${a.id}">${socalData ? esc(terrName(a) || (hasGeo(a) ? 'Outside the territories' : 'Not on the map yet')) : '…'}</span></div>` : ''}
           <div><span>Sales Navigator</span>${liIdOf(a) ? `<a href="${esc(snCompanyUrl(liIdOf(a)))}" target="_blank" rel="noopener">Account</a> · <a href="${esc(snPeopleAt(liIdOf(a), a.name))}" target="_blank" rel="noopener">People here</a> <span class="small muted">ID ${esc(liIdOf(a))}</span> ` : ''}<button type="button" class="link-btn small" data-act="li-id" data-id="${a.id}">${liIdOf(a) ? 'Change' : 'Add LinkedIn ID'}</button>
               ${liTwins(a).length ? `<div class="small warn-text">Same LinkedIn page as ${liTwins(a).map((x) => `<a href="#account/${x.id}">${esc(x.name)}</a>`).join(', ')}. One business or separate accounts? Check the legal name and EIN.</div>` : ''}</div>
@@ -3795,10 +3862,10 @@
 
   function accountsCsv(title, accounts) {
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Account', 'Website', 'Company LinkedIn', 'LinkedIn company ID', 'Sales Navigator', 'Type', 'Stage', 'Industry', 'Employees', 'Street address', 'Location', 'Main phone', 'Value', 'Admin fees', 'Expected close', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Lead source', 'Channel partner', 'Channel contact', 'Tags', 'Stay in touch', 'Partner type', 'Last touch', 'Last referral']];
+    const rows = [['Account', 'Website', 'Company LinkedIn', 'LinkedIn company ID', 'Sales Navigator', 'Type', 'Stage', 'Book', 'Industry', 'Employees', 'Street address', 'Location', 'Main phone', 'Value', 'Admin fees', 'Expected close', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Lead source', 'Channel partner', 'Channel contact', 'Tags', 'Stay in touch', 'Partner type', 'Last touch', 'Last referral']];
     for (const a of accounts) {
       const p = primaryContact(a) || {};
-      rows.push([a.name, a.website, a.linkedin, liIdOf(a), liIdOf(a) ? snCompanyUrl(liIdOf(a)) : '', a.type, a.stage, a.industry, a.employees, a.address, a.location, a.mainPhone, a.value, a.adminFees, a.closeDate, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
+      rows.push([a.name, a.website, a.linkedin, liIdOf(a), liIdOf(a) ? snCompanyUrl(liIdOf(a)) : '', a.type, a.stage, isReserve(a) ? 'Reserve' : 'Active', a.industry, a.employees, a.address, a.location, a.mainPhone, a.value, a.adminFees, a.closeDate, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
         a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.leadSource,
         (getAccount(a.channelPartnerId) || {}).name || '',
         ((getAccount(a.channelPartnerId) || { contacts: [] }).contacts.find((c) => c.id === a.channelContactId) || {}).name || '', a.tags,
@@ -4222,6 +4289,7 @@
       </div>
       <div class="row spread small">
         <label class="row"><input type="checkbox" id="ap-primary" style="width:auto"> Primary contacts only</label>
+        <label class="row"><input type="checkbox" id="ap-reserve" style="width:auto"> Include Reserve accounts</label>
         <label class="row"><input type="checkbox" id="ap-all" style="width:auto"> Select all shown</label>
       </div>
       <div class="ap-spread small">
@@ -4232,7 +4300,7 @@
       <div class="pick-list" id="ap-list">
         ${people.length ? people.map(({ a, c }) => {
           const blocked = c.status && c.status !== 'Active' ? c.status : inCad.has(c.id) ? 'Already in this cadence' : '';
-          return `<label class="pick ${blocked ? 'blocked' : ''}" data-acct="${a.id}" data-primary="${c.primary ? 1 : 0}" data-text="${esc([c.name, c.title, a.name, ...a.vendors].join(' ').toLowerCase())}">
+          return `<label class="pick ${blocked ? 'blocked' : ''}" data-acct="${a.id}" data-primary="${c.primary ? 1 : 0}" data-reserve="${isReserve(a) ? 1 : 0}" data-text="${esc([c.name, c.title, a.name, ...a.vendors].join(' ').toLowerCase())}">
             <input type="checkbox" name="pick" value="${a.id}|${c.id}" ${blocked ? 'disabled' : ''} ${preset.contactId === c.id && !blocked ? 'checked' : ''}>
             <span class="avatar sm" style="--c:${cad.color}">${esc(initials(c.name))}</span>
             <span class="grow"><strong>${esc(c.name)}</strong>${c.title ? ` <span class="muted">· ${esc(c.title)}</span>` : ''}<div class="small muted">${esc(a.name)}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</div></span>
@@ -4262,8 +4330,9 @@
       const q = $('#ap-search').value.trim().toLowerCase();
       const ids = listIds($('#ap-source').value);
       const primaryOnly = $('#ap-primary').checked;
+      const withReserve = $('#ap-reserve').checked || !!q;
       $$('#ap-list .pick').forEach((row) => {
-        row.hidden = (ids && !ids.has(row.dataset.acct)) || (primaryOnly && row.dataset.primary !== '1') || (q && !row.dataset.text.includes(q));
+        row.hidden = (ids && !ids.has(row.dataset.acct)) || (primaryOnly && row.dataset.primary !== '1') || (q && !row.dataset.text.includes(q)) || (!withReserve && row.dataset.reserve === '1');
       });
       const n = $$('#ap-list input:checked').length;
       $('#ap-count').textContent = `${n} selected`;
@@ -4278,6 +4347,7 @@
     $('#ap-source').addEventListener('change', refresh);
     $('#ap-search').addEventListener('input', refresh);
     $('#ap-primary').addEventListener('change', refresh);
+    $('#ap-reserve').addEventListener('change', refresh);
     ['#ap-spread', '#ap-perday', '[name=start]'].forEach((sel) => $(sel, modalForm).addEventListener('input', refresh));
     $('#ap-list').addEventListener('change', refresh);
     $('#ap-all').addEventListener('change', (ev) => {
@@ -5433,6 +5503,7 @@
     companyPhone: ['companyphone', 'companyphonenumber', 'companymainphone', 'mainphone', 'hqphone', 'officephone', 'companyhqphone'],
     companyLinkedin: ['companylinkedinurl', 'linkedincompanyurl', 'companylinkedin', 'linkedincompanyprofileurl'],
     liId: ['linkedincompanyid', 'linkedinid', 'linkedincompanyidnumber', 'salesnavigatorcompanyurl', 'salesnavigatoraccounturl', 'salesnavigatorurl', 'salesnavigatorlink', 'salesnavurl', 'salesnavigator'],
+    book: ['book'],
     salesNav: ['salesnavigatorlead', 'salesnavigatorleadurl', 'salesnavleadurl', 'salesnavigatorprofileurl', 'salesnavlead'],
     first: ['firstname', 'first'],
     last: ['lastname', 'last'],
@@ -5494,6 +5565,7 @@
         employees: emp ? emp[0].replace(/,/g, '') : '',
         location: get(r, 'location') || [get(r, 'city'), [get(r, 'state'), get(r, 'zip')].filter(Boolean).join(' ')].filter(Boolean).join(', '),
         address: get(r, 'address'), mainPhone: get(r, 'companyPhone'),
+        book: /^reserve/i.test(get(r, 'book')) ? 'reserve' : /^active/i.test(get(r, 'book')) ? 'active' : '',
         companyLinkedin: get(r, 'companyLinkedin'), liId: liCompanyId(get(r, 'liId')) || liCompanyId(get(r, 'companyLinkedin')),
         contact: name ? { name, title: get(r, 'title'), email: get(r, 'email'), phone: get(r, 'phone'), mobile: get(r, 'mobile'), linkedin: get(r, 'linkedin'), ...(get(r, 'salesNav') ? { salesNav: get(r, 'salesNav') } : {}), ...(parseStay(get(r, 'stayInTouch')) ? { stayInTouch: parseStay(get(r, 'stayInTouch')), sitSince: today() } : {}) } : null,
         value: parseMoney(get(r, 'value')), adminFees: parseMoney(get(r, 'adminFees')), vendors: parseVendors(get(r, 'vendors')),
@@ -5615,7 +5687,7 @@
       if (a) return { a, created: false };
       stats.created.push(name);
       a = migrateAccount({
-        id: uid(), name, type, stage, tags: opts.tag, notes: '', vendors: [],
+        id: uid(), name, type, stage, book: opts.book === 'active' ? 'active' : 'reserve', tags: opts.tag, notes: '', vendors: [],
         contacts: [], activities: [], keyDates: [], leadSource: source, createdAt: now, updatedAt: now,
       });
       made.set(key, a);
@@ -5626,6 +5698,7 @@
     for (const r of records) {
       const stage = stageFromText(opts.type, r.stage) || STAGES[opts.type][0];
       const { a, created } = findOrCreate(r.company, opts.type, stage, r.leadSource || opts.source, r.website, r.liId);
+      if (created && r.book) a.book = r.book; // the file says which book (an exported list coming back in)
       if (created) stats.newAccounts++;
       else if (![...made.values()].includes(a)) stats.updatedAccounts.add(a.id); // already in the CRM
       const fill = {
@@ -5709,6 +5782,7 @@
       <p class="small muted" style="margin:0">Existing accounts are matched by website domain first, then by name (ignoring LLC, Inc. and punctuation), a name the company also goes by ("dba", parentheses), or the same name with extra words like "Insurance Services". Only empty fields are filled in, and contacts already on an account (same email or name) are skipped.</p>
       <div class="grid-3">
         ${field('New accounts are', `<select name="type">${opt('prospect', 'Prospects', 'prospect')}${opt('partner', 'Partners', '')}</select>`)}
+        ${field('New accounts go to', `<select name="book">${opt('reserve', 'Reserve', 'reserve')}${opt('active', 'Active', 'reserve')}</select>`)}
         ${field(col.leadSource !== undefined ? 'Lead source (rows without one)' : 'Lead source', `<select name="source"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, '')).join('')}</select>`)}
         ${field('Tag new accounts', `<input name="tag" value="${fromZoomInfo ? 'zoominfo' : 'import'}-${today().slice(5)}">`)}
         ${col.address !== undefined || col.city !== undefined ? `<label class="row small span-3"><input type="checkbox" name="replaceAddr" style="width:auto"> Use this file's addresses on existing accounts too (replaces their street and city; the map finds the new spot)</label>` : ''}
@@ -5717,8 +5791,9 @@
       const noMerge = new Set([...s.fuzzy.keys()].filter((n, i) => !keep.has(i)));
       const nearPicked = new Set(fd.getAll('near').map(Number));
       const mergeInto = new Map([...s.near].filter((x, i) => nearPicked.has(i)).map(([n, m]) => [n, m.id]));
-      const st2 = applyImport(records, { type: data.type, tag: data.tag.trim(), source: data.source, dupes: 'merge', noMerge, mergeInto, replaceAddr: !!data.replaceAddr }, true);
-      toast(`Imported: ${st2.newAccounts - st2.newPartners} new accounts${st2.newPartners ? `, ${st2.newPartners} partners` : ''}, ${st2.newContacts} contacts${st2.addrUpdated ? `, ${plural(st2.addrUpdated, 'address', 'addresses')} updated` : ''}`);
+      const st2 = applyImport(records, { type: data.type, book: data.book, tag: data.tag.trim(), source: data.source, dupes: 'merge', noMerge, mergeInto, replaceAddr: !!data.replaceAddr }, true);
+      toast(`Imported: ${st2.newAccounts - st2.newPartners} new accounts${st2.newAccounts ? ` (${data.book === 'active' ? 'Active' : 'Reserve'})` : ''}${st2.newPartners ? `, ${st2.newPartners} partners` : ''}, ${st2.newContacts} contacts${st2.addrUpdated ? `, ${plural(st2.addrUpdated, 'address', 'addresses')} updated` : ''}`);
+      if (st2.newAccounts && data.book !== 'active') ui.bookFilter = 'all';
       ui.typeFilter = 'all'; ui.stageFilter = 'all'; ui.vendorFilter = 'all'; ui.search = '';
       go('accounts');
     }, 'Import', { wide: true });
@@ -6175,7 +6250,7 @@
   /** Accounts worth a field-day stop, best first: due, renewing within 120 days, never dropped, or 30+ days cold.
    *  Mailboxes and homes are left out. `n` is days since the last touch (9999 = never). */
   function fieldDayCandidates(members, d, exclude = new Set()) {
-    return members.filter((a) => !exclude.has(a.id) && !isClosedStage(a.stage) && !noDrop(a))
+    return members.filter((a) => !exclude.has(a.id) && !isClosedStage(a.stage) && !noDrop(a) && (!isReserve(a) || dueBy(a, d)))
       .map((a) => { const x = dropScore(a, d); return { a, ...x, n: x.idle === null ? 9999 : x.idle }; })
       .filter((x) => x.due || x.renew || !x.dropped || x.n >= 30)
       .sort((x, y) => y.score - x.score || y.n - x.n);
@@ -6302,7 +6377,7 @@
   /** Territory scorecard: accounts, due, cold, renewals, last field day and last touch, and the ranked picks. */
   function socalCard(t) {
     let rd = planDay();
-    const members = state.accounts.filter((a) => socalOf(a) === t);
+    const members = state.accounts.filter((a) => socalOf(a) === t && !isReserve(a));
     const st = socalStats(t, members);
     const body = () => {
       const cands = fieldDayCandidates(members, rd, new Set(routeStops(rd).map((s) => s.a.id))).slice(0, 10);
@@ -6386,7 +6461,7 @@
       const radius = st.scope === 'me' ? 2 : 5;
       const zone = st.scope.startsWith('z:') && zones.find((z) => `z:${z.id}` === st.scope);
       let pool = st.scope.startsWith('b:') ? by.get(Number(st.scope.slice(2))) || [] : state.accounts;
-      pool = pool.filter((a) => !onRoute.has(a.id) && (st.type === 'all' || a.type === st.type) && (q || !isClosedStage(a.stage)));
+      pool = pool.filter((a) => !onRoute.has(a.id) && (st.type === 'all' || a.type === st.type) && (q || (!isClosedStage(a.stage) && (!isReserve(a) || dueBy(a, d)))));
       if (zone) pool = pool.filter((a) => inTerritory(zone, a));
       if (q) pool = pool.filter((a) => `${a.name} ${a.location || ''} ${a.address || ''}`.toLowerCase().includes(q));
       const rows = pool.map((a) => {
@@ -6610,7 +6685,7 @@
     const ids = list ? new Set(listAccounts(list).map((a) => a.id)) : null;
     const bt = f.terr && f.terr.startsWith('b:') && socalData ? socalData.find((t) => String(t.n) === f.terr.slice(2)) : null;
     const terr = !bt && f.terr && (state.territories || []).find((t) => t.id === f.terr);
-    return state.accounts.filter((a) => (f.type === 'all' || a.type === f.type) && (f.vendor === 'all' || a.vendors.includes(f.vendor)) && (!ids || ids.has(a.id)) && (!terr || inTerritory(terr, a)) && (!bt || socalOf(a) === bt));
+    return state.accounts.filter((a) => (f.reserve || !isReserve(a)) && (f.type === 'all' || a.type === f.type) && (f.vendor === 'all' || a.vendors.includes(f.vendor)) && (!ids || ids.has(a.id)) && (!terr || inTerritory(terr, a)) && (!bt || socalOf(a) === bt));
   };
 
   function accountPopup(a) {
@@ -6677,6 +6752,7 @@
           <div class="layer-chips" role="group" aria-label="Show on the map">
             <button type="button" class="chip-tog ${f.type !== 'partner' ? 'on' : ''}" data-layer="prospect" aria-pressed="${f.type !== 'partner'}">● Prospects</button>
             <button type="button" class="chip-tog ${f.type !== 'prospect' ? 'on' : ''}" data-layer="partner" aria-pressed="${f.type !== 'prospect'}">◆ Partners</button>
+            <button type="button" class="chip-tog ${f.reserve ? 'on' : ''}" id="mf-reserve" aria-pressed="${!!f.reserve}" title="Reserve accounts (off the active lists)">◌ Reserve</button>
             <button type="button" class="chip-tog ${socalOn() ? 'on' : ''}" id="mf-socal" aria-pressed="${socalOn()}">▦ Territories${mapState.socalFail ? ' (failed to load)' : ''}</button>
           </div>
           <details class="map-filters" ${window.innerWidth > 900 || f.vendor !== 'all' || f.list || f.terr ? 'open' : ''}><summary class="small"><b>Filters and pin colours</b>${(() => { const n = [f.vendor !== 'all', !!f.list, !!f.terr, (ui.mapColor || 'touch') !== 'touch'].filter(Boolean).length; return n ? ` <span class="pill">${n} on</span>` : ''; })()}</summary>
@@ -6751,6 +6827,7 @@
     if ($('#mf-terr')) $('#mf-terr').addEventListener('change', (e) => { ui.mapFilter.terr = e.target.value; rerender(); });
     $('#mf-color').addEventListener('change', (e) => { ui.mapColor = e.target.value; savePrefs(); rerender(); });
     $('#mf-socal').addEventListener('click', () => { ui.mapSocal = !socalOn(); savePrefs(); rerender(); });
+    $('#mf-reserve').addEventListener('click', () => { ui.mapFilter.reserve = !ui.mapFilter.reserve; rerender(); });
     if (ui.mapFix) { ui.mapFix = false; const el = $('.map-side h3 + .side-list, .approx-box'); if (el) el.scrollIntoView({ block: 'center' }); }
     const run = mapState.runId;
     loadLeaflet().then(() => {
@@ -6844,7 +6921,7 @@
       mapState.me = pt;
       const d = today();
       const onRoute = new Set(routeStops(d).map((s) => s.a.id));
-      const list = state.accounts.filter((a) => hasGeo(a) && !isClosedStage(a.stage)).map((a) => ({ a, m: miles(pt, ll(a)), ...dropScore(a, d) }))
+      const list = state.accounts.filter((a) => hasGeo(a) && !isClosedStage(a.stage) && (!isReserve(a) || dueBy(a, d))).map((a) => ({ a, m: miles(pt, ll(a)), ...dropScore(a, d) }))
         .filter((x) => x.m <= radius).sort((x, y) => x.m - y.m);
       const label = (r) => (r === 0.5 ? '½' : String(r));
       openModal('Near me now', `
@@ -7234,7 +7311,8 @@
     const region = ui.terrRegion || '';
     const showEmpty = !!ui.terrEmpty;
     const regions = [...new Set(socalData.map((t) => t.region))];
-    const all = socalData.filter((t) => (!region || t.region === region) && (showEmpty || by.has(t.n))).map((t) => socalStats(t, by.get(t.n) || []));
+    const act = (t) => (by.get(t.n) || []).filter((a) => !isReserve(a));
+    const all = socalData.filter((t) => (!region || t.region === region) && (showEmpty || act(t).length)).map((t) => socalStats(t, act(t)));
     const key = TERR_SORTS[ui.terrSort] ? ui.terrSort : 'overdue';
     const dir = ui.terrDir || 1;
     all.sort((x, y) => TERR_SORTS[key](x, y) * dir || x.t.n - y.t.n);
@@ -7862,6 +7940,7 @@
       <fieldset class="form-sec"><legend>Company</legend><div class="grid-3">
         ${field('Account name *', `<input name="name" required value="${esc(a.name)}">`)}
         ${field('Type', `<select name="type" id="f-type">${opt('prospect', 'Prospect (deal pipeline)', a.type)}${opt('partner', 'Partner (channel / referral)', a.type)}</select>`)}
+        ${field('Book', `<select name="book">${opt('active', 'Active (working it)', existing ? bookOf(a) : (a.book || 'active'))}${opt('reserve', 'Reserve (out of the active lists)', existing ? bookOf(a) : (a.book || 'active'))}</select>`)}
         ${field(`<span id="f-stage-label">${a.type === 'partner' ? 'Channel stage' : 'Deal stage'}</span>`, `<select name="stage" id="f-stage">${STAGES[a.type].map((s) => opt(s, s, a.stage)).join('')}</select><span class="small muted" id="f-stage-hint">${esc(STAGE_HINTS[a.stage] || STAGE_HINTS[STAGES[a.type][0]])}</span>`)}
         ${field('Industry', `<input name="industry" value="${esc(a.industry)}">`)}
         ${field('Employees', `<input name="employees" type="number" min="0" value="${esc(a.employees)}">`)}
@@ -8249,6 +8328,13 @@
       case 'set-view': ui.accountView = el.dataset.mode; savePrefs(); return rerender();
       case 'acct-nearby': return nearbyForm(acct);
       case 'li-id': return liIdForm(acct);
+      case 'book-filter': ui.bookFilter = el.dataset.f; ui.contactLimit = 100; return rerender();
+      case 'book-toggle': {
+        acct.book = isReserve(acct) ? 'active' : 'reserve'; touch(acct); save();
+        const { p, q } = bookCounts();
+        toast(`${acct.name}: ${bookLabel(acct)} · ${p}/${BOOK_TARGETS.partner} partners, ${q}/${BOOK_TARGETS.prospect} prospects active`);
+        return rerender();
+      }
       case 'map-fix': ui.mapFix = true; return rerender();
       case 'day-recap': return dayRecapForm(el.dataset.date || ui.routeDate || today());
       case 'map-draw': mapState.drawing = { points: [] }; mapState.placing = null; return rerender();
@@ -9305,6 +9391,7 @@
       return;
     }
     await startCloud();
+    migrateBooks();
     route();
     syncNow();
     // Territories (assignment, columns, filters) load when the browser is idle, so the first screen isn't slowed.

@@ -2158,3 +2158,10 @@ tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 .reach-btn.sn { color: #0a66c2; font-size: .68rem; letter-spacing: .02em; }
 .ok-text { color: var(--ok); font-weight: 600; }
 .li-get { background: var(--surface-2); border-radius: 8px; padding: .5rem .65rem; line-height: 1.5; }
+
+/* ---------- Book: Active / Reserve ---------- */
+.pill.reserve { background: var(--surface-2); color: var(--muted); border: 1px dashed var(--border); }
+.book-bar { display: flex; align-items: center; gap: .6rem 1rem; flex-wrap: wrap; margin: 0 0 .75rem; }
+.book-meters { color: var(--muted); }
+.book-meter b { color: var(--text); }
+.book-meter.over b { color: var(--warn); }

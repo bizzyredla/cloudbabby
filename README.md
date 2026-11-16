@@ -291,6 +291,29 @@ No install, no build step: open `index.html` in a browser.
   **vendor renewal date**, follow-up and revisit dates, tags, notes. Forms are grouped into
   compact sections, and secondary details fold away on the account page
 
+**Book: Active and Reserve** (keeps the account list to the ones you're working)
+- Every account is **Active** or **Reserve**. Active is the book you work (targets: **150 active partners**
+  and **300 active prospects**); Reserve is the layer behind it. The labels read Active Partner, Active
+  Prospect or Reserve (partner vs prospect is the account's type, so the two never disagree). It's
+  separate from the partner Tier A/B/C
+- The first time this version opened, every existing account got its closest fit: open deals (S1–S5),
+  live partners (Engaged, Met, Committed, Producing), anything with a follow-up or revisit date, in a
+  cadence or touched in the last 90 days went to Active; Closed Won / Closed Lost / closed partners and
+  quiet accounts went to Reserve. After that an account only moves when you move it
+- **Active by default**: Accounts (table, cards, board), saved views, Partners, Contacts, the Overview
+  counts and the sidebar count, map pins, field-day picks, Near me, the territory board and the cadence
+  "add people" picker. An **Active · Reserve · All** switch on Accounts, Partners and Contacts shows the
+  rest; the map has a **◌ Reserve** layer chip; the cadence picker has "Include Reserve accounts"
+- **Soft counters** beside the switch: "153 / 150 active partners · 287 / 300 active prospects". Over a
+  target the number turns amber; nothing is ever blocked
+- Reserve accounts stay **searchable** (search reaches them from the Active view and marks them with a
+  Reserve pill), open and edit normally, and keep their **follow-ups and revisits**, which still show
+  in the planner when due (and as drop stops when due)
+- Move one from its account page (Book · Move to Active / Reserve), the Book field in the account form,
+  or many at once with **Move to Active / Reserve** in the bulk bar. Hand-added accounts start Active;
+  imported ones start in Reserve unless you pick Active on the import screen
+- Exports carry a **Book** column, and importing an exported file puts each account back in its book
+
 **Accounts table and saved views** (Lists now live here; old list links open the matching view)
 - **Columns you pick** (Columns, under the table): type, stage, value, employees, current vendor,
   renewal, last touch, days in stage, next step, follow-up, location, plus primary contact, close,
@@ -570,5 +593,7 @@ On first launch, click **Load sample data** to explore with example accounts.
 - `styles.css`: styles (light/dark mode, responsive)
 - `app.js`: all app logic
 - `supabase-setup.sql`: one-time database setup for cloud sync
+- `supabase-views.sql`: optional read-only views (`accounts`, and more as features add record types) so
+  the synced data can be browsed as tables in Supabase; the app doesn't need them. Safe to re-run
 - `vendor/supabase`: Supabase client library (MIT license), bundled so nothing loads from a CDN
 - `manifest.webmanifest`, `sw.js`, `icons/`: home-screen install and offline support
