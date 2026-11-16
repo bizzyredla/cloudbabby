@@ -2213,3 +2213,32 @@ tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 #pm-new[hidden], #pm-merge[hidden] { display: none; }
 .tabs a[data-view=imports] { --hue: var(--nav-contacts); }
 .btn:disabled, .btn[disabled] { opacity: .4; cursor: not-allowed; box-shadow: none; }
+
+/* ---------- Segments, contact views, task modes, swipeable tab rows ---------- */
+.seg-link { margin-left: .25rem; white-space: nowrap; }
+.seg-list { display: flex; flex-direction: column; gap: .6rem; }
+.seg-card { padding: .8rem 1rem; display: flex; flex-direction: column; gap: .3rem; }
+.seg-name strong { font-size: 1.02rem; }
+.pill.seg-acc { background: var(--accent-soft); color: var(--accent); }
+.pill.seg-con { background: var(--partner-soft); color: var(--partner); }
+.q-modes { margin-bottom: .45rem; }
+.q-row .q-check-sp { color: var(--ok); font-weight: 700; text-align: center; }
+.q-row.q-done .q-title { color: var(--muted); }
+@media (max-width: 700px) {
+  .view-tabs, .q-tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: .15rem; }
+  .view-tabs::-webkit-scrollbar, .q-tabs::-webkit-scrollbar { display: none; }
+  .view-tabs > *, .q-tabs > * { flex: 0 0 auto; white-space: nowrap; }
+}
+
+/* ---------- links from the Home Screen app: "didn't open?" bar, Settings → Links ---------- */
+.link-help {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 101;
+  bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; justify-content: center;
+  width: max-content; max-width: calc(100vw - 2rem);
+  background: var(--surface, #fff); color: var(--text); border: 1px solid var(--border);
+  border-radius: 12px; padding: .55rem .75rem; box-shadow: 0 8px 28px rgba(10, 14, 22, .18);
+}
+.link-help span { font-weight: 600; font-size: .9rem; }
+@media (max-width: 700px) { .link-help { bottom: calc(5.5rem + env(safe-area-inset-bottom)); } }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; margin: .35rem 0; }

@@ -88,3 +88,20 @@ where key like 'imr:%' and not deleted and data is not null;
 
 revoke all on public.import_lists, public.list_items from anon;
 grant select on public.import_lists, public.list_items to authenticated;
+
+-- Segments: every saved view, for accounts (l:) and contacts (cv:).
+create or replace view public.segments with (security_invoker = true) as
+select
+  substring(key from position(':' in key) + 1)             as id,
+  case when key like 'cv:%' then 'contacts' else 'accounts' end as object,
+  data->>'name'                                            as name,
+  coalesce(data->>'kind', 'filter')                        as kind,
+  data->'criteria'                                         as criteria,
+  data->'ids'                                              as picked_ids,
+  coalesce((data->>'pinned')::boolean, false)              as pinned,
+  data->>'updated_at'                                      as updated_at
+from public.records
+where (key like 'l:%' or key like 'cv:%') and not deleted and data is not null;
+
+revoke all on public.segments from anon;
+grant select on public.segments to authenticated;
