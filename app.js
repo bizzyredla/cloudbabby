@@ -5249,6 +5249,45 @@
   const accountLinks = (a) => linkIcons({ website: a.website, linkedin: a.linkedin, findLinkedIn: liCompanySearch(a.name) });
   const contactLinkIcons = (c, a) => linkIcons({ linkedin: c.linkedin, findLinkedIn: liPeopleSearch(c.name, a && a.name) });
 
+  // ----- LinkedIn links: the LinkedIn app on iPhone / iPad, a new browser tab on a computer -----
+  // Profile (/in/…) and company (/company/…) links try the app first. If it doesn't open within a
+  // couple of seconds (not installed), the web page opens instead and the app isn't tried again on
+  // this device for a month. Searches and Sales Navigator links open on the web everywhere.
+  const LI_APP_KEY = 'minicrm.liApp';
+  const onIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  /** linkedin://in/jane-doe for a profile, linkedin://company/acme for a company page, else ''. */
+  function linkedinAppUrl(href) {
+    let u;
+    try { u = new URL(href); } catch (e) { return ''; }
+    if (!/(^|\.)linkedin\.com$/i.test(u.hostname)) return '';
+    const m = u.pathname.match(/^\/(in|company)\/([^/?#]+)/i);
+    return m ? `linkedin://${m[1].toLowerCase()}/${m[2]}` : '';
+  }
+  document.addEventListener('click', (e) => {
+    const link = e.target.closest && e.target.closest('a[href*="linkedin.com/"]');
+    if (!link || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || !onIOS()) return;
+    const app = linkedinAppUrl(link.href);
+    let pref = '';
+    try { pref = localStorage.getItem(LI_APP_KEY) || ''; } catch (err) { /* no storage: just try the app */ }
+    if (!app || (pref.startsWith('no:') && Date.now() - Number(pref.slice(3)) < 30 * 864e5)) return; // the web page, as before
+    e.preventDefault();
+    const web = link.href;
+    let left = false;
+    const opened = () => { left = true; try { localStorage.setItem(LI_APP_KEY, 'yes'); } catch (err) { /* ignore */ } };
+    const onHide = () => { if (document.hidden) opened(); };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', opened, { once: true });
+    // Once the app has opened on this device, wait longer: iOS may be asking "Open in LinkedIn?".
+    setTimeout(() => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', opened);
+      if (left || document.hidden) return;
+      try { localStorage.setItem(LI_APP_KEY, 'no:' + Date.now()); } catch (err) { /* ignore */ }
+      location.href = web;
+    }, pref === 'yes' ? 4000 : 1800);
+    location.href = app;
+  });
+
   /**
    * "Look up" menu: opens LinkedIn, Sales Navigator or ZoomInfo searching for the account or person.
    * The search text is also copied, so it can be pasted if a site opens without it filled in.

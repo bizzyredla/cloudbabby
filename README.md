@@ -240,6 +240,11 @@ No install, no build step: open `index.html` in a browser.
 **Web links, LinkedIn & ZoomInfo**
 - Website and LinkedIn icons on accounts (record, table, cards, board) and contacts (cards,
   cadence people). A faded LinkedIn icon means no profile is saved yet. Tap it to search LinkedIn
+- **LinkedIn opens in the app on iPhone / iPad**: a saved profile (linkedin.com/in/…) or company
+  page (linkedin.com/company/…) opens in the LinkedIn app. If the app doesn't open within a couple
+  of seconds (not installed), the web page opens instead, and this device goes straight to the web
+  for a month. On a computer LinkedIn keeps opening in a new browser tab; searches and Sales
+  Navigator links open on the web everywhere
 - **Look up** menu on every account and contact: LinkedIn, Sales Navigator, ZoomInfo, the
   company's public ZoomInfo profile, and Google. The name is copied to the clipboard as well, so
   you can paste it if a site opens without the search filled in
