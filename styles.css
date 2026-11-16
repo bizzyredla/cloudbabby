@@ -2191,3 +2191,25 @@ tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface));
   .wl-item { flex-wrap: wrap; }
   .wl-item .grow { flex: 1 1 60%; }
 }
+
+/* ---------- Imports (staging) ---------- */
+.st-new h2, .st-lists + h2, .card > h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
+.st-template { margin-top: .9rem; padding: .7rem .8rem; border-radius: 10px; background: var(--surface-2); display: flex; flex-direction: column; gap: .45rem; }
+.st-header { display: block; font: .78rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .45rem .6rem; overflow-x: auto; white-space: nowrap; }
+.st-error { margin-top: .75rem; border: 1px solid var(--danger); background: var(--danger-soft); color: var(--text); border-radius: 10px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .25rem; }
+.st-error code, .st-template code { font-size: .78rem; }
+.st-review { margin-bottom: .75rem; }
+.st-chips { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-top: .5rem; }
+.st-chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: .25rem .65rem; font: inherit; font-size: .8rem; cursor: pointer; }
+.st-chip b { color: var(--accent); margin-left: .15rem; }
+.st-chip.on { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
+.st-table td { vertical-align: top; }
+.st-table .st-note { min-width: 8rem; }
+.st-table select { width: auto; }
+.st-table tr.st-rejected td { opacity: .55; }
+.st-match .pill + a { font-weight: 600; }
+.pm-table td, .pm-table th { padding: .35rem .4rem; }
+#pm-mode { margin-bottom: .2rem; }
+#pm-new[hidden], #pm-merge[hidden] { display: none; }
+.tabs a[data-view=imports] { --hue: var(--nav-contacts); }
+.btn:disabled, .btn[disabled] { opacity: .4; cursor: not-allowed; box-shadow: none; }

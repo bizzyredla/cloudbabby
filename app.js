@@ -259,7 +259,7 @@
   }
   applyTheme();
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], colleagues: [], watchlist: [], deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], colleagues: [], watchlist: [], importLists: [], listItems: [], deleted: {} }; }
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
@@ -286,6 +286,8 @@
     if (!Array.isArray(st.routeTemplates)) st.routeTemplates = [];
     if (!Array.isArray(st.colleagues)) st.colleagues = [];
     if (!Array.isArray(st.watchlist)) st.watchlist = [];
+    if (!Array.isArray(st.importLists)) st.importLists = [];
+    if (!Array.isArray(st.listItems)) st.listItems = [];
     if (!st.compPlans.length) st.compPlans = defaultCompPlans().filter((x) => !(st.deleted || {})['cp:' + x.id]);
     // Planner rows used to store only the account name; link each to its account where the name is unique.
     const byName = new Map();
@@ -316,7 +318,7 @@
   let booted = false;
   // Device-only sync bookkeeping: records waiting to upload, and how far we have read the cloud.
   const local = { dirty: new Set(), cursor: 0, user: '', seen: {} };
-  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:'], ['colleagues', 'col:'], ['watchlist', 'wl:']];
+  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:'], ['colleagues', 'col:'], ['watchlist', 'wl:'], ['importLists', 'imp:'], ['listItems', 'imr:']];
 
   function loadLegacy() {
     try {
@@ -2493,7 +2495,7 @@
       ${!state.accounts.length ? `<div class="card welcome stack" style="margin-bottom:1rem">
         <h2 style="margin:0">Welcome to Bbars OS</h2>
         <p class="muted" style="margin:0">Add your first account, import a spreadsheet, or load sample data to look around.</p>
-        <div class="row"><button class="btn" data-act="new-account">+ Add account</button><button class="btn ghost" data-act="import-csv">Import a spreadsheet</button><button class="btn ghost" data-act="load-sample">Load sample data</button></div>
+        <div class="row"><button class="btn" data-act="new-account">+ Add account</button><button class="btn ghost" data-act="go-imports">Import a list</button><button class="btn ghost" data-act="load-sample">Load sample data</button></div>
       </div>` : ''}
       <div class="kpi-grid4">
         ${kpi('#accounts', 'Total accounts', state.accounts.length, `${plural(prospects.length, 'prospect')} · ${plural(partners.length, 'partner')}`)}
@@ -2574,7 +2576,7 @@
   }
 
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession, partners: renderPartners, watchlist: renderWatchlist };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession, partners: renderPartners, watchlist: renderWatchlist, imports: renderImports };
   const TAB_FOR = { account: 'accounts', report: 'dashboard', session: 'cadences', lists: 'accounts' };
 
   function route() {
@@ -2614,7 +2616,7 @@
     }
   }
   const rerender = () => route();
-  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', partners: 'Partners', session: 'Session', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude', watchlist: 'Watchlist' };
+  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', partners: 'Partners', session: 'Session', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude', watchlist: 'Watchlist', imports: 'Imports' };
   /** Breadcrumb and sidebar counts. */
   function updateChrome(view) {
     $('#crumb-page').textContent = CRUMBS[view] || 'Overview';
@@ -2774,6 +2776,422 @@
       state.watchlist = state.watchlist.filter((x) => x !== it);
       modal.close(); save(); rerender();
     });
+  }
+
+  // ---------- imports: a staging area for lists (Salesforce, ZoomInfo, Mployer, others) ----------
+  // A file lands here as rows checked against your accounts. Nothing reaches your accounts or contacts
+  // until you approve a row and promote it: as a new account (Reserve by default) or merged into the
+  // account it matched. One template for every source, formatted before upload (Claude can do that).
+  const ST_COLS = ['company_name', 'contact_first', 'contact_last', 'title', 'email', 'phone', 'website', 'street_address', 'city', 'state', 'zip', 'employee_count', 'industry', 'salesforce_url', 'notes'];
+  const ST_SOURCES = ['Salesforce', 'ZoomInfo', 'Mployer', 'Other'];
+  const ST_SET = ['New', 'Reviewed', 'Approved', 'Rejected']; // Promoted is set by promoting
+  const ST_HEADER = ST_COLS.join(',');
+  const stFormatPrompt = () => `Reformat the spreadsheet I'm attaching into a CSV for my CRM's import.
+
+Use exactly these columns, in this order, with this header row:
+${ST_HEADER}
+
+Rules:
+- One row per contact. A company with no contact gets one row with the contact columns empty; a company with three contacts gets three rows.
+- company_name: the company's name as it's commonly written.
+- website: the domain only (acme.com), no https:// or www.
+- phone: digits with dashes (310-555-0147): the contact's direct line, or the company's main line when there's no contact.
+- street_address: street and suite only (1200 Main St Ste 100). city, state (two letters, CA) and zip (5 digits) go in their own columns.
+- employee_count: a plain number (for a range like 50-99, use 50).
+- salesforce_url: the record's Salesforce link when the file has one.
+- notes: anything useful that has no column (renewal month, current PEO, broker), kept short.
+- Leave a cell empty rather than guess. Don't add, rename or reorder columns.
+
+Give me the CSV file.`;
+  const stNorm = (h) => String(h || '').replace(/^﻿/, '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const digits10 = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+  const listById = (id) => state.importLists.find((l) => l.id === id);
+  const itemsOf = (id) => state.listItems.filter((x) => x.list_id === id);
+  const stContactName = (r) => [r.contact_first, r.contact_last].filter(Boolean).join(' ');
+  const stLocation = (r) => [r.city, [String(r.state || '').toUpperCase(), r.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const stCityLabel = (r) => (r.city ? `${r.city.replace(/\b\w/g, (c) => c.toUpperCase())}${r.state ? `, ${String(r.state).toUpperCase()}` : ''}` : '');
+  /** Same company and same person: the key for "already in this file" and "already in another list". */
+  const stKey = (r) => `${domainOf(r.website) || `${companyKey(r.company_name)}|${String(r.city || '').trim().toLowerCase()}`}#${(r.email || stContactName(r)).trim().toLowerCase()}`;
+
+  /** The header row must name exactly the template's columns (any order, any case). */
+  function stCheckHeader(row) {
+    const got = row.map(stNorm);
+    const named = got.filter(Boolean);
+    const missing = ST_COLS.filter((c) => !got.includes(c));
+    const extra = named.filter((c) => !ST_COLS.includes(c));
+    const dup = [...new Set(named.filter((c, i) => named.indexOf(c) !== i))];
+    return { ok: !missing.length && !extra.length && !dup.length, missing, extra, dup, idx: Object.fromEntries(ST_COLS.map((c) => [c, got.indexOf(c)])) };
+  }
+
+  // ----- matching: website domain, then phone, then email, then company name + city -----
+  function stIndex() {
+    const dom = new Map(), phone = new Map(), email = new Map();
+    for (const a of state.accounts) {
+      const d = domainOf(a.website);
+      if (d && d.includes('.') && !dom.has(d)) dom.set(d, a);
+      const mp = digits10(a.mainPhone);
+      if (mp.length === 10 && !phone.has(mp)) phone.set(mp, { a });
+      for (const c of a.contacts) {
+        for (const ph of [c.phone, c.mobile]) { const k = digits10(ph); if (k.length === 10 && !phone.has(k)) phone.set(k, { a, c }); }
+        const e = (c.email || '').trim().toLowerCase();
+        if (e && !email.has(e)) email.set(e, { a, c });
+      }
+    }
+    return { dom, phone, email };
+  }
+  /** Accounts with the same company name: normalized, also-known-as, or with extra words like "Insurance Services". */
+  function nameMatches(name) {
+    const k = companyKey(name);
+    if (!k) return [];
+    const ix = coIndex();
+    const out = new Set(ix.keys.filter(([, x]) => x === k || sameButLonger(k, x)).map(([a]) => a));
+    for (const al of companyAliases(name)) for (const a of ix.alias.get(al) || []) out.add(a);
+    return [...out];
+  }
+  const acctCity = (a) => cityZip(a.location || '').city;
+  function stMatch(r, ix) {
+    const d = domainOf(r.website);
+    if (d && d.includes('.') && ix.dom.has(d)) return { a: ix.dom.get(d), conf: 'exact', how: 'website' };
+    const ph = digits10(r.phone);
+    if (ph.length === 10 && ix.phone.has(ph)) { const m = ix.phone.get(ph); return { a: m.a, c: m.c, conf: 'exact', how: m.c ? 'contact phone' : 'main phone' }; }
+    const em = (r.email || '').trim().toLowerCase();
+    if (em && ix.email.has(em)) { const m = ix.email.get(em); return { a: m.a, c: m.c, conf: 'exact', how: 'email' }; }
+    const cands = nameMatches(r.company_name);
+    if (!cands.length) return { conf: 'none' };
+    const city = String(r.city || '').trim().toLowerCase();
+    const same = city && cands.find((a) => acctCity(a) === city);
+    if (same) return { a: same, conf: 'fuzzy', how: 'name + city' };
+    const open = !city ? cands[0] : cands.find((a) => !acctCity(a));
+    if (open) return { a: open, conf: 'fuzzy', how: 'name (no city to compare)' };
+    return { conf: 'none', hint: `Same name in ${cands.slice(0, 2).map((a) => a.location || 'another city').join(' and ')}`, hintId: cands[0].id };
+  }
+  /** The contact on an account that is this row's person (same email, or same name). */
+  const stSamePerson = (a, r) => {
+    const e = (r.email || '').trim().toLowerCase(); const n = stContactName(r).toLowerCase();
+    return a.contacts.find((c) => (e && (c.email || '').toLowerCase() === e) || (n && c.name.trim().toLowerCase() === n)) || null;
+  };
+
+  // ----- upload -----
+  async function stUpload(file, source, notes) {
+    ui.stError = '';
+    let rows;
+    try {
+      if (/\.xlsx$/i.test(file.name)) rows = await readXlsx(await file.arrayBuffer());
+      else if (/\.(csv|txt)$/i.test(file.name)) rows = parseCsv(await file.text());
+      else { ui.stError = `<b>${esc(file.name)}</b> isn't a CSV or Excel (.xlsx) file. Save it as CSV with the template's columns and upload that.`; return rerender(); }
+    } catch (e) { ui.stError = `Couldn't read <b>${esc(file.name)}</b> (${esc(e.message)}). Try saving it as CSV.`; return rerender(); }
+    if (!rows.length) { ui.stError = `<b>${esc(file.name)}</b> is empty.`; return rerender(); }
+    const h = stCheckHeader(rows[0]);
+    if (!h.ok) {
+      ui.stError = `<b>${esc(file.name)}</b> doesn't match the template, so nothing was imported.
+        ${h.missing.length ? `<div>Missing: ${h.missing.map((c) => `<code>${esc(c)}</code>`).join(' ')}</div>` : ''}
+        ${h.extra.length ? `<div>Not in the template: ${h.extra.map((c) => `<code>${esc(c)}</code>`).join(' ')}</div>` : ''}
+        ${h.dup.length ? `<div>More than once: ${h.dup.map((c) => `<code>${esc(c)}</code>`).join(' ')}</div>` : ''}
+        <div class="small muted">The header row has to be exactly the template's columns (any order). "Copy formatting instructions" gives Claude everything it needs to reshape the file.</div>`;
+      return rerender();
+    }
+    const now = new Date().toISOString();
+    const list = { id: uid(), source: ST_SOURCES.includes(source) ? source : 'Other', file_name: file.name, notes: (notes || '').trim(), row_count: 0, created_at: now };
+    const ix = stIndex();
+    const seen = new Map();
+    const before = new Map();
+    for (const it of state.listItems) before.set(stKey(it.raw), it.list_id);
+    const items = [];
+    let skipped = 0;
+    for (const r0 of rows.slice(1)) {
+      const raw = Object.fromEntries(ST_COLS.map((c) => [c, String(r0[h.idx[c]] ?? '').trim()]));
+      if (!ST_COLS.some((c) => raw[c])) continue; // a blank line
+      if (!raw.company_name) { skipped++; continue; }
+      const m = stMatch(raw, ix);
+      const it = { id: uid(), list_id: list.id, raw, matched_account_id: m.a ? m.a.id : '', matched_contact_id: m.c ? m.c.id : '', match_confidence: m.conf,
+        match_reason: m.how || '', match_hint: m.hint || '', hint_account_id: m.hintId || '', status: 'New', note: '', created_at: now };
+      const k = stKey(raw);
+      if (seen.has(k)) it.dup_of = seen.get(k); else seen.set(k, it.id);
+      if (before.has(k)) it.seen_in = before.get(k);
+      items.push(it);
+    }
+    if (!items.length) { ui.stError = `<b>${esc(file.name)}</b> has the right columns but no rows with a company_name.`; return rerender(); }
+    list.row_count = items.length;
+    state.importLists.push(list);
+    state.listItems.push(...items);
+    save();
+    const c = (k) => items.filter((x) => x.match_confidence === k).length;
+    toast(`${list.file_name}: ${plural(items.length, 'row')} staged · ${c('exact')} exact, ${c('fuzzy')} fuzzy, ${c('none')} new${skipped ? ` · ${skipped} without a company skipped` : ''}`);
+    ui.stF = {};
+    go(`imports/${list.id}`);
+  }
+
+  // ----- the list review: what's in this list, at a glance -----
+  const ST_GROUPS = {
+    none: 'Not in your CRM', stale: 'Yours, no touch in 90+ days', nocontact: 'No contact or title', noemp: 'No employee count',
+    noreach: 'No website or phone', dup: 'Repeated in this file', seen: 'Already in another list',
+  };
+  function stReview(items) {
+    const t = today();
+    const g = Object.fromEntries(Object.keys(ST_GROUPS).map((k) => [k, new Set()]));
+    const terr = new Map(), city = new Map(), ind = new Map();
+    const add = (m, k, id) => { if (!m.has(k)) m.set(k, new Set()); m.get(k).add(id); };
+    for (const it of items) {
+      const r = it.raw;
+      if (it.match_confidence === 'none') g.none.add(it.id);
+      const a = it.matched_account_id && getAccount(it.matched_account_id);
+      if (a) { const lt = lastTouchDate(a); if (!lt || daysBetween(lt, t) >= 90) g.stale.add(it.id); }
+      if (!stContactName(r) || !r.title) g.nocontact.add(it.id);
+      if (!r.employee_count) g.noemp.add(it.id);
+      if (!r.website && !r.phone) g.noreach.add(it.id);
+      if (it.dup_of) g.dup.add(it.id);
+      if (it.seen_in) g.seen.add(it.id);
+      if (r.city) add(city, r.city.trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()), it.id);
+      if (r.industry) add(ind, r.industry.trim(), it.id);
+      const tt = socalData && r.city ? socalData.find((x) => x.cities.includes(r.city.trim().toLowerCase())) : null;
+      if (tt) add(terr, `#${tt.n} ${tt.name}`, it.id);
+    }
+    const top = (m) => [...m].filter(([, v]) => v.size > 1).sort((x, y) => y[1].size - x[1].size).slice(0, 6);
+    return { g, terr: top(terr), city: top(city), ind: top(ind) };
+  }
+
+  // ----- pages -----
+  function renderImports() {
+    socalSoon();
+    const id = (location.hash.split('/')[1] || '');
+    if (id && listById(id)) return renderImportList(listById(id));
+    const lists = state.importLists.slice().sort((x, y) => (y.created_at || '').localeCompare(x.created_at || ''));
+    $('#view').innerHTML = `
+      <div class="page-head">
+        <div>
+          <h1>Imports</h1>
+          <div class="muted small">Stage lists from Salesforce, ZoomInfo, Mployer and others. Nothing reaches your accounts until you approve a row and promote it.</div>
+        </div>
+      </div>
+      <section class="card st-new">
+        <h2>Stage a list</h2>
+        <div class="grid-3">
+          ${field('Source', `<select id="st-source">${ST_SOURCES.map((x) => opt(x, x, ui.stSource || 'Salesforce')).join('')}</select>`)}
+          ${field('Why you pulled it (optional)', '<input id="st-notes" placeholder="e.g. Irvine 50–200 employees, no PEO">', 'span-2')}
+        </div>
+        <div class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
+          <button type="button" class="btn" data-act="st-pick">Choose a CSV or .xlsx file…</button>
+          <input type="file" id="st-file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+        </div>
+        ${ui.stError ? `<div class="st-error">${ui.stError}</div>` : ''}
+        <div class="st-template">
+          <div class="small"><b>The template</b>: one header row with exactly these columns (any order). One row per contact.</div>
+          <code class="st-header">${esc(ST_HEADER)}</code>
+          <div class="row" style="gap:.4rem;flex-wrap:wrap">
+            <button type="button" class="btn sm ghost" data-act="st-copy-prompt" title="Paste into Claude with your raw export">Copy formatting instructions (for Claude)</button>
+            <button type="button" class="btn sm ghost" data-act="st-copy-header">Copy header row</button>
+            <button type="button" class="btn sm ghost" data-act="st-template">Download template</button>
+          </div>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Lists <span class="muted small">(${lists.length})</span></h2>
+        ${lists.length ? `<div class="table-wrap"><table class="table st-lists">
+          <thead><tr><th>File</th><th>Source</th><th>Staged</th><th class="num">Rows</th><th>Status</th><th>Matches</th></tr></thead>
+          <tbody>${lists.map((l) => {
+            const its = itemsOf(l.id); const n = (k, v) => its.filter((x) => x[k] === v).length;
+            return `<tr><td><a href="#imports/${l.id}"><strong>${esc(l.file_name)}</strong></a>${l.notes ? `<div class="small muted">${esc(l.notes)}</div>` : ''}</td>
+              <td>${esc(l.source)}</td><td class="small">${esc(fmtDate((l.created_at || '').slice(0, 10), { month: 'short', day: 'numeric', year: 'numeric' }))}</td><td class="num">${its.length}</td>
+              <td class="small">${['New', 'Reviewed', 'Approved', 'Promoted', 'Rejected'].map((s) => n('status', s) ? `${n('status', s)} ${s.toLowerCase()}` : '').filter(Boolean).join(' · ')}</td>
+              <td class="small">${n('match_confidence', 'exact')} exact · ${n('match_confidence', 'fuzzy')} fuzzy · ${n('match_confidence', 'none')} new</td></tr>`;
+          }).join('')}</tbody></table></div>` : '<div class="empty">No lists yet. Format a file with the template above and stage it here.</div>'}
+      </section>`;
+    $('#st-source').addEventListener('change', (e) => { ui.stSource = e.target.value; });
+    $('#st-file').addEventListener('change', async (e) => {
+      const f = e.target.files[0]; e.target.value = '';
+      if (f) await stUpload(f, $('#st-source').value, $('#st-notes').value);
+    });
+  }
+
+  function renderImportList(l) {
+    const all = itemsOf(l.id);
+    const f = ui.stF && ui.stF.list === l.id ? ui.stF : (ui.stF = { list: l.id, status: '', match: '', q: '', group: '', show: 100 });
+    const rv = stReview(all);
+    const inGroup = (it) => {
+      if (!f.group) return true;
+      const [kind, key] = f.group.split('|');
+      if (kind === 'g') return rv.g[key] && rv.g[key].has(it.id);
+      const list = { terr: rv.terr, city: rv.city, ind: rv.ind }[kind] || [];
+      const hit = list.find(([k]) => k === key);
+      return !!(hit && hit[1].has(it.id));
+    };
+    const q = (f.q || '').trim().toLowerCase();
+    const shown = all.filter((it) => (!f.status || it.status === f.status) && (!f.match || it.match_confidence === f.match) && inGroup(it)
+      && (!q || Object.values(it.raw).join(' ').toLowerCase().includes(q)));
+    const sel = ui.stSel || (ui.stSel = new Set());
+    for (const id of [...sel]) if (!all.some((x) => x.id === id)) sel.delete(id);
+    const chip = (key, label, n) => (n ? `<button type="button" class="st-chip ${f.group === key ? 'on' : ''}" data-act="st-group" data-g="${esc(key)}">${esc(label)} <b>${n}</b></button>` : '');
+    const approvedSel = [...sel].map((id) => all.find((x) => x.id === id)).filter((x) => x && x.status === 'Approved').length;
+    const approvedAll = all.filter((x) => x.status === 'Approved').length;
+    const matchCell = (it) => {
+      const a = it.matched_account_id && getAccount(it.matched_account_id);
+      if (it.status === 'Promoted') { const p = getAccount(it.promoted_account_id); return p ? `<span class="pill won">Promoted</span> <a href="#account/${p.id}">${esc(p.name)}</a>` : '<span class="pill won">Promoted</span>'; }
+      if (a) return `<span class="pill ${it.match_confidence === 'exact' ? 'won' : 'med'}">${it.match_confidence === 'exact' ? 'Exact' : 'Fuzzy'}</span> <a href="#account/${a.id}">${esc(a.name)}</a>${isReserve(a) ? ' <span class="pill reserve">Reserve</span>' : ''}<div class="small muted">by ${esc(it.match_reason)}</div>`;
+      return `<span class="pill">Not in CRM</span>${it.match_hint ? `<div class="small muted">${esc(it.match_hint)}${it.hint_account_id && getAccount(it.hint_account_id) ? ` · <a href="#account/${it.hint_account_id}">look</a>` : ''}</div>` : ''}`;
+    };
+    $('#view').innerHTML = `
+      <div class="page-head">
+        <div>
+          <a class="small" href="#imports">← Imports</a>
+          <h1>${esc(l.file_name)} <span class="muted small">(${all.length})</span></h1>
+          <div class="muted small">${esc(l.source)} · staged ${esc(fmtDate((l.created_at || '').slice(0, 10), { month: 'short', day: 'numeric', year: 'numeric' }))}${l.notes ? ` · ${esc(l.notes)}` : ''}</div>
+        </div>
+        <div class="row"><button type="button" class="btn ghost danger" data-act="st-del-list" data-lid="${l.id}">Delete list</button></div>
+      </div>
+      <section class="card st-review">
+        <div class="row spread" style="gap:.5rem;flex-wrap:wrap"><h2 style="margin:0">List review</h2>${f.group ? '<button type="button" class="link-btn small" data-act="st-group" data-g="">Show every row</button>' : '<span class="small muted">Tap one to see those rows</span>'}</div>
+        <div class="st-chips">${Object.entries(ST_GROUPS).map(([k, label]) => chip(`g|${k}`, label, rv.g[k].size)).join('')}</div>
+        ${rv.terr.length ? `<div class="st-chips"><span class="small muted">Territories</span>${rv.terr.map(([k, v]) => chip(`terr|${k}`, k, v.size)).join('')}</div>` : ''}
+        ${rv.city.length ? `<div class="st-chips"><span class="small muted">Cities</span>${rv.city.map(([k, v]) => chip(`city|${k}`, k, v.size)).join('')}</div>` : ''}
+        ${rv.ind.length ? `<div class="st-chips"><span class="small muted">Industries</span>${rv.ind.map(([k, v]) => chip(`ind|${k}`, k, v.size)).join('')}</div>` : ''}
+      </section>
+      <div class="filters">
+        <input type="search" id="st-q" placeholder="Search this list" value="${esc(f.q || '')}">
+        <select id="st-status" aria-label="Status"><option value="">Every status</option>${['New', 'Reviewed', 'Approved', 'Promoted', 'Rejected'].map((s) => opt(s, s, f.status)).join('')}</select>
+        <select id="st-match" aria-label="Match"><option value="">Every match</option>${opt('exact', 'Exact match', f.match)}${opt('fuzzy', 'Fuzzy match', f.match)}${opt('none', 'Not in CRM', f.match)}</select>
+      </div>
+      <div class="bulk-bar st-bulk">
+        <label class="row small"><input type="checkbox" id="st-all" style="width:auto"> ${sel.size ? `${sel.size} selected` : `Select the ${shown.length} shown`}</label>
+        <button type="button" class="btn sm ghost" data-act="st-bulk" data-to="Reviewed">Mark reviewed</button>
+        <button type="button" class="btn sm ghost" data-act="st-bulk" data-to="Approved">Approve</button>
+        <button type="button" class="btn sm ghost" data-act="st-bulk" data-to="Rejected">Reject</button>
+        <button type="button" class="btn sm" data-act="st-promote-many" ${(sel.size ? approvedSel : approvedAll) ? '' : 'disabled'}>Promote ${sel.size ? approvedSel : approvedAll} approved</button>
+      </div>
+      <div class="table-wrap"><table class="table st-table">
+        <thead><tr><th></th><th>Company</th><th>Contact</th><th>Match</th><th>Status</th><th>Note</th><th></th></tr></thead>
+        <tbody>${shown.slice(0, f.show || 100).map((it) => { const r = it.raw; return `<tr class="${it.status === 'Rejected' ? 'st-rejected' : ''}">
+          <td><input type="checkbox" class="st-sel" value="${it.id}" ${sel.has(it.id) ? 'checked' : ''} aria-label="Select ${esc(r.company_name)}"></td>
+          <td><strong>${esc(r.company_name)}</strong><div class="small muted">${esc([r.website, stCityLabel(r), r.employee_count ? `${r.employee_count} employees` : ''].filter(Boolean).join(' · '))}</div>
+            ${it.dup_of ? '<span class="pill med">Repeated in file</span>' : ''}${it.seen_in && listById(it.seen_in) ? ` <span class="pill">Also in ${esc(listById(it.seen_in).file_name)}</span>` : ''}</td>
+          <td>${stContactName(r) ? `${esc(stContactName(r))}${r.title ? `<div class="small muted">${esc(r.title)}</div>` : ''}` : '<span class="muted">—</span>'}<div class="small muted">${esc([r.email, r.phone].filter(Boolean).join(' · '))}</div></td>
+          <td class="st-match">${matchCell(it)}</td>
+          <td>${it.status === 'Promoted' ? '<span class="small">Promoted</span>' : `<select class="st-status-one" data-iid="${it.id}" aria-label="Status">${ST_SET.map((s) => opt(s, s, it.status)).join('')}</select>`}</td>
+          <td><input class="st-note" data-iid="${it.id}" value="${esc(it.note || '')}" placeholder="Note" aria-label="Note"></td>
+          <td>${it.status === 'Promoted' ? '' : `<button type="button" class="btn sm" data-act="st-promote" data-iid="${it.id}" ${it.status === 'Approved' ? '' : 'disabled title="Approve the row first"'}>Promote</button>`}</td>
+        </tr>`; }).join('') || `<tr><td colspan="7"><div class="empty">No rows match.</div></td></tr>`}</tbody>
+      </table></div>
+      ${shown.length > (f.show || 100) ? `<button type="button" class="btn ghost" data-act="st-more">Show ${Math.min(200, shown.length - (f.show || 100))} more</button>` : ''}`;
+    const redraw = () => rerender();
+    $('#st-q').addEventListener('input', (e) => { f.q = e.target.value; clearTimeout(renderImportList.t); renderImportList.t = setTimeout(() => { redraw(); const i = $('#st-q'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 250); });
+    $('#st-status').addEventListener('change', (e) => { f.status = e.target.value; redraw(); });
+    $('#st-match').addEventListener('change', (e) => { f.match = e.target.value; redraw(); });
+    $('#st-all').addEventListener('change', (e) => { if (e.target.checked) shown.forEach((x) => sel.add(x.id)); else sel.clear(); redraw(); });
+    $$('.st-sel').forEach((cb) => cb.addEventListener('change', () => { if (cb.checked) sel.add(cb.value); else sel.delete(cb.value); redraw(); }));
+    $$('.st-status-one').forEach((s) => s.addEventListener('change', () => { const it = state.listItems.find((x) => x.id === s.dataset.iid); if (it) { it.status = s.value; save(); redraw(); } }));
+    $$('.st-note').forEach((n) => n.addEventListener('change', () => { const it = state.listItems.find((x) => x.id === n.dataset.iid); if (it) { it.note = n.value.trim(); save(); } }));
+  }
+
+  // ----- promote: Approved rows only; a new account, or merged into the one it matched -----
+  /** The account a row is about now: its match, or (if none) one found since, e.g. a row of the same company promoted earlier. */
+  function stTarget(it, ix) {
+    const a = it.matched_account_id && getAccount(it.matched_account_id);
+    if (a) return { a, conf: it.match_confidence, how: it.match_reason };
+    const m = stMatch(it.raw, ix || stIndex());
+    return m.a ? { a: m.a, conf: m.conf, how: m.how } : null;
+  }
+  const ST_FIELDS = [['website', 'Website', 'website'], ['mainPhone', 'Main phone', 'phone'], ['address', 'Street address', 'street_address'], ['location', 'City, State ZIP', '_loc'],
+    ['employees', 'Employees', 'employee_count'], ['industry', 'Industry', 'industry'], ['salesforceUrl', 'Salesforce link', 'salesforce_url']];
+  const stValue = (r, src) => (src === '_loc' ? stLocation(r) : src === 'phone' && stContactName(r) ? '' : String(r[src] || '').trim()); // a contact's phone goes on the contact
+  function stNewContact(r, primary) {
+    return { id: uid(), name: stContactName(r), title: r.title || '', email: r.email || '', phone: r.phone || '', mobile: '', linkedin: '', role: '', notes: '', status: 'Active', channel: '', timezone: '', primary };
+  }
+  function stMarkPromoted(it, a) {
+    it.status = 'Promoted'; it.promoted_account_id = a.id; it.matched_account_id = it.matched_account_id || a.id; it.promoted_at = new Date().toISOString();
+  }
+  /** Merge a row into an account: the chosen fields, the person (added, or blanks filled), and optionally the row's notes. */
+  function stMerge(it, a, keys, opts = {}) {
+    const r = it.raw; const l = listById(it.list_id);
+    let changedAddr = false;
+    for (const [k, , src] of ST_FIELDS) if (keys.includes(k)) { const v = stValue(r, src); if (v && a[k] !== v) { if (k === 'address' || k === 'location') changedAddr = true; a[k] = v; } }
+    if (stContactName(r) && opts.contact !== false) {
+      const c = stSamePerson(a, r);
+      if (c) { for (const [ck, rk] of [['title', 'title'], ['email', 'email'], ['phone', 'phone']]) if (!c[ck] && r[rk]) c[ck] = r[rk]; }
+      else a.contacts.push(stNewContact(r, !a.contacts.length));
+    }
+    if (opts.notes && r.notes) a.notes = [a.notes, `${l ? l.source : 'Import'} list ${l ? l.file_name : ''}: ${r.notes}`].filter(Boolean).join('\n');
+    touch(a); stMarkPromoted(it, a);
+    if (changedAddr) geocodeSoon(a.id);
+  }
+  function stCreate(it, type, book) {
+    const r = it.raw; const l = listById(it.list_id); const now = new Date().toISOString();
+    const a = migrateAccount({
+      id: uid(), name: r.company_name, type, stage: STAGES[type][0], book, tags: l ? l.source.toLowerCase() : 'import', notes: r.notes || '', vendors: [],
+      website: r.website || '', mainPhone: stValue(r, 'phone'), address: r.street_address || '', location: stLocation(r), employees: r.employee_count || '',
+      industry: r.industry || '', salesforceUrl: r.salesforce_url || '', contacts: stContactName(r) ? [stNewContact(r, true)] : [], activities: [], keyDates: [], createdAt: now, updatedAt: now,
+    });
+    state.accounts.push(a);
+    stMarkPromoted(it, a);
+    if (geoQuery(a)) geocodeSoon(a.id);
+    return a;
+  }
+  function stPromoteForm(it) {
+    const r = it.raw; const tgt = stTarget(it); const a = tgt && tgt.a;
+    const rows = a ? ST_FIELDS.map(([k, label, src]) => ({ k, label, v: stValue(r, src), cur: String(a[k] || '') })).filter((x) => x.v) : [];
+    const person = stContactName(r) ? (a && stSamePerson(a, r)) : null;
+    openModal(`Promote · ${r.company_name}`, `
+      ${a ? `<div class="seg" role="group" aria-label="How" id="pm-mode">
+          <button type="button" class="active" data-m="merge">Merge into ${esc(a.name)}</button><button type="button" data-m="new">Create a new account</button></div>
+        <input type="hidden" name="mode" value="merge">
+        <p class="small muted" style="margin:.4rem 0 0">${tgt.conf === 'exact' ? 'Exact' : 'Fuzzy'} match by ${esc(tgt.how)}${it.matched_account_id ? '' : ' (found since the list was staged)'}. <a href="#account/${a.id}" target="_blank" rel="noopener">Open ${esc(a.name)}</a></p>` : '<input type="hidden" name="mode" value="new">'}
+      ${a ? `<div id="pm-merge">
+        ${rows.length ? `<table class="table pm-table"><thead><tr><th></th><th>Field</th><th>Now</th><th>From the file</th></tr></thead><tbody>${rows.map((x) => `<tr>
+          <td><input type="checkbox" name="f" value="${x.k}" ${x.cur ? '' : 'checked'} ${x.cur === x.v ? 'disabled' : ''} aria-label="Use ${esc(x.label)} from the file"></td>
+          <td>${esc(x.label)}</td><td class="small ${x.cur ? '' : 'muted'}">${esc(x.cur || 'empty')}</td><td class="small">${esc(x.v)}${x.cur === x.v ? ' <span class="muted">(same)</span>' : ''}</td></tr>`).join('')}</tbody></table>
+          <p class="small muted" style="margin:0">Ticked fields are written to the account. Empty ones start ticked; tick a filled one to replace it.</p>` : '<p class="small muted">No account fields to bring over from this row.</p>'}
+        ${stContactName(r) ? `<label class="row small"><input type="checkbox" name="contact" checked style="width:auto"> ${person ? `Fill in ${esc(person.name)}'s blank title, email or phone` : `Add ${esc(stContactName(r))}${r.title ? ` (${esc(r.title)})` : ''} as a contact`}</label>` : ''}
+        ${r.notes ? `<label class="row small"><input type="checkbox" name="notes" style="width:auto"> Add the row's note to the account notes: "${esc(r.notes)}"</label>` : ''}
+      </div>` : ''}
+      <div id="pm-new" ${a ? 'hidden' : ''}>
+        <div class="grid-2">
+          ${field('Type', `<select name="type">${opt('prospect', 'Prospect', ui.stType || 'prospect')}${opt('partner', 'Partner', ui.stType || 'prospect')}</select>`)}
+          ${field('Book', `<select name="book">${opt('reserve', 'Reserve', ui.stBook || 'reserve')}${opt('active', 'Active', ui.stBook || 'reserve')}</select>`)}
+        </div>
+        <p class="small muted" style="margin:0">Creates ${esc(r.company_name)}${stContactName(r) ? ` with ${esc(stContactName(r))} as the contact` : ''}, tagged ${esc((listById(it.list_id) || {}).source || 'import').toLowerCase()}.</p>
+      </div>`, (data, fd) => {
+      if (data.mode === 'merge' && a) {
+        stMerge(it, a, fd.getAll('f'), { contact: !!data.contact, notes: !!data.notes });
+        toast(`${r.company_name}: merged into ${a.name}`);
+      } else {
+        ui.stType = data.type; ui.stBook = data.book;
+        const n = stCreate(it, data.type === 'partner' ? 'partner' : 'prospect', data.book === 'active' ? 'active' : 'reserve');
+        toast(`${n.name}: created (${data.book === 'active' ? 'Active' : 'Reserve'})`);
+      }
+    }, 'Promote', { wide: true });
+    $$('#pm-mode [data-m]').forEach((b) => b.addEventListener('click', () => {
+      $$('#pm-mode [data-m]').forEach((x) => x.classList.toggle('active', x === b));
+      modalForm.querySelector('[name=mode]').value = b.dataset.m;
+      $('#pm-merge').hidden = b.dataset.m !== 'merge'; $('#pm-new').hidden = b.dataset.m === 'merge';
+    }));
+  }
+  /** Promote many approved rows at once: matches merge (filling only empty fields, adding new people); the rest become accounts. */
+  function stPromoteMany(items) {
+    const ix = stIndex();
+    const plan = items.map((it) => ({ it, tgt: stTarget(it, ix) }));
+    const exact = plan.filter((x) => x.tgt && x.tgt.conf === 'exact').length;
+    const fuzzy = plan.filter((x) => x.tgt && x.tgt.conf === 'fuzzy').length;
+    const fresh = plan.length - exact - fuzzy;
+    openModal(`Promote ${plural(items.length, 'approved row')}`, `
+      <div class="import-summary"><div><b>${exact}</b><span>exact matches: merge</span></div><div><b>${fuzzy}</b><span>fuzzy matches</span></div><div><b>${fresh}</b><span>new accounts</span></div></div>
+      <div class="grid-3">
+        ${fuzzy ? field('Fuzzy matches', `<select name="fuzzy">${opt('merge', 'Merge into the match', 'merge')}${opt('new', 'Create new accounts', 'merge')}</select>`) : ''}
+        ${field('New accounts are', `<select name="type">${opt('prospect', 'Prospects', ui.stType || 'prospect')}${opt('partner', 'Partners', ui.stType || 'prospect')}</select>`)}
+        ${field('New accounts go to', `<select name="book">${opt('reserve', 'Reserve', ui.stBook || 'reserve')}${opt('active', 'Active', ui.stBook || 'reserve')}</select>`)}
+      </div>
+      <p class="small muted" style="margin:0">Merges only fill fields that are empty on the account and add people who aren't on it yet. Rows of the same company become one account. For field-by-field choices, promote a row on its own.</p>`, (data) => {
+      ui.stType = data.type; ui.stBook = data.book;
+      const type = data.type === 'partner' ? 'partner' : 'prospect';
+      const book = data.book === 'active' ? 'active' : 'reserve';
+      const made = new Map(); let merged = 0, created = 0;
+      for (const { it, tgt } of plan) {
+        const useMatch = tgt && (tgt.conf === 'exact' || data.fuzzy !== 'new');
+        const key = `${companyKey(it.raw.company_name)}|${String(it.raw.city || '').trim().toLowerCase()}`;
+        const a = useMatch ? tgt.a : made.get(key);
+        if (a) { stMerge(it, a, ST_FIELDS.map(([k]) => k).filter((k) => !a[k]), { contact: true }); merged++; }
+        else { made.set(key, stCreate(it, type, book)); created++; }
+      }
+      ui.stSel = new Set();
+      toast(`${plural(merged, 'row')} merged · ${plural(created, 'new account')} (${book === 'active' ? 'Active' : 'Reserve'})`);
+    }, 'Promote', { wide: true });
   }
 
   // ---------- dashboard ----------
@@ -3343,7 +3761,7 @@
           <div class="row" style="gap:.85rem"><h1>Accounts <span class="muted small">(${ui.viewId === 'scoreboard' ? state.accounts.length : list.length})</span></h1>${peopleSwitch('accounts')}</div>
           <div class="muted small">Saved views live here (they replace the old Lists page). Change stage, value or follow-up right in the table.</div>
         </div>
-        <div class="row">${viewSwitcher()}<button class="btn ghost" data-act="import-csv" title="Import accounts and contacts from a ZoomInfo or spreadsheet CSV">Import</button><button class="btn ghost" data-act="accounts-csv" title="Export the accounts shown">Export CSV</button><button class="btn" data-act="new-account">+ New account</button></div>
+        <div class="row">${viewSwitcher()}<button class="btn ghost" data-act="go-imports" title="Stage a list from Salesforce, ZoomInfo, Mployer or another source">Import</button><button class="btn ghost" data-act="accounts-csv" title="Export the accounts shown">Export CSV</button><button class="btn" data-act="new-account">+ New account</button></div>
       </div>
       ${bookBar()}
       <div class="view-tabs">
@@ -3501,6 +3919,7 @@
         <div class="facts">
           ${a.type === 'prospect' || a.vendors.length ? `<div class="span-all"><span>Current vendors</span>${a.vendors.length ? vendorPills(a) : '—'}</div>` : ''}
           <div class="span-all"><span>Address</span>${geoQuery(a) ? `${esc(geoQuery(a))}${hasGeo(a) ? ` · <a href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}${noDrop(a) ? ` <span class="pill med">${esc(noDrop(a))}: not a drop stop</span>` : ''}</div>
+          ${a.salesforceUrl ? `<div><span>Salesforce</span><a href="${esc(extUrl(a.salesforceUrl))}" target="_blank" rel="noopener">Open record ↗</a></div>` : ''}
           <div><span>Book</span>${esc(bookLabel(a))} <button type="button" class="link-btn small" data-act="book-toggle" data-id="${a.id}">${isReserve(a) ? 'Move to Active' : 'Move to Reserve'}</button></div>
           ${geoQuery(a) ? `<div><span>Field territory</span><span data-terr="${a.id}">${socalData ? esc(terrName(a) || (hasGeo(a) ? 'Outside the territories' : 'Not on the map yet')) : '…'}</span></div>` : ''}
           <div><span>Sales Navigator</span>${liIdOf(a) ? `<a href="${esc(snCompanyUrl(liIdOf(a)))}" target="_blank" rel="noopener">Account</a> · <a href="${esc(snPeopleAt(liIdOf(a), a.name))}" target="_blank" rel="noopener">People here</a> <span class="small muted">ID ${esc(liIdOf(a))}</span> ` : ''}<button type="button" class="link-btn small" data-act="li-id" data-id="${a.id}">${liIdOf(a) ? 'Change' : 'Add LinkedIn ID'}</button>
@@ -6482,7 +6901,7 @@
     loadSocal().then(() => {
       fillTerr();
       const busy = modal.open || (document.activeElement && document.activeElement.matches('input, textarea, select'));
-      if (/^#(map|accounts)/.test(location.hash) && !busy) rerender();
+      if (/^#(map|accounts|imports)/.test(location.hash) && !busy) rerender();
     }).catch(() => { /* the app works without the layer */ });
   }
   function drawSocal(layer) {
@@ -8102,6 +8521,7 @@
         ${field('Street address', `<input name="address" value="${esc(a.address)}" placeholder="e.g. 1200 J St" autocomplete="street-address">`)}
         ${field('City, State ZIP', `<input name="location" value="${esc(a.location)}" placeholder="e.g. Sacramento, CA 95814">`)}
         ${field('Main phone', `<input name="mainPhone" type="tel" value="${esc(a.mainPhone)}" placeholder="e.g. 310-555-0147" autocomplete="tel">`)}
+        ${field('Salesforce link', `<input name="salesforceUrl" value="${esc(a.salesforceUrl || '')}" autocapitalize="off" placeholder="https://…lightning.force.com/…">`)}
         ${field('The address is', `<select name="addrKind"><option value="">Guess from the address${!a.addrKind && addrKind(a) ? ` (now: ${esc(NO_DROP_LABEL[addrKind(a)].toLowerCase())})` : ''}</option>${Object.entries(ADDR_KINDS).map(([k, l]) => opt(k, l, a.addrKind || '')).join('')}</select>`)}
         ${field('Lead source', `<select name="leadSource"><option value="">—</option>${LEAD_SOURCES.map((x) => opt(x, x, a.leadSource)).join('')}</select>`)}
       </div></fieldset>
@@ -8476,6 +8896,35 @@
       case 'set-view': ui.accountView = el.dataset.mode; savePrefs(); return rerender();
       case 'acct-nearby': return nearbyForm(acct);
       case 'li-id': return liIdForm(acct);
+      case 'go-imports': return go('imports');
+      case 'st-pick': return $('#st-file').click();
+      case 'st-copy-prompt': return copyText(stFormatPrompt(), 'Formatting instructions copied: paste them into Claude with your file');
+      case 'st-copy-header': return copyText(ST_HEADER, 'Header row copied');
+      case 'st-template': return downloadFile('bbars-import-template.csv', `${ST_HEADER}\r\n`, 'text/csv');
+      case 'st-group': ui.stF.group = ui.stF.group === el.dataset.g ? '' : el.dataset.g; ui.stF.show = 100; return rerender();
+      case 'st-more': ui.stF.show = (ui.stF.show || 100) + 200; return rerender();
+      case 'st-bulk': {
+        const lid = ui.stF && ui.stF.list;
+        const sel = ui.stSel && ui.stSel.size ? ui.stSel : null;
+        const its = itemsOf(lid).filter((x) => (sel ? sel.has(x.id) : true) && x.status !== 'Promoted');
+        if (!sel) { toast('Select rows first (or "Select the … shown")'); return undefined; }
+        for (const it of its) it.status = el.dataset.to;
+        save(); toast(`${plural(its.length, 'row')} ${el.dataset.to.toLowerCase()}`); return rerender();
+      }
+      case 'st-promote': { const it = state.listItems.find((x) => x.id === el.dataset.iid); return it && it.status === 'Approved' ? stPromoteForm(it) : undefined; }
+      case 'st-promote-many': {
+        const lid = ui.stF && ui.stF.list;
+        const sel = ui.stSel && ui.stSel.size ? ui.stSel : null;
+        const its = itemsOf(lid).filter((x) => x.status === 'Approved' && (!sel || sel.has(x.id)));
+        return its.length ? stPromoteMany(its) : toast('Approve some rows first');
+      }
+      case 'st-del-list': {
+        const l = listById(el.dataset.lid);
+        if (!l || !confirm(`Delete the list ${l.file_name} and its ${plural(itemsOf(l.id).length, 'row')}? Accounts you promoted from it stay.`)) return undefined;
+        state.listItems = state.listItems.filter((x) => x.list_id !== l.id);
+        state.importLists = state.importLists.filter((x) => x !== l);
+        save(); return go('imports');
+      }
       case 'wl-edit': { const it = state.watchlist.find((x) => x.id === el.dataset.wid); return it ? wlItemForm(it) : undefined; }
       case 'wl-col-status': {
         const c = colleagueById(el.dataset.col);
@@ -8867,7 +9316,8 @@
         <h3>Data</h3>
         <p class="small muted">Import accounts and contacts from a ZoomInfo export or any spreadsheet saved as CSV.</p>
         <div class="row">
-          <button type="button" class="btn ghost sm" id="set-csv">Import CSV…</button>
+          <button type="button" class="btn ghost sm" id="set-csv" title="Writes straight to your accounts: for one-off fixes like an address update. Lists go through Imports.">Direct import (writes to accounts)…</button>
+          <a class="btn ghost sm" href="#imports" data-close>Imports (staging)</a>
           ${state.accounts.length ? '' : '<button type="button" class="btn ghost sm" id="set-sample">Load sample data</button>'}
           <button type="button" class="btn danger sm" id="set-erase">Erase all data…</button>
         </div>

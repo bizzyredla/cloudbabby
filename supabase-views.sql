@@ -58,3 +58,33 @@ where key like 'wl:%' and not deleted and data is not null;
 
 revoke all on public.colleagues, public.watchlist_items from anon;
 grant select on public.colleagues, public.watchlist_items to authenticated;
+
+-- Imports (staging): uploaded lists and their rows. Rows never write to accounts on their own.
+create or replace view public.import_lists with (security_invoker = true) as
+select
+  substring(key from 5)          as id,
+  data->>'source'                as source,
+  data->>'file_name'             as file_name,
+  data->>'notes'                 as notes,
+  (data->>'row_count')::int      as row_count,
+  data->>'created_at'            as created_at
+from public.records
+where key like 'imp:%' and not deleted and data is not null;
+
+create or replace view public.list_items with (security_invoker = true) as
+select
+  substring(key from 5)                        as id,
+  data->>'list_id'                             as list_id,
+  data->'raw'                                  as raw,
+  nullif(data->>'matched_account_id', '')      as matched_account_id,
+  data->>'match_confidence'                    as match_confidence,
+  data->>'match_reason'                        as match_reason,
+  data->>'status'                              as status,
+  data->>'note'                                as note,
+  nullif(data->>'promoted_account_id', '')     as promoted_account_id,
+  data->>'created_at'                          as created_at
+from public.records
+where key like 'imr:%' and not deleted and data is not null;
+
+revoke all on public.import_lists, public.list_items from anon;
+grant select on public.import_lists, public.list_items to authenticated;
