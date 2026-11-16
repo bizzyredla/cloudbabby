@@ -376,6 +376,11 @@ No install, no build step: open `index.html` in a browser.
   - **Hand-picked lists** hold the accounts you put in them ("Brokers Brew members", "Q1 gift
     drop"): tick rows and use "Add to a hand-picked list", or "+ List" on an account page
   - **Pin** up to three views to the Overview, where they show as counts with this week's change
+  - **All views** (the link at the end of the tab row) opens **Segments**: every saved view, for
+    accounts and contacts, on one page. Each card shows the object, Filters or Hand-picked, its size
+    in your Active book (Reserve counted apart), when it was last changed, whether it's pinned, and
+    what it filters on. Search, show account or contact views only, sort by recently updated, name
+    or size. Open goes straight to Accounts or Contacts with that view on
 - **Actions on a view or the rows you tick**: enroll in a cadence (primary contact, everyone,
   decision makers, or titles containing a word; start dates can be spread over workdays), start a
   call session for whatever is due, add to a day's route, set stage, add a tag, add to a
@@ -483,6 +488,16 @@ value first, then spends your time by tier
   frequency, **last touch with that person** and next due
 - Tabs: All, Decision makers, Champions, No role, Stay-in-touch due, Left / inactive. Search, type
   filter and sort (next due, name, account, last touch, role)
+- **Saved contact views** sit in the same tab row, each with a count. "+ Save view" starts from the
+  tab and type you're on
+  - **Filter views** update themselves: account type, role, status, vendor, territory, PEO renewal
+    within N days, no touch with that person in N days, title contains, primary contacts only, and
+    text. "HR at Rippling accounts renewing within 90 days" is one view, with a live count while
+    you build it
+  - **Hand-picked views** hold the people you put in them ("Met at the mixer"): tick rows and use
+    "Add to a view"; inside one, "Remove from this view" takes people out
+  - The Book switch applies on top, so a view shows people at Active accounts unless you pick
+    Reserve or All
 - **Roles**: Decision maker, Champion, Finance, HR, Influencer, Gatekeeper, Operations, Executive.
   Change a role right in the row. Decision makers and champions with no touch in 30+ days on a live
   deal show red
@@ -534,8 +549,15 @@ value first, then spends your time by tier
   (time grid), stale accounts and day notes. Work week uses the full width. Narrower screens stack
 - **Work queue** (Salesloft/Outreach style): one list of everything due from cadence steps,
   follow-ups, revisits, route stops, key dates, stay-in-touch reminders and untimed tasks
-  - Tabs: All · Calls · Emails · LinkedIn · Visits · Other, each with a count; Start session at
+  - Tabs: All · Calls · Emails · LinkedIn · Visits · To-do, each with a count; Start session at
     the top opens a call/email/LinkedIn session for the tab you're on
+  - **Due · Future · Completed** above today's queue, each with a count. Future is everything that
+    comes due in the next 30 days (cadence steps, follow-ups, revisits, key dates, stay-in-touch,
+    tasks), grouped Tomorrow / Later this week / Next week / Later. Completed is the last 14 days of
+    calls, emails, visits and other activity you logged plus tasks you finished, by day. The type
+    tabs work in all three
+  - On a phone the tab rows (here and on Accounts and Contacts) are one line you swipe sideways,
+    and the tab you're on is scrolled into view
   - Grouped by age: overdue 7+ days, overdue, due today, and upcoming (next 2 days). Each overdue
     group has **Snooze all to tomorrow** and **Skip N cadence steps** (they advance, after a
     confirm); long groups show 10 and "Show N more"

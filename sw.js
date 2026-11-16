@@ -1,5 +1,5 @@
 /* Offline support: serve the app shell from cache, refresh it in the background. */
-const CACHE = 'minicrm-v52';
+const CACHE = 'minicrm-v53';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './manifest.webmanifest', './socal-territories.json',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
   './vendor/leaflet/leaflet.js', './vendor/leaflet/leaflet.css', './vendor/supabase/supabase.js'];

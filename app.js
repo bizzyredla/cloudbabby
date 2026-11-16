@@ -259,7 +259,7 @@
   }
   applyTheme();
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], colleagues: [], watchlist: [], importLists: [], listItems: [], deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], colleagues: [], watchlist: [], importLists: [], listItems: [], contactViews: [], deleted: {} }; }
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
@@ -288,6 +288,7 @@
     if (!Array.isArray(st.watchlist)) st.watchlist = [];
     if (!Array.isArray(st.importLists)) st.importLists = [];
     if (!Array.isArray(st.listItems)) st.listItems = [];
+    if (!Array.isArray(st.contactViews)) st.contactViews = [];
     if (!st.compPlans.length) st.compPlans = defaultCompPlans().filter((x) => !(st.deleted || {})['cp:' + x.id]);
     // Planner rows used to store only the account name; link each to its account where the name is unique.
     const byName = new Map();
@@ -318,7 +319,7 @@
   let booted = false;
   // Device-only sync bookkeeping: records waiting to upload, and how far we have read the cloud.
   const local = { dirty: new Set(), cursor: 0, user: '', seen: {} };
-  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:'], ['colleagues', 'col:'], ['watchlist', 'wl:'], ['importLists', 'imp:'], ['listItems', 'imr:']];
+  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:'], ['colleagues', 'col:'], ['watchlist', 'wl:'], ['importLists', 'imp:'], ['listItems', 'imr:'], ['contactViews', 'cv:']];
 
   function loadLegacy() {
     try {
@@ -852,10 +853,12 @@
 
   function contactRows() {
     const t = today();
+    const cview = ui.contactViewId && cvById(ui.contactViewId);
     const q = ui.contactSearch.trim().toLowerCase();
     const f = CONTACT_FILTERS[ui.contactFilter] ? ui.contactFilter : 'all';
     const rows = state.accounts.flatMap((a) => a.contacts.map((c) => ({ a, c, s: stayInfo(a, c), last: lastContacted(a, c) })))
       .filter(({ a, c, s, last }) => {
+        if (cview && !cvHas(cview, a, c)) return false;
         if (q ? bookFilter() === 'reserve' && !isReserve(a) : !inBook(a)) return false;
         if (ui.contactType !== 'all' && a.type !== ui.contactType) return false;
         const active = isActiveContact(c);
@@ -894,6 +897,7 @@
     const st = singleThreaded();
     const nodm = noDecisionMaker();
     const tabs = ['all', 'dm', 'champ', 'norole', 'due', 'left'];
+    const cview = ui.contactViewId && cvById(ui.contactViewId);
     $('#view').innerHTML = `
       <div class="page-head">
         <div>
@@ -902,7 +906,15 @@
         </div>
       </div>
       ${bookBar()}
-      <div class="view-tabs">${tabs.map((k) => `<button type="button" class="q-tab ${f === k ? 'active' : ''}" data-act="ct-filter" data-f="${k}">${esc(CONTACT_FILTERS[k])} <span>${counts[k]}</span></button>`).join('')}</div>
+      <div class="view-tabs">${tabs.map((k) => `<button type="button" class="q-tab ${f === k && !cview ? 'active' : ''}" data-act="ct-filter" data-f="${k}">${esc(CONTACT_FILTERS[k])} <span>${counts[k]}</span></button>`).join('')}
+        ${state.contactViews.map((v) => `<button type="button" class="q-tab ${cview === v ? 'active' : ''}" data-act="cv-open" data-vid="${v.id}">${esc(v.name)} <span>${all.filter((x) => cvHas(v, x.a, x.c)).length}</span></button>`).join('')}
+        <button type="button" class="btn ghost sm" data-act="cv-new">+ Save view</button>
+        <a class="small seg-link" href="#segments">All views</a></div>
+      ${cview ? `<div class="view-bar">
+        <div class="grow"><b>${esc(cview.name)}</b> ${cvSummary(cview).map((x) => `<span class="pill wrap">${esc(x)}</span>`).join(' ')}</div>
+        <button type="button" class="btn ghost sm" data-act="cv-edit" data-vid="${cview.id}">Edit</button>
+        <button type="button" class="btn ghost sm danger" data-act="cv-del" data-vid="${cview.id}">Delete</button>
+      </div>` : ''}
       <div class="filters">
         <input type="search" id="ct-search" placeholder="Search name, title, email, account…" value="${esc(ui.contactSearch)}">
         <select id="ct-filter" aria-label="Show">${Object.entries(CONTACT_FILTERS).map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
@@ -921,6 +933,8 @@
         <button type="button" class="btn sm ghost" id="ct-bulk-apply">Apply</button>
         <label class="row small">Status <select id="ct-bulk-status"><option value="">Set status…</option>${CONTACT_STATUSES.map((x) => `<option>${esc(x)}</option>`).join('')}</select></label>
         <button type="button" class="btn sm ghost" id="ct-bulk-tag">Tag their accounts</button>
+        <button type="button" class="btn sm ghost" id="ct-bulk-view">Add to a view</button>
+        ${ui.contactViewId && cvById(ui.contactViewId) && cvById(ui.contactViewId).kind === 'static' ? '<button type="button" class="btn sm ghost" id="ct-bulk-unview">Remove from this view</button>' : ''}
         <button type="button" class="btn sm ghost" id="ct-bulk-csv">Export</button>
         <button type="button" class="btn sm ghost" id="ct-bulk-clear">Clear</button>
       </div>
@@ -1028,6 +1042,12 @@
       save(); redraw(); toast(`#${tag} added to ${plural(accts.length, 'account')}`);
     });
     $('#ct-bulk-csv').addEventListener('click', () => contactsCsvRows(picks()));
+    $('#ct-bulk-view').addEventListener('click', () => addToContactViewForm(picks()));
+    if ($('#ct-bulk-unview')) $('#ct-bulk-unview').addEventListener('click', () => {
+      const v = cvById(ui.contactViewId); const out = new Set(picks().map((x) => x.c.id));
+      v.ids = v.ids.filter((id) => !out.has(id)); v.updated_at = new Date().toISOString();
+      save(); redraw(); toast(`${plural(out.size, 'person', 'people')} removed from ${v.name}`);
+    });
     $('#ct-bulk-cad').addEventListener('click', () => enrollPeopleForm(picks()));
   }
 
@@ -2140,7 +2160,8 @@
   // revisits, key dates, stay-in-touch reminders, untimed tasks and route stops. Each item knows
   // its type, why it is on the list, when it was due and how to act on it. The planner queue, the
   // Overview's Priority tasks, the Today card and the "Everything due" tile all read from it.
-  const QTABS = { all: 'All', calls: 'Calls', emails: 'Emails', linkedin: 'LinkedIn', visits: 'Visits', other: 'Other' };
+  const QTABS = { all: 'All', calls: 'Calls', emails: 'Emails', linkedin: 'LinkedIn', visits: 'Visits', other: 'To-do' };
+  const QMODES = { due: 'Due', future: 'Future', done: 'Completed' };
   const TAB_OF = { call: 'calls', email: 'emails', linkedin: 'linkedin', visit: 'visits', text: 'other', task: 'other' };
   const QGROUPS = { late7: 'Overdue 7+ days', late: 'Overdue', today: 'Due today', upcoming: 'Upcoming' };
   const kindToType = (k) => ({ Call: 'call', Email: 'email', LinkedIn: 'linkedin', Visit: 'visit', Text: 'text' })[k] || 'task';
@@ -2159,10 +2180,10 @@
     return [x.priority === 'high' ? 'High priority' : '', (x.notes || '').split('\n')[0].slice(0, 80)].filter(Boolean).join(' · ') || `Task ${dueWords(x.date)}`;
   }
 
-  function workQueue(d = today()) {
+  function workQueue(d = today(), range = null) {
     const t = today(); const isToday = d === t;
     const horizon = isToday ? addDays(t, 2) : d;
-    const inRange = (date) => !!date && (isToday ? date <= horizon : date === d);
+    const inRange = range ? (date) => !!date && date >= range.from && date <= range.to : (date) => !!date && (isToday ? date <= horizon : date === d);
     const items = [];
     for (const p of liveEnrollments()) {
       if (p.e.status !== 'active' || !inRange(p.e.dueDate)) continue;
@@ -2199,7 +2220,7 @@
       items.push({ key: 't:' + x.id, type: taskType(x), title: x.title, sub: a ? a.name : '', acct: a || null, due: x.date, src: 'task', why: taskWhy(x, a), task: x,
         btn: { act: 'edit-task', label: 'Open', attrs: `data-tid="${x.id}"` } });
     }
-    routeStops(d).forEach((s, i) => {
+    if (!range) routeStops(d).forEach((s, i) => {
       if (visitedRow(d, s.a) || items.some((it) => it.acct && it.acct.id === s.a.id && it.type === 'visit')) return;
       items.push({ key: 'rt:' + s.a.id, type: 'visit', title: `Visit · ${accountLabel(s.a)}`, sub: `Route stop ${i + 1}`, acct: s.a, due: d, src: 'route', why: s.why,
         btn: { act: 'q-visit', label: 'Visited', attrs: `data-id="${s.a.id}"` } });
@@ -2208,13 +2229,32 @@
     const sOrder = { cadence: 0, followup: 1, revisit: 2, route: 2, stay: 3, keydate: 4, task: 5 };
     for (const it of items) {
       it.late = Math.max(0, daysBetween(it.due, t));
-      it.group = !isToday ? 'today' : it.late >= 7 ? 'late7' : it.late > 0 ? 'late' : it.due === t ? 'today' : 'upcoming';
+      it.group = range ? 'upcoming' : !isToday ? 'today' : it.late >= 7 ? 'late7' : it.late > 0 ? 'late' : it.due === t ? 'today' : 'upcoming';
       it.tab = TAB_OF[it.type] || 'other';
     }
     return items.sort((x, y) => gOrder[x.group] - gOrder[y.group] || x.due.localeCompare(y.due) || sOrder[x.src] - sOrder[y.src]
       || (Number(y.acct && y.acct.value) || 0) - (Number(x.acct && x.acct.value) || 0));
   }
   const dueNow = (items) => items.filter((it) => it.group !== 'upcoming');
+  /** Everything due in the 30 days after today. */
+  const futureQueue = () => { const t = today(); return workQueue(t, { from: addDays(t, 1), to: addDays(t, 30) }); };
+  /** Work done in the last `days` days: logged calls, emails, visits and the rest (not notes), and finished planner tasks. */
+  function completedWork(days = 14) {
+    const t = today(); const from = addDays(t, -(days - 1));
+    const out = [];
+    for (const a of state.accounts) for (const h of a.activities) {
+      if (!h.date || h.date < from || h.date > t || h.kind === 'Note') continue;
+      const c = h.contactId && a.contacts.find((x) => x.id === h.contactId);
+      out.push({ key: 'h:' + h.id, type: kindToType(h.kind), title: h.summary || h.kind, sub: c ? c.name : h.kind, acct: a, due: h.date, at: h.createdAt || '' });
+    }
+    for (const x of state.tasks) {
+      if (!x.done || !x.date || x.date < from || x.date > t) continue;
+      const a = x.accountId && getAccount(x.accountId);
+      out.push({ key: 't:' + x.id, type: taskType(x), title: x.title, sub: 'Planner task', acct: a || null, due: x.date, at: '' });
+    }
+    for (const it of out) it.tab = TAB_OF[it.type] || 'other';
+    return out.sort((x, y) => y.due.localeCompare(x.due) || (y.at || '').localeCompare(x.at || ''));
+  }
   /** Three or more people on the same cadence step in the same group become one summary row. */
   function foldQueue(items) {
     const counts = new Map();
@@ -2250,9 +2290,57 @@
       .sort((x, y) => (x.lt ? 1 : 0) - (y.lt ? 1 : 0) || (Number(y.a.value) || 0) - (Number(x.a.value) || 0));
   }
 
+  /** Due · Future · Completed, each with its count. */
+  function qModeSwitch(mode) {
+    const n = { due: dueNow(workQueue(today())).length, future: futureQueue().length, done: completedWork(14).length };
+    return `<div class="seg q-modes" role="group" aria-label="Show">${Object.entries(QMODES).map(([k, l]) => `<button type="button" class="${mode === k ? 'active' : ''}" data-act="q-mode" data-mode="${k}">${l} <span class="muted">${n[k]}</span></button>`).join('')}</div>`;
+  }
+  /** Future (the next 30 days) and Completed (the last 14 days), with the same type tabs. */
+  function queueOtherCard(mode) {
+    const t = today();
+    const all = mode === 'future' ? futureQueue() : completedWork(14);
+    const tab = QTABS[ui.qTab] ? ui.qTab : 'all';
+    const shown = all.filter((it) => tab === 'all' || it.tab === tab);
+    const counts = Object.fromEntries(Object.keys(QTABS).map((k) => [k, all.filter((it) => k === 'all' || it.tab === k).length]));
+    const endOfWeek = addDays(t, 7 - (fromISO(t).getDay() || 7));
+    const bucket = mode === 'future'
+      ? (it) => (it.due === addDays(t, 1) ? 'Tomorrow' : it.due <= endOfWeek ? 'Later this week' : it.due <= addDays(endOfWeek, 7) ? 'Next week' : 'Later (next 30 days)')
+      : (it) => (it.due === t ? 'Today' : it.due === addDays(t, -1) ? 'Yesterday' : fmtDate(it.due, { weekday: 'long', month: 'short', day: 'numeric' }));
+    const groups = [];
+    for (const it of shown) { const g = bucket(it); let grp = groups.find((x) => x.g === g); if (!grp) groups.push(grp = { g, list: [] }); grp.list.push(it); }
+    const SHOW = 8;
+    const row = (it) => `
+      <div class="q-row ${mode === 'done' ? 'q-done' : ''}">
+        <span class="q-check-sp" aria-hidden="true">${mode === 'done' ? '✓' : ''}</span>
+        ${stepIcon({ type: it.type })}
+        <div class="q-main"><div class="q-title">${esc(it.title)}</div><div class="q-sub">${esc((it.sub && !(it.acct && it.sub === it.acct.name) ? it.sub : it.why) || '')}</div></div>
+        <div class="q-acct">${it.acct ? `<a href="#account/${it.acct.id}">${esc(it.acct.name)}</a>` : ''}</div>
+        <div class="q-due">${esc(fmtDate(it.due, { weekday: 'short', month: 'short', day: 'numeric' }))}</div>
+        ${mode === 'future' && it.btn ? `<button class="btn sm ghost" data-act="${it.btn.act}" ${it.btn.attrs}>${esc(it.btn.act === 'enr-log' ? 'Do it early' : it.btn.label)}</button>` : '<span></span>'}
+      </div>`;
+    return `
+      <div class="card q-card">
+        <div class="section-head">
+          <div>${qModeSwitch(mode)}<h2 style="margin:0">${mode === 'future' ? 'Coming up · next 30 days' : 'Completed · last 14 days'}</h2>
+            <div class="small muted">${mode === 'future' ? 'Cadence steps, follow-ups, revisits, key dates, stay-in-touch reminders and tasks that come due after today.' : 'Calls, emails, visits and other activity you logged, plus planner tasks you finished.'}</div></div>
+        </div>
+        <div class="q-tabs" role="tablist">${Object.entries(QTABS).filter(([k]) => k === 'all' || counts[k]).map(([k, l]) => `<button type="button" role="tab" class="q-tab ${tab === k ? 'active' : ''}" data-act="q-tab" data-tab="${k}">${l} <b>${counts[k]}</b></button>`).join('')}</div>
+        ${groups.length ? groups.map(({ g, list }) => {
+          const open = ui.qOpen && ui.qOpen[g];
+          return `<div class="q-group">
+            <div class="q-ghead"><span>${esc(g)} <span class="muted">(${list.length})</span></span></div>
+            ${list.slice(0, open ? list.length : SHOW).map(row).join('')}
+            ${list.length > SHOW ? `<button type="button" class="link-btn q-more" data-act="q-more" data-group="${esc(g)}">${open ? 'Show fewer' : `Show ${list.length - SHOW} more ▾`}</button>` : ''}
+          </div>`;
+        }).join('') : `<div class="empty-soft">${mode === 'future' ? 'Nothing scheduled in the next 30 days.' : 'Nothing logged in the last 14 days.'}</div>`}
+      </div>`;
+  }
+
   /** The queue card: type tabs, goal, grouped rows with bulk actions. */
   function queueCard(d) {
     const t = today();
+    const mode = d === t && QMODES[ui.qMode] ? ui.qMode : 'due';
+    if (mode !== 'due') return queueOtherCard(mode);
     const all = workQueue(d);
     const tab = QTABS[ui.qTab] ? ui.qTab : 'all';
     const shown = all.filter((it) => tab === 'all' || it.tab === tab);
@@ -2272,7 +2360,7 @@
     return `
       <div class="card q-card">
         <div class="section-head">
-          <div><h2 style="margin:0">${d === t ? "Today's queue" : `Queue · ${esc(fmtDate(d, { weekday: 'long' }))}`}</h2>
+          <div>${d === t ? qModeSwitch('due') : ''}<h2 style="margin:0">${d === t ? "Today's queue" : `Queue · ${esc(fmtDate(d, { weekday: 'long' }))}`}</h2>
             <div class="small muted">Built from cadence steps, follow-ups, revisits, key dates, stay-in-touch reminders, tasks and route stops.</div></div>
           ${counts.all ? `<button class="btn" data-act="session-setup" data-type="${{ calls: 'call', emails: 'email', linkedin: 'linkedin' }[tab] || 'all'}">▶ Start session</button>` : ''}
         </div>
@@ -2576,8 +2664,8 @@
   }
 
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession, partners: renderPartners, watchlist: renderWatchlist, imports: renderImports };
-  const TAB_FOR = { account: 'accounts', report: 'dashboard', session: 'cadences', lists: 'accounts' };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession, partners: renderPartners, watchlist: renderWatchlist, imports: renderImports, segments: renderSegments };
+  const TAB_FOR = { account: 'accounts', report: 'dashboard', session: 'cadences', lists: 'accounts', segments: 'accounts' };
 
   function route() {
     let [name, arg] = location.hash.replace('#', '').split('/');
@@ -2607,6 +2695,7 @@
     });
     updateChrome(view);
     views[view]();
+    if (window.innerWidth <= 700) $$('.view-tabs, .q-tabs').forEach((r) => { const a = r.querySelector('.active'); if (a && r.scrollWidth > r.clientWidth) r.scrollLeft = Math.max(0, a.offsetLeft - r.offsetLeft - r.clientWidth / 2 + a.offsetWidth / 2); });
     if (ui.focusContact) { // jump to a contact card after opening its account
       const cid = ui.focusContact; ui.focusContact = null;
       setTimeout(() => {
@@ -2616,7 +2705,7 @@
     }
   }
   const rerender = () => route();
-  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', partners: 'Partners', session: 'Session', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude', watchlist: 'Watchlist', imports: 'Imports' };
+  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', partners: 'Partners', session: 'Session', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude', watchlist: 'Watchlist', imports: 'Imports', segments: 'Segments' };
   /** Breadcrumb and sidebar counts. */
   function updateChrome(view) {
     $('#crumb-page').textContent = CRUMBS[view] || 'Overview';
@@ -2631,6 +2720,181 @@
   }
   const go = (hash) => { if (location.hash === '#' + hash) rerender(); else location.hash = hash; };
   window.addEventListener('hashchange', () => { if (!booted) return; ui.navs++; route(); window.scrollTo(0, 0); });
+
+  // ---------- saved contact views (segments of people) ----------
+  // Like the account views: Filters keep themselves up to date; Hand-picked is a fixed list of people.
+  const cvById = (id) => state.contactViews.find((v) => v.id === id);
+  const emptyCv = () => ({ type: 'all', roles: [], statuses: [], vendors: [], terrs: [], renewalDays: 0, touchOlder: 0, title: '', text: '', primaryOnly: false });
+  /** Is this person in the view? */
+  function cvHas(v, a, c) {
+    if (v.kind === 'static') return (v.ids || []).includes(c.id);
+    const k = { ...emptyCv(), ...v.criteria };
+    const t = today();
+    if (k.type !== 'all' && a.type !== k.type) return false;
+    if (k.roles.length && !k.roles.includes(c.role || '(none)')) return false;
+    if (k.statuses.length && !k.statuses.includes(c.status || 'Active')) return false;
+    if (k.vendors.length && !a.vendors.some((x) => k.vendors.includes(x))) return false;
+    if (k.terrs.length && !k.terrs.includes(String((socalOf(a) || {}).n))) return false;
+    if (k.renewalDays) { const r = nextRenewal(a, t); if (!r || daysBetween(t, r) > k.renewalDays) return false; }
+    if (k.touchOlder) { const lt = lastContacted(a, c); if (lt && daysBetween(lt, t) < k.touchOlder) return false; }
+    if (k.title && !(c.title || '').toLowerCase().includes(k.title.toLowerCase())) return false;
+    if (k.primaryOnly && !c.primary) return false;
+    if (k.text && ![c.name, c.title, c.email, a.name, a.tags, a.notes].join(' ').toLowerCase().includes(k.text.toLowerCase())) return false;
+    return true;
+  }
+  /** Everyone in a view, as { a, c } pairs. */
+  const cvMembers = (v) => state.accounts.flatMap((a) => a.contacts.filter((c) => cvHas(v, a, c)).map((c) => ({ a, c })));
+  function cvSummary(v) {
+    if (v.kind === 'static') return [`${plural((v.ids || []).length, 'person', 'people')} picked by hand`];
+    const k = { ...emptyCv(), ...v.criteria };
+    const parts = [];
+    if (k.type !== 'all') parts.push(k.type === 'partner' ? 'At partners' : 'At prospects');
+    if (k.roles.length) parts.push('Role: ' + k.roles.map((r) => (r === '(none)' ? 'none yet' : r)).join(' or '));
+    if (k.statuses.length) parts.push('Status: ' + k.statuses.join(' or '));
+    if (k.vendors.length) parts.push('Vendor: ' + k.vendors.join(' or '));
+    if (k.terrs.length) parts.push('Territory ' + k.terrs.map((n) => `#${n}`).join(' or '));
+    if (k.renewalDays) parts.push(`Company renews within ${k.renewalDays} days`);
+    if (k.touchOlder) parts.push(`No touch in ${k.touchOlder}+ days`);
+    if (k.title) parts.push(`Title has "${k.title}"`);
+    if (k.primaryOnly) parts.push('Primary contacts');
+    if (k.text) parts.push(`Contains "${k.text}"`);
+    return parts.length ? parts : ['Everyone'];
+  }
+  /** Today's Contacts filters as a starting point for "+ Save view". */
+  function cvFromFilters() {
+    const f = ui.contactFilter;
+    return { ...emptyCv(), type: ui.contactType && ui.contactType !== 'all' ? ui.contactType : 'all', text: (ui.contactSearch || '').trim(),
+      roles: f === 'dm' ? ['Decision maker'] : f === 'champ' ? ['Champion'] : f === 'norole' ? ['(none)'] : [],
+      statuses: f === 'left' ? CONTACT_STATUSES.filter((x) => x !== 'Active') : [], touchOlder: f === 'quiet' ? 90 : 0 };
+  }
+  function contactViewForm(existing, preset) {
+    const v = existing || { name: '', kind: 'filter', criteria: preset || emptyCv(), ids: [] };
+    const k = { ...emptyCv(), ...v.criteria };
+    const checks = (name, values, chosen, label = (x) => x) => (values.length
+      ? `<div class="check-grid">${values.map((x) => `<label><input type="checkbox" name="${name}" value="${esc(x)}" ${chosen.includes(x) ? 'checked' : ''}> ${esc(label(x))}</label>`).join('')}</div>`
+      : '<div class="small muted">None in use yet.</div>');
+    const terrNs = socalData ? [...new Set([...socalMembers().keys()].map(String).concat(k.terrs))].sort((x, y) => x - y) : [];
+    openModal(existing ? `Edit view · ${v.name}` : 'Save contact view', `
+      <div class="grid-2">
+        ${field('Name', `<input name="name" required value="${esc(v.name)}" placeholder="e.g. PEO renewals · HR leaders">`)}
+        ${field('Kind', `<select name="kind" id="cv-kind">${opt('filter', 'Filters (updates itself)', v.kind)}${opt('static', 'Hand-picked people', v.kind)}</select>`)}
+      </div>
+      <div id="cv-filters" ${v.kind === 'static' ? 'hidden' : ''}>
+        <div class="grid-3">
+          ${field('At', `<select name="type">${opt('all', 'Partners and prospects', k.type)}${opt('prospect', 'Prospects', k.type)}${opt('partner', 'Partners', k.type)}</select>`)}
+          ${field('Title contains', `<input name="title" value="${esc(k.title)}" placeholder="e.g. HR, CFO">`)}
+          ${field('Name, email, company or notes contain', `<input name="text" value="${esc(k.text)}">`)}
+          ${field('Their company renews within (days)', `<input name="renewalDays" type="number" min="0" step="15" value="${k.renewalDays || ''}" placeholder="e.g. 120">`)}
+          ${field('No touch with them in (days)', `<input name="touchOlder" type="number" min="0" step="15" value="${k.touchOlder || ''}" placeholder="e.g. 60">`)}
+          <label class="row small" style="align-self:end"><input type="checkbox" name="primaryOnly" style="width:auto" ${k.primaryOnly ? 'checked' : ''}> Primary contacts only</label>
+        </div>
+        <div class="field"><span>Role is any of</span>${checks('roles', [...CONTACT_ROLES, '(none)'], k.roles, (r) => (r === '(none)' ? 'No role yet' : r))}</div>
+        <div class="field"><span>Status is any of</span>${checks('statuses', CONTACT_STATUSES, k.statuses)}</div>
+        <div class="field"><span>Their company's current vendor is any of</span>${checks('vendors', allVendors(), k.vendors)}</div>
+        ${terrNs.length ? `<div class="field"><span>Field territory is any of</span>${checks('terrs', terrNs, k.terrs, (n) => { const t = socalData.find((x) => String(x.n) === n); return t ? `#${n} ${t.name}` : `#${n}`; })}</div>` : ''}
+      </div>
+      <p class="small muted" id="cv-static" ${v.kind === 'static' ? '' : 'hidden'}>${plural((v.ids || []).length, 'person', 'people')} in this view. Add more from the Contacts list: select people, then "Add to a view".</p>
+      <div class="small" id="cv-preview"></div>`, (data, fd) => {
+      const name = (data.name || '').trim();
+      if (!name) return false;
+      const now = new Date().toISOString();
+      const criteria = { type: data.type || 'all', roles: fd.getAll('roles'), statuses: fd.getAll('statuses'), vendors: fd.getAll('vendors'), terrs: fd.getAll('terrs'),
+        renewalDays: Number(data.renewalDays) || 0, touchOlder: Number(data.touchOlder) || 0, title: (data.title || '').trim(), text: (data.text || '').trim(), primaryOnly: !!data.primaryOnly };
+      const kind = data.kind === 'static' ? 'static' : 'filter';
+      if (existing) Object.assign(existing, { name, kind, criteria, updated_at: now });
+      else {
+        const nv = { id: uid(), name, kind, criteria, ids: kind === 'static' ? (preset && preset.ids) || [] : [], created_at: now, updated_at: now };
+        state.contactViews.push(nv);
+        ui.contactViewId = nv.id; ui.contactFilter = 'all'; ui.contactSearch = '';
+        if (location.hash !== '#contacts') setTimeout(() => go('contacts'), 0);
+      }
+      toast(existing ? 'View updated' : 'View saved');
+    }, 'Save view', { wide: true });
+    const preview = () => {
+      const fd = new FormData(modalForm);
+      if (fd.get('kind') === 'static') { $('#cv-filters').hidden = true; $('#cv-static').hidden = false; $('#cv-preview').textContent = ''; return; }
+      $('#cv-filters').hidden = false; $('#cv-static').hidden = true;
+      const tmp = { kind: 'filter', criteria: { type: fd.get('type') || 'all', roles: fd.getAll('roles'), statuses: fd.getAll('statuses'), vendors: fd.getAll('vendors'), terrs: fd.getAll('terrs'),
+        renewalDays: Number(fd.get('renewalDays')) || 0, touchOlder: Number(fd.get('touchOlder')) || 0, title: (fd.get('title') || '').trim(), text: (fd.get('text') || '').trim(), primaryOnly: !!fd.get('primaryOnly') } };
+      const n = cvMembers(tmp);
+      $('#cv-preview').innerHTML = `<b>${plural(n.length, 'person', 'people')}</b> match right now${n.length ? `: ${n.slice(0, 5).map((x) => esc(x.c.name)).join(', ')}${n.length > 5 ? '…' : ''}` : ''}`;
+    };
+    modalForm.oninput = preview;
+    preview();
+  }
+  /** Add picked people to a hand-picked contact view (or a new one). */
+  function addToContactViewForm(pairs) {
+    const statics = state.contactViews.filter((v) => v.kind === 'static');
+    openModal(`Add ${plural(pairs.length, 'person', 'people')} to a view`, `
+      ${field('View', `<select name="vid">${statics.map((v) => opt(v.id, v.name, statics[0] && statics[0].id)).join('')}${opt('__new', '+ New hand-picked view…', statics.length ? '' : '__new')}</select>`)}
+      ${field('New view name', '<input name="name" placeholder="e.g. Met at the Irvine mixer">')}`, (data) => {
+      const now = new Date().toISOString();
+      let v = data.vid !== '__new' && cvById(data.vid);
+      if (!v) {
+        const name = (data.name || '').trim();
+        if (!name) { toast('Give the new view a name'); return false; }
+        v = { id: uid(), name, kind: 'static', criteria: emptyCv(), ids: [], created_at: now, updated_at: now };
+        state.contactViews.push(v);
+      }
+      const before = v.ids.length;
+      v.ids = [...new Set([...v.ids, ...pairs.map((x) => x.c.id)])];
+      v.updated_at = now;
+      toast(`${plural(v.ids.length - before, 'person', 'people')} added to ${v.name}`);
+    }, 'Add');
+  }
+
+  // ---------- segments: every saved view, accounts and contacts, in one list ----------
+  function segmentRows() {
+    const rows = [];
+    for (const l of state.lists) {
+      const members = state.accounts.filter((a) => listHas(l, a));
+      rows.push({ obj: 'accounts', id: l.id, name: l.name, kind: l.kind === 'static' ? 'static' : 'filter', active: members.filter((a) => !isReserve(a)).length, reserve: members.filter(isReserve).length,
+        updated: l.updated_at || (l._ts ? new Date(l._ts).toISOString() : ''), pinned: !!l.pinned, summary: l.kind === 'static' ? `${plural((l.ids || []).length, 'account')} picked by hand` : criteriaSummary({ ...emptyCriteria(), ...l.criteria }).join(' · ') });
+    }
+    for (const v of state.contactViews) {
+      const members = cvMembers(v);
+      rows.push({ obj: 'contacts', id: v.id, name: v.name, kind: v.kind, active: members.filter((x) => !isReserve(x.a)).length, reserve: members.filter((x) => isReserve(x.a)).length,
+        updated: v.updated_at || v.created_at || '', pinned: false, summary: cvSummary(v).join(' · ') });
+    }
+    return rows;
+  }
+  function renderSegments() {
+    const q = (ui.segQ || '').trim().toLowerCase();
+    const obj = ['accounts', 'contacts'].includes(ui.segObj) ? ui.segObj : 'all';
+    const sort = { updated: (x, y) => (y.updated || '').localeCompare(x.updated || ''), name: (x, y) => x.name.localeCompare(y.name), size: (x, y) => (y.active + y.reserve) - (x.active + x.reserve) }[ui.segSort] || null;
+    const all = segmentRows();
+    const rows = all.filter((r) => (obj === 'all' || r.obj === obj) && (!q || `${r.name} ${r.summary}`.toLowerCase().includes(q)))
+      .sort(sort || ((x, y) => (y.updated || '').localeCompare(x.updated || '')));
+    $('#view').innerHTML = `
+      <div class="page-head">
+        <div>
+          <h1>Segments <span class="muted small">(${all.length})</span></h1>
+          <div class="muted small">Every saved view, for accounts and contacts. Filters update themselves; hand-picked ones stay as you made them. Open one to work it.</div>
+        </div>
+        <div class="row"><button type="button" class="btn ghost" data-act="seg-new" data-obj="accounts">+ Account view</button><button type="button" class="btn" data-act="seg-new" data-obj="contacts">+ Contact view</button></div>
+      </div>
+      <div class="filters">
+        <input type="search" id="seg-q" placeholder="Search views" value="${esc(ui.segQ || '')}">
+        <select id="seg-obj" aria-label="Object">${opt('all', 'Accounts and contacts', obj)}${opt('accounts', 'Account views', obj)}${opt('contacts', 'Contact views', obj)}</select>
+        <select id="seg-sort" aria-label="Sort">${opt('updated', 'Sort: Recently updated', ui.segSort || 'updated')}${opt('name', 'Sort: Name', ui.segSort)}${opt('size', 'Sort: Size', ui.segSort)}</select>
+      </div>
+      <div class="seg-list">${rows.map((r) => `
+        <div class="card seg-card">
+          <div class="row spread" style="gap:.5rem;flex-wrap:wrap">
+            <button type="button" class="link-btn seg-name" data-act="seg-open" data-obj="${r.obj}" data-vid="${r.id}"><strong>${esc(r.name)}</strong></button>
+            <span class="row" style="gap:.3rem;flex-wrap:wrap">
+              <span class="pill ${r.obj === 'accounts' ? 'seg-acc' : 'seg-con'}">${r.obj === 'accounts' ? 'Accounts' : 'Contacts'}</span>
+              <span class="pill ${r.kind === 'static' ? '' : 'won'}">${r.kind === 'static' ? 'Hand-picked' : 'Filters'}</span>
+              ${r.pinned ? '<span class="pill">★ Pinned</span>' : ''}
+            </span>
+          </div>
+          <div class="small seg-meta"><b>${r.active}</b> ${r.obj === 'accounts' ? (r.active === 1 ? 'active account' : 'active accounts') : `${r.active === 1 ? 'person' : 'people'} at active accounts`}${r.reserve ? ` <span class="muted">· +${r.reserve} in Reserve</span>` : ''}${r.updated ? ` <span class="muted">· updated ${esc(fmtDate(r.updated.slice(0, 10), { month: 'short', day: 'numeric', year: 'numeric' }))}</span>` : ''}</div>
+          <div class="small muted">${esc(r.summary)}</div>
+        </div>`).join('') || `<div class="card"><div class="empty">${all.length ? 'No views match.' : 'No saved views yet. Save one from Accounts or Contacts ("+ Save view"), or start one here.'}</div></div>`}</div>`;
+    $('#seg-q').addEventListener('input', (e) => { ui.segQ = e.target.value; clearTimeout(renderSegments.t); renderSegments.t = setTimeout(() => { rerender(); const i = $('#seg-q'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 200); });
+    $('#seg-obj').addEventListener('change', (e) => { ui.segObj = e.target.value; rerender(); });
+    $('#seg-sort').addEventListener('change', (e) => { ui.segSort = e.target.value; rerender(); });
+  }
 
   // ---------- watchlist: what colleagues own that you'd go after if they leave ----------
   // Its own layer: never in accounts, views, the map, search, counts or the pipeline. Barebones on purpose:
@@ -3770,6 +4034,7 @@ Give me the CSV file.`;
         ${vendors.length ? `<select id="vendor-view" class="view-select ${ui.viewId && ui.viewId.startsWith(VENDOR_LIST) ? 'on' : ''}" aria-label="Vendor views"><option value="">By vendor…</option>${vendors.map(([v, n]) => `<option value="${esc(VENDOR_LIST + v)}" ${ui.viewId === VENDOR_LIST + v ? 'selected' : ''}>${esc(v)} (${n})</option>`).join('')}</select>` : ''}
         ${tab('scoreboard', 'Vendor scoreboard', vendors.length)}
         <button type="button" class="btn ghost sm" data-act="save-view">+ Save view</button>
+        <a class="small seg-link" href="#segments">All views</a>
       </div>
       ${ui.viewId === 'scoreboard' ? vendorScoreboard() : `
       ${view ? `<div class="view-bar">
@@ -4400,7 +4665,7 @@ Give me the CSV file.`;
       <div class="small" id="list-preview"></div>`, (data, fd) => {
       if (!data.name.trim()) return false;
       const criteria = readCriteria(fd);
-      const fields = { name: data.name.trim(), criteria, kind: data.kind === 'static' ? 'static' : 'filter', pinned: !!data.pinned };
+      const fields = { name: data.name.trim(), criteria, kind: data.kind === 'static' ? 'static' : 'filter', pinned: !!data.pinned, updated_at: new Date().toISOString() };
       if (fields.kind === 'static') fields.ids = (existing && existing.ids) || [];
       if (fields.pinned && state.lists.filter((x) => x.pinned && x !== existing).length >= 3) { toast('Up to 3 pinned views; unpin one first'); fields.pinned = false; }
       if (existing) Object.assign(existing, fields);
@@ -9099,7 +9364,19 @@ Give me the CSV file.`;
         const s = stayInfo(acct, c);
         return toast(`Reset · next ${s ? shortDate(s.next) : ''}`.trim());
       }
-      case 'ct-filter': ui.contactFilter = el.dataset.f; ui.contactLimit = 200; return rerender();
+      case 'ct-filter': ui.contactFilter = el.dataset.f; ui.contactViewId = null; ui.contactLimit = 200; return rerender();
+      case 'cv-open': ui.contactViewId = el.dataset.vid; ui.contactFilter = 'all'; ui.contactLimit = 200; return rerender();
+      case 'cv-new': return contactViewForm(null, cvFromFilters());
+      case 'cv-edit': { const v = cvById(el.dataset.vid); return v ? contactViewForm(v) : undefined; }
+      case 'cv-del': {
+        const v = cvById(el.dataset.vid);
+        if (!v || !confirm(`Delete the view ${v.name}? The people stay; only the view goes.`)) return undefined;
+        state.contactViews = state.contactViews.filter((x) => x !== v); ui.contactViewId = null; save(); return rerender();
+      }
+      case 'seg-open':
+        if (el.dataset.obj === 'contacts') { ui.contactViewId = el.dataset.vid; ui.contactFilter = 'all'; ui.contactSearch = ''; return go('contacts'); }
+        openView(el.dataset.vid); return go('accounts');
+      case 'seg-new': return el.dataset.obj === 'contacts' ? contactViewForm(null, emptyCv()) : listForm(null, emptyCriteria());
       case 'ct-more': ui.contactLimit += 200; return rerender();
       case 'ct-follow': { const c = acct && acct.contacts.find((x) => x.id === cid); return c ? leftCompanyForm(acct, c) : undefined; }
       case 'primary-contact':
@@ -9217,6 +9494,7 @@ Give me the CSV file.`;
       case 'session-setup': return sessionSetupForm({ ...(el.dataset.cad ? { cadenceId: el.dataset.cad, type: 'all' } : {}), ...(el.dataset.type ? { type: SESSION_TYPES[el.dataset.type] ? el.dataset.type : 'all' } : {}), ...(el.dataset.step ? { stepNo: el.dataset.step } : {}) });
       case 'q-check': e.preventDefault(); return queueCheck(el.dataset.key);
       case 'q-tab': ui.qTab = el.dataset.tab; if (el.dataset.go) { e.preventDefault(); ui.calMode = 'day'; return go(`planner/${today()}`); } return rerender();
+      case 'q-mode': ui.qMode = el.dataset.mode; ui.qOpen = {}; return rerender();
       case 'q-more': ui.qOpen = { ...(ui.qOpen || {}), [el.dataset.group]: !(ui.qOpen || {})[el.dataset.group] }; return rerender();
       case 'q-bulk': return queueBulk(el.dataset.op, el.dataset.group);
       case 'q-visit': return markVisited(today(), acct);
