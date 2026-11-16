@@ -2784,8 +2784,8 @@
           ${field('At', `<select name="type">${opt('all', 'Partners and prospects', k.type)}${opt('prospect', 'Prospects', k.type)}${opt('partner', 'Partners', k.type)}</select>`)}
           ${field('Title contains', `<input name="title" value="${esc(k.title)}" placeholder="e.g. HR, CFO">`)}
           ${field('Name, email, company or notes contain', `<input name="text" value="${esc(k.text)}">`)}
-          ${field('Their company renews within (days)', `<input name="renewalDays" type="number" min="0" step="15" value="${k.renewalDays || ''}" placeholder="e.g. 120">`)}
-          ${field('No touch with them in (days)', `<input name="touchOlder" type="number" min="0" step="15" value="${k.touchOlder || ''}" placeholder="e.g. 60">`)}
+          ${field('Their company renews within (days)', `<input name="renewalDays" type="number" min="0" step="1" value="${k.renewalDays || ''}" placeholder="e.g. 120">`)}
+          ${field('No touch with them in (days)', `<input name="touchOlder" type="number" min="0" step="1" value="${k.touchOlder || ''}" placeholder="e.g. 60">`)}
           <label class="row small" style="align-self:end"><input type="checkbox" name="primaryOnly" style="width:auto" ${k.primaryOnly ? 'checked' : ''}> Primary contacts only</label>
         </div>
         <div class="field"><span>Role is any of</span>${checks('roles', [...CONTACT_ROLES, '(none)'], k.roles, (r) => (r === '(none)' ? 'No role yet' : r))}</div>
@@ -3768,6 +3768,8 @@ Give me the CSV file.`;
     $('#cols-reset').addEventListener('click', () => { $$('[name=cols]', modalForm).forEach((cb) => { cb.checked = DEFAULT_COLS.includes(cb.value); }); });
   }
 
+  /** Bits of the last accounts table drawn, so one row can be redrawn on its own. */
+  const acctTable = { row: null, list: [], sel: null };
   function accountTable(list) {
     const cols = acctCols();
     const sel = ui.acctSel || new Set();
@@ -3803,20 +3805,31 @@ Give me the CSV file.`;
         default: return '<td></td>';
       }
     };
+    const rowHtml = (a) => `<tr class="click-row ${sel.has(a.id) ? 'picked' : ''}" data-act="open-account" data-id="${a.id}">
+                <td class="pick-col"><input type="checkbox" class="row-pick" data-id="${a.id}" ${sel.has(a.id) ? 'checked' : ''} aria-label="Select ${esc(a.name)}"></td>
+                <td class="sticky-col"><strong>${esc(a.name)}</strong>${fresh && fresh.has(a.id) ? ' <span class="pill new-pill">New</span>' : ''}<div class="row" style="gap:.35rem">${cols.includes('type') ? '' : typePill(a)}${accountLinks(a)}</div></td>
+                ${cols.map((k) => cell(a, k)).join('')}
+              </tr>`;
+    acctTable.row = rowHtml;
     return `
       <div class="card table-card">
         <div class="table-wrap">
           <table class="table acct-table">
             <thead><tr><th class="pick-col"><input type="checkbox" class="row-pick" id="pick-all" aria-label="Select all shown" ${list.length && list.every((a) => sel.has(a.id)) ? 'checked' : ''}></th><th><button type="button" class="th-sort ${ui.sort === 'name' ? 'on' : ''}" data-act="sort" data-key="name">Account${ui.sort === 'name' ? (ui.sortDir > 0 ? ' ▲' : ' ▼') : ''}</button></th>${cols.map(th).join('')}</tr></thead>
-            <tbody>${list.map((a) => `<tr class="click-row ${sel.has(a.id) ? 'picked' : ''}" data-act="open-account" data-id="${a.id}">
-                <td class="pick-col"><input type="checkbox" class="row-pick" data-id="${a.id}" ${sel.has(a.id) ? 'checked' : ''} aria-label="Select ${esc(a.name)}"></td>
-                <td class="sticky-col"><strong>${esc(a.name)}</strong>${fresh && fresh.has(a.id) ? ' <span class="pill new-pill">New</span>' : ''}<div class="row" style="gap:.35rem">${cols.includes('type') ? '' : typePill(a)}${accountLinks(a)}</div></td>
-                ${cols.map((k) => cell(a, k)).join('')}
-              </tr>`).join('')}</tbody>
+            <tbody>${list.map(rowHtml).join('')}</tbody>
           </table>
         </div>
         <div class="table-foot small muted"><span>Red: no touch in ${STALE_TOUCH}+ days, ${STALE_STAGE}+ days in stage, or no next step on an open deal.</span><button type="button" class="link-btn small" data-act="acct-cols">Columns</button></div>
       </div>`;
+  }
+
+  /** Draw one row of the accounts table again (after an inline edit) and wire it up. */
+  function redrawRow(a, tr) {
+    const tb = document.createElement('tbody');
+    tb.innerHTML = acctTable.row(a);
+    const row = tb.firstElementChild;
+    tr.replaceWith(row);
+    bindAcctRows(row);
   }
 
   /** Inline edits from the table: stage, value, follow-up. */
@@ -3824,13 +3837,21 @@ Give me the CSV file.`;
     const a = getAccount(el.dataset.id);
     if (!a) return;
     const k = el.dataset.inline;
-    if (k === 'stage') { moveStage(a.id, el.value); return; }
+    const tr = el.closest('tr');
+    // A long "Show all" table takes a second or two to draw: redraw just this row there.
+    const one = tr && acctTable.row && $$('.acct-table tbody tr').length > PAGE_SIZE;
+    if (k === 'stage') {
+      if (!one) { moveStage(a.id, el.value); return; }
+      if (a.stage === el.value) return;
+      logStageChange(a, a.stage, el.value); a.stage = el.value; touch(a); save();
+      redrawRow(a, tr); toast(`${a.name} moved to ${a.stage}`); return;
+    }
     if (k === 'value') {
       const n = Number(String(el.value).replace(/[^\d.]/g, ''));
       a.value = n || ''; touch(a); save(); el.value = a.value ? money(a.value) : '';
       toast(`${a.name}: value ${a.value ? money(a.value) : 'cleared'}`); return;
     }
-    if (k === 'nextFollowUp') { a.nextFollowUp = el.value; touch(a); save(); rerender(); toast(el.value ? `${a.name}: follow up ${fmtDate(el.value, { weekday: 'short', month: 'short', day: 'numeric' })}` : `${a.name}: follow-up cleared`); }
+    if (k === 'nextFollowUp') { a.nextFollowUp = el.value; touch(a); save(); if (one) redrawRow(a, tr); else rerender(); toast(el.value ? `${a.name}: follow up ${fmtDate(el.value, { weekday: 'short', month: 'short', day: 'numeric' })}` : `${a.name}: follow-up cleared`); }
   }
 
   // ----- saved views: the old Lists, as tabs on the accounts table -----
@@ -4095,14 +4116,34 @@ Give me the CSV file.`;
     if (ptSel) ptSel.addEventListener('change', (e) => { ui.partnerTypeFilter = e.target.value; renderAccounts(); });
     $('#acct-export').addEventListener('change', (e) => { const k = e.target.value; e.target.value = ''; if (k) runAction(k); });
     bindCollection();
-    $$('.row-pick').forEach((cb) => cb.addEventListener('change', () => {
-      if (cb.id === 'pick-all') { if (cb.checked) list.forEach((a) => sel.add(a.id)); else list.forEach((a) => sel.delete(a.id)); }
-      else if (cb.checked) sel.add(cb.dataset.id); else sel.delete(cb.dataset.id);
-      renderAccounts();
+    acctTable.list = list; acctTable.sel = sel;
+    bindAcctRows(document);
+  }
+
+  /** The selected / shown count at the start of the accounts action bar. */
+  function actBarCount() {
+    const bar = $('.act-bar');
+    const { sel, list } = acctTable;
+    if (!bar || !sel) return;
+    bar.classList.toggle('on', sel.size > 0);
+    const span = bar.querySelector(':scope > span');
+    if (span) span.innerHTML = `<b>${sel.size ? `${sel.size} selected` : `${list.length} shown`}</b>${sel.size ? ' · <button type="button" class="link-btn small" data-act="acct-clear">Clear</button>' : ''}`;
+    const all = $('#pick-all');
+    if (all) all.checked = list.length > 0 && list.every((a) => sel.has(a.id));
+  }
+
+  /** Wire up the accounts table (or one redrawn row): ticks, inline edits, follow-up dates, stage pickers. */
+  function bindAcctRows(root) {
+    const { list, sel } = acctTable;
+    $$('.row-pick', root).forEach((cb) => cb.addEventListener('change', () => {
+      if (cb.id === 'pick-all') { if (cb.checked) list.forEach((a) => sel.add(a.id)); else list.forEach((a) => sel.delete(a.id)); renderAccounts(); return; }
+      if (cb.checked) sel.add(cb.dataset.id); else sel.delete(cb.dataset.id);
+      const tr = cb.closest('tr');
+      if (tr && $('.act-bar')) { tr.classList.toggle('picked', cb.checked); actBarCount(); } else renderAccounts();
     }));
-    $$('.cell-edit').forEach((el) => el.addEventListener('change', () => inlineEdit(el)));
+    $$('.cell-edit', root).forEach((el) => el.addEventListener('change', () => inlineEdit(el)));
     // Follow-up dates show as text and become a date picker when clicked (1,500 pickers slow the page down).
-    $$('[data-date-edit]').forEach((btn) => btn.addEventListener('click', (e) => {
+    $$('[data-date-edit]', root).forEach((btn) => btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const a = getAccount(btn.dataset.id);
       if (!a) return;
@@ -4122,7 +4163,7 @@ Give me the CSV file.`;
       const a = getAccount(el.dataset.id);
       if (a) el.innerHTML = STAGES[a.type].map((x) => opt(x, stageShort(x), a.stage)).join('');
     };
-    $$('.cell-edit[data-inline=stage]').forEach((el) => {
+    $$('.cell-edit[data-inline=stage]', root).forEach((el) => {
       el.addEventListener('mousedown', fillStages);
       el.addEventListener('focus', fillStages);
       el.addEventListener('touchstart', fillStages, { passive: true });
@@ -4659,7 +4700,7 @@ Give me the CSV file.`;
       <div class="field"><span>Partner type is any of</span>${checks('partnerTypes', PARTNER_TYPES, c.partnerTypes)}</div>
       <div class="grid-2">
         ${field('Name, contacts or notes contain', `<input name="text" value="${esc(c.text)}">`)}
-        ${field('Vendor renewal within (days)', `<input name="renewalDays" type="number" min="0" step="15" value="${c.renewalDays || ''}" placeholder="e.g. 120">`)}
+        ${field('Vendor renewal within (days)', `<input name="renewalDays" type="number" min="0" step="1" value="${c.renewalDays || ''}" placeholder="e.g. 120">`)}
       </div>
       </div>
       <div class="small" id="list-preview"></div>`, (data, fd) => {
@@ -8045,7 +8086,7 @@ Give me the CSV file.`;
           <div class="grid-2 route-opts">
             ${field('Start from', `<select id="r-start">${opt('home', homeOk ? `Home base` : 'Home base (not set)', r.start)}${opt('gps', 'My current location', r.start)}${opt('first', 'First stop', r.start)}</select>`)}
             ${field('Leave at', `<input id="r-time" type="time" value="${esc(r.startTime)}">`)}
-            ${field('Minutes per visit', `<input id="r-mins" type="number" min="0" step="5" value="${esc(r.visitMins)}">`)}
+            ${field('Minutes per visit', `<input id="r-mins" type="number" min="0" step="1" value="${esc(r.visitMins)}">`)}
             <label class="row small" style="align-self:end"><input id="r-round" type="checkbox" style="width:auto" ${r.roundTrip ? 'checked' : ''}> Return to start</label>
           </div>
           <div class="small"><button type="button" class="link-btn" data-act="set-home">${homeOk ? `Home base: ${esc(ui.home.label)} · change` : 'Set your home base'}</button></div>
@@ -9154,7 +9195,7 @@ Give me the CSV file.`;
         ${field('Task *', `<input name="title" required value="${esc(x.title)}" placeholder="e.g. Prep proposal for Acme">`, 'span-2')}
         ${field('Date', `<input name="date" type="date" required value="${esc(x.date)}">`)}
         ${field('Time (blank = anytime)', `<input name="time" type="time" value="${esc(x.time)}">`)}
-        ${field('Duration (min)', `<input name="duration" type="number" min="0" step="5" value="${esc(x.duration)}">`)}
+        ${field('Duration (min)', `<input name="duration" type="number" min="0" step="1" value="${esc(x.duration)}">`)}
         ${field('Priority', `<select name="priority">${Object.entries(PRIORITIES).map(([v, l]) => opt(v, l, x.priority)).join('')}</select>`)}
         ${field('Category', `<div class="row" style="flex-wrap:nowrap"><i class="cat-dot" id="tf-dot" style="--c:${catColor(x)}"></i><select name="categoryId" id="tf-cat"><option value="">No category</option>${catRows().map((c) => opt(c.id, c.name, x.categoryId || '')).join('')}</select><button type="button" class="btn sm ghost" id="tf-cats">Edit</button></div>`)}
         ${field('Related account', `<select name="accountId">${accountOptions(x.accountId)}</select>`)}
