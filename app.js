@@ -545,7 +545,7 @@
     return [...COMPETITORS, ...[...used].filter((v) => !COMPETITORS.includes(v) && v !== NO_VENDOR).sort(), NO_VENDOR];
   };
   const haystack = (a) => [a.name, a.industry, a.tags, a.notes, a.partnerType, a.stage, ...a.vendors,
-    a.location, a.address, a.mainPhone, ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone, c.mobile])].join(' ').toLowerCase();
+    a.location, a.address, a.mainPhone, a.liId, ...a.contacts.flatMap((c) => [c.name, c.title, c.email, c.phone, c.mobile])].join(' ').toLowerCase();
   const vendorPills = (a) => a.vendors.map((v) => `<span class="pill vendor">${esc(v)}</span>`).join(' ');
   const getDay = (iso) => { const d = state.days[iso] || {}; return { ...d, priorities: Array.isArray(d.priorities) ? d.priorities : ['', '', ''], notes: d.notes || '' }; };
   const findAccountByName = (name) => {
@@ -799,6 +799,7 @@
       ${c.phone || c.mobile ? `<a class="reach-btn" href="tel:${esc(c.phone || c.mobile)}" title="Call ${esc(c.phone || c.mobile)}" aria-label="Call ${esc(c.name)}">☎</a>` : '<span class="reach-btn off" title="No phone">☎</span>'}
       ${c.email ? `<a class="reach-btn" href="mailto:${esc(c.email)}" title="${esc(c.email)}" aria-label="Email ${esc(c.name)}">✉</a>` : '<span class="reach-btn off" title="No email">✉</span>'}
       <a class="reach-btn li ${c.linkedin ? '' : 'find'}" href="${esc(c.linkedin ? extUrl(c.linkedin) : liPeopleSearch(c.name, a.name))}" target="_blank" rel="noopener" title="${c.linkedin ? 'Open LinkedIn profile' : 'Find on LinkedIn'}" aria-label="LinkedIn for ${esc(c.name)}">in</a>
+      ${c.salesNav ? `<a class="reach-btn sn" href="${esc(extUrl(c.salesNav))}" target="_blank" rel="noopener" title="Open lead in Sales Navigator" aria-label="Sales Navigator for ${esc(c.name)}">SN</a>` : ''}
     </span>`;
 
   /** Status changes: inactive people leave cadences; "Left company" asks where they went. */
@@ -1063,11 +1064,11 @@
   /** Contacts as an upload file for ZoomInfo / Apollo. */
   function contactsCsvRows(pairs) {
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['First Name', 'Last Name', 'Title', 'Role', 'Email', 'Phone', 'Mobile', 'Person LinkedIn URL', 'Company', 'Website', 'City', 'State', 'Employees', 'Industry', 'Status']];
+    const rows = [['First Name', 'Last Name', 'Title', 'Role', 'Email', 'Phone', 'Mobile', 'Person LinkedIn URL', 'Sales Navigator lead', 'Company', 'Website', 'City', 'State', 'Employees', 'Industry', 'Status']];
     for (const { a, c } of pairs) {
       const [first, ...rest] = (c.name || '').split(/\s+/);
       const [city, stt] = (a.location || '').split(',').map((x) => x.trim());
-      rows.push([first, rest.join(' '), c.title, c.role, c.email, c.phone, c.mobile, c.linkedin, a.name, a.website, city, stt, a.employees, a.industry, c.status || 'Active']);
+      rows.push([first, rest.join(' '), c.title, c.role, c.email, c.phone, c.mobile, c.linkedin, c.salesNav || '', a.name, a.website, city, stt, a.employees, a.industry, c.status || 'Active']);
     }
     downloadFile(`contacts-${today()}.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
   }
@@ -3287,6 +3288,8 @@
           ${a.type === 'prospect' || a.vendors.length ? `<div class="span-all"><span>Current vendors</span>${a.vendors.length ? vendorPills(a) : '—'}</div>` : ''}
           <div class="span-all"><span>Address</span>${geoQuery(a) ? `${esc(geoQuery(a))}${hasGeo(a) ? ` · <a href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}${noDrop(a) ? ` <span class="pill med">${esc(noDrop(a))}: not a drop stop</span>` : ''}</div>
           ${geoQuery(a) ? `<div><span>Field territory</span><span data-terr="${a.id}">${socalData ? esc(terrName(a) || (hasGeo(a) ? 'Outside the territories' : 'Not on the map yet')) : '…'}</span></div>` : ''}
+          <div><span>Sales Navigator</span>${liIdOf(a) ? `<a href="${esc(snCompanyUrl(liIdOf(a)))}" target="_blank" rel="noopener">Account</a> · <a href="${esc(snPeopleAt(liIdOf(a), a.name))}" target="_blank" rel="noopener">People here</a> <span class="small muted">ID ${esc(liIdOf(a))}</span> ` : ''}<button type="button" class="link-btn small" data-act="li-id" data-id="${a.id}">${liIdOf(a) ? 'Change' : 'Add LinkedIn ID'}</button>
+              ${liTwins(a).length ? `<div class="small warn-text">Same LinkedIn page as ${liTwins(a).map((x) => `<a href="#account/${x.id}">${esc(x.name)}</a>`).join(', ')}. One business or separate accounts? Check the legal name and EIN.</div>` : ''}</div>
           ${a.type === 'partner' ? (() => {
             const ref = lastReferralDate(a);
             const stale = ref && daysBetween(ref, today()) > 182;
@@ -3322,7 +3325,7 @@
           <div class="facts">
             <div><span>Industry</span>${esc(a.industry) || '—'}</div>
             <div><span>Website</span>${a.website ? `<a href="${esc(extUrl(a.website))}" target="_blank" rel="noopener">${esc(a.website)}</a>` : '—'}</div>
-            <div><span>Company LinkedIn</span>${a.linkedin ? `<a href="${esc(extUrl(a.linkedin))}" target="_blank" rel="noopener">Open profile</a>` : '—'}</div>
+            <div><span>Company LinkedIn</span>${a.linkedin ? `<a href="${esc(extUrl(a.linkedin))}" target="_blank" rel="noopener">Open page</a>` : '—'}</div>
             <div><span>Lead source</span>${esc(a.leadSource) || '—'}</div>
             <div><span>Added</span>${fmtDate((a.createdAt || '').slice(0, 10) || null)}</div>
           </div>
@@ -3792,10 +3795,10 @@
 
   function accountsCsv(title, accounts) {
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Account', 'Website', 'Company LinkedIn', 'Type', 'Stage', 'Industry', 'Employees', 'Street address', 'Location', 'Main phone', 'Value', 'Admin fees', 'Expected close', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Lead source', 'Channel partner', 'Channel contact', 'Tags', 'Stay in touch', 'Partner type', 'Last touch', 'Last referral']];
+    const rows = [['Account', 'Website', 'Company LinkedIn', 'LinkedIn company ID', 'Sales Navigator', 'Type', 'Stage', 'Industry', 'Employees', 'Street address', 'Location', 'Main phone', 'Value', 'Admin fees', 'Expected close', 'Current vendors', 'Vendor renewal', 'Primary contact', 'Title', 'Email', 'Phone', 'Contact LinkedIn', 'Other contacts', 'Next follow-up', 'Next revisit', 'Revisit purpose', 'Lead source', 'Channel partner', 'Channel contact', 'Tags', 'Stay in touch', 'Partner type', 'Last touch', 'Last referral']];
     for (const a of accounts) {
       const p = primaryContact(a) || {};
-      rows.push([a.name, a.website, a.linkedin, a.type, a.stage, a.industry, a.employees, a.address, a.location, a.mainPhone, a.value, a.adminFees, a.closeDate, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
+      rows.push([a.name, a.website, a.linkedin, liIdOf(a), liIdOf(a) ? snCompanyUrl(liIdOf(a)) : '', a.type, a.stage, a.industry, a.employees, a.address, a.location, a.mainPhone, a.value, a.adminFees, a.closeDate, a.vendors.join('; '), a.vendorRenewal, p.name, p.title, p.email, p.phone, p.linkedin,
         a.contacts.filter((x) => x.id !== p.id).map((x) => x.name).join('; '), a.nextFollowUp, a.revisitDate, a.revisitNote, a.leadSource,
         (getAccount(a.channelPartnerId) || {}).name || '',
         ((getAccount(a.channelPartnerId) || { contacts: [] }).contacts.find((c) => c.id === a.channelContactId) || {}).name || '', a.tags,
@@ -5007,7 +5010,7 @@
     return {
       call: phones.length ? phones.map(([n, l], i) => `<a class="btn ${i ? 'ghost' : ''} call-btn" href="tel:${esc(n)}">☎ ${esc(l)} · ${esc(n)}</a>`).join(' ') : '<span class="small muted">No phone on file. Add one on the contact.</span>',
       email: contact.email ? `<a class="btn" href="mailto:${esc(contact.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}">✉ Open in Mail</a>` : '<span class="small muted">No email on file for this contact.</span>',
-      linkedin: `<a class="btn" href="${esc(liUrl)}" target="_blank" rel="noopener">in Open LinkedIn</a>`,
+      linkedin: `<a class="btn" href="${esc(liUrl)}" target="_blank" rel="noopener">in Open LinkedIn</a>${contact.salesNav ? ` <a class="btn ghost" href="${esc(extUrl(contact.salesNav))}" target="_blank" rel="noopener">Sales Navigator lead</a>` : ''}`,
       visit: `<a class="btn" href="https://maps.apple.com/?q=${encodeURIComponent([acct.name, acct.address, acct.location].filter(Boolean).join(' '))}" target="_blank" rel="noopener">⌂ Directions</a>`,
       text: contact.mobile ? `<a class="btn" href="sms:${esc(contact.mobile)}&body=${encodeURIComponent(body)}">✆ Text ${esc(contact.mobile)}</a>` : '<span class="small muted">No mobile number on file.</span>',
       task: '',
@@ -5236,18 +5239,88 @@
   const SVG_LI = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10.5V17M8 7.2v.1M11.5 17v-6.5M11.5 13.2a2.6 2.6 0 0 1 5 1V17"/></svg>';
   const SVG_FIND = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg>';
 
-  /** Small icon links: website and LinkedIn. A missing LinkedIn shows a faded "find on LinkedIn" icon. */
-  function linkIcons({ website, linkedin, findLinkedIn }) {
+  const SVG_SN = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15.6 8.4l-2.1 5.1-5.1 2.1 2.1-5.1z"/></svg>';
+
+  // ----- LinkedIn company ID and Sales Navigator -----
+  // The numeric company ID (usually 6–9 digits) is the fixed key for a LinkedIn page: the public URL
+  // (/company/ahlem) can change, the ID doesn't. It's in Sales Navigator links (/sales/company/16256299),
+  // numeric page links (/company/16256299) and the company page's "See jobs" link (f_C=16256299).
+  /** The LinkedIn company ID in a pasted link or number, or ''. */
+  function liCompanyId(text) {
+    const t = String(text || '').trim();
+    if (/^\d{4,12}$/.test(t)) return t;
+    const m = t.match(/\/sales\/company\/(\d{4,12})(?!\d)/i) || t.match(/linkedin\.com\/company\/(\d{4,12})(?=[/?#]|$)/i)
+      || t.match(/[?&]f_C=(\d{4,12})(?!\d)/i) || t.match(/urn(?::|%3A)li(?::|%3A)(?:fs_salesCompany|organization|company)(?::|%3A)(\d{4,12})(?!\d)/i);
+    return m ? m[1] : '';
+  }
+  /** A public company page link with a name in it (linkedin.com/company/ahlem), the one to share. */
+  const isPublicCompanyUrl = (t) => /linkedin\.com\/company\/(?!\d+(?:[/?#]|$))[^/?#\s]+/i.test(String(t || ''));
+  /** The account's LinkedIn ID: saved, or read from a numeric / Sales Navigator company link. */
+  const liIdOf = (a) => a.liId || liCompanyId(a.linkedin);
+  const snCompanyUrl = (id) => `https://www.linkedin.com/sales/company/${id}`;
+  const snCompanySearch = (name) => `https://www.linkedin.com/sales/search/company?keywords=${encodeURIComponent(name)}`;
+  const snPeopleSearch = (q) => `https://www.linkedin.com/sales/search/people?keywords=${encodeURIComponent(q)}`;
+  /** Sales Navigator lead search for people now at the company. LinkedIn doesn't document this link,
+   *  so it may stop working; the account page's employee list is the fallback. */
+  const snPeopleAt = (id, name) => `https://www.linkedin.com/sales/search/people?query=${encodeURIComponent(
+    `(filters:List((type:CURRENT_COMPANY,values:List((id:${encodeURIComponent(`urn:li:organization:${id}`)},text:${encodeURIComponent(name || '')},selectionType:INCLUDED)))))`)}`;
+  /** Other accounts on the same LinkedIn page (same ID). */
+  const liTwins = (a) => { const id = liIdOf(a); return id ? state.accounts.filter((x) => x !== a && liIdOf(x) === id) : []; };
+
+  /** Small icon links: website, LinkedIn and Sales Navigator. Missing ones show faded "find" icons. */
+  function linkIcons({ website, linkedin, findLinkedIn, salesNav, findSalesNav }) {
     return `<span class="ext-links">
       ${website ? `<a class="ext-ic web" href="${esc(extUrl(website))}" target="_blank" rel="noopener" title="Website: ${esc(website)}" aria-label="Website">${SVG_WEB}</a>` : ''}
       ${linkedin ? `<a class="ext-ic li" href="${esc(extUrl(linkedin))}" target="_blank" rel="noopener" title="LinkedIn profile" aria-label="LinkedIn">${SVG_LI}</a>`
         : findLinkedIn ? `<a class="ext-ic li missing" href="${esc(findLinkedIn)}" target="_blank" rel="noopener" title="Find on LinkedIn" aria-label="Find on LinkedIn">${SVG_LI}</a>` : ''}
+      ${salesNav ? `<a class="ext-ic sn" href="${esc(salesNav)}" target="_blank" rel="noopener" title="Open in Sales Navigator" aria-label="Sales Navigator">${SVG_SN}</a>`
+        : findSalesNav ? `<a class="ext-ic sn missing" href="${esc(findSalesNav)}" target="_blank" rel="noopener" title="Find in Sales Navigator (no LinkedIn ID saved yet)" aria-label="Find in Sales Navigator">${SVG_SN}</a>` : ''}
     </span>`;
   }
   const liPeopleSearch = (name, company) => `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${name} ${company || ''}`.trim())}`;
   const liCompanySearch = (company) => `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(company)}`;
-  const accountLinks = (a) => linkIcons({ website: a.website, linkedin: a.linkedin, findLinkedIn: liCompanySearch(a.name) });
-  const contactLinkIcons = (c, a) => linkIcons({ linkedin: c.linkedin, findLinkedIn: liPeopleSearch(c.name, a && a.name) });
+  const accountLinks = (a) => linkIcons({ website: a.website, linkedin: a.linkedin, findLinkedIn: liCompanySearch(a.name),
+    salesNav: liIdOf(a) ? snCompanyUrl(liIdOf(a)) : '', findSalesNav: snCompanySearch(a.name) });
+  const contactLinkIcons = (c, a) => linkIcons({ linkedin: c.linkedin, findLinkedIn: liPeopleSearch(c.name, a && a.name), salesNav: c.salesNav ? extUrl(c.salesNav) : '' });
+
+  /** Add or change an account's LinkedIn ID: paste a Sales Navigator, "See jobs" or numeric link, or the number. */
+  function liIdForm(a) {
+    const pubOrSearch = isPublicCompanyUrl(a.linkedin) ? extUrl(a.linkedin) : liCompanySearch(a.name);
+    openModal(`LinkedIn ID · ${a.name}`, `
+      <p class="small muted" style="margin:0">Paste any of these and the number is kept: a Sales Navigator account link, the company page's <b>See jobs</b> link (right-click or long-press See jobs → Copy link), a numeric page link (linkedin.com/company/16256299), or just the number.</p>
+      ${field('Link or ID', `<input name="li" id="li-in" value="${esc(liIdOf(a) || '')}" placeholder="linkedin.com/sales/company/16256299" autocapitalize="off" autocomplete="off">`)}
+      <div class="small" id="li-read"></div>
+      ${field('Public LinkedIn page (the link to share)', `<input name="pub" id="li-pub" value="${esc(isPublicCompanyUrl(a.linkedin) ? a.linkedin : '')}" placeholder="linkedin.com/company/…" autocapitalize="off">`)}
+      <div class="small li-get"><b>Get the ID:</b>
+        <a href="${esc(pubOrSearch)}" target="_blank" rel="noopener" data-web>${isPublicCompanyUrl(a.linkedin) ? 'Open the LinkedIn page' : 'Find the company on LinkedIn'}</a> and copy its See jobs link,
+        or <a href="${esc(snCompanySearch(a.name))}" target="_blank" rel="noopener">find it in Sales Navigator</a> and copy the account's link.
+        If there's no See jobs, use <i>View in Sales Navigator</i> on the company page. Match the website and location before you paste.</div>`, (data) => {
+      const raw = (data.li || '').trim();
+      const id = liCompanyId(raw);
+      if (raw && !id) { toast(isPublicCompanyUrl(raw) ? 'That\'s the public page link: it has no ID. Open it and copy the See jobs link.' : 'No LinkedIn ID found in that link'); return false; }
+      const pub = (data.pub || '').trim();
+      a.liId = id;
+      if (pub) a.linkedin = pub;
+      else if (id && !a.linkedin) a.linkedin = `linkedin.com/company/${id}`;
+      touch(a);
+      const twins = liTwins(a);
+      toast(id ? (twins.length ? `Saved. Same LinkedIn page as ${twins.map((x) => x.name).join(', ')}: one business or separate accounts?` : `LinkedIn ID ${id} saved`) : 'LinkedIn ID removed');
+    }, 'Save');
+    const read = () => {
+      const v = $('#li-in').value.trim();
+      const id = liCompanyId(v);
+      if (!v) { $('#li-read').innerHTML = ''; return; }
+      if (id) { $('#li-read').innerHTML = `<span class="ok-text">✓ ID ${esc(id)}</span> · <a href="${esc(snCompanyUrl(id))}" target="_blank" rel="noopener">check it in Sales Navigator</a>`; return; }
+      if (isPublicCompanyUrl(v)) {
+        if (!$('#li-pub').value.trim()) $('#li-pub').value = v;
+        $('#li-read').innerHTML = '<span class="warn-text">That\'s the public page link (moved below). It has no ID: open it and copy the See jobs link.</span>';
+        return;
+      }
+      $('#li-read').innerHTML = '<span class="warn-text">No ID in that yet.</span>';
+    };
+    $('#li-in').addEventListener('input', read);
+    read();
+  }
 
   // ----- LinkedIn links: the LinkedIn app on iPhone / iPad, a new browser tab on a computer -----
   // Profile (/in/…) and company (/company/…) links try the app first. If it doesn't open within a
@@ -5265,7 +5338,7 @@
   }
   document.addEventListener('click', (e) => {
     const link = e.target.closest && e.target.closest('a[href*="linkedin.com/"]');
-    if (!link || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || !onIOS()) return;
+    if (!link || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || !onIOS() || link.hasAttribute('data-web')) return;
     const app = linkedinAppUrl(link.href);
     let pref = '';
     try { pref = localStorage.getItem(LI_APP_KEY) || ''; } catch (err) { /* no storage: just try the app */ }
@@ -5294,13 +5367,15 @@
    */
   function researchMenu(a, c) {
     const q = c ? `${c.name} ${a.name}` : a.name;
+    const id = liIdOf(a);
     const items = c ? [
       ['LinkedIn', liPeopleSearch(c.name, a.name), 'Search people on LinkedIn'],
-      ['Sales Navigator', `https://www.linkedin.com/sales/search/people?keywords=${encodeURIComponent(q)}`, 'Search leads in Sales Navigator'],
+      c.salesNav ? ['Sales Navigator lead', extUrl(c.salesNav), 'Open this lead in Sales Navigator'] : ['Sales Navigator', snPeopleSearch(q), 'Search leads in Sales Navigator'],
       ['ZoomInfo', 'https://app.zoominfo.com/#/apps/search/v2', 'Open ZoomInfo search (name copied — paste it in)'],
     ] : [
       ['LinkedIn', liCompanySearch(a.name), 'Search companies on LinkedIn'],
-      ['Sales Navigator', `https://www.linkedin.com/sales/search/company?keywords=${encodeURIComponent(a.name)}`, 'Search accounts in Sales Navigator'],
+      ...(id ? [['Sales Navigator account', snCompanyUrl(id), 'Open the account in Sales Navigator'], ['Sales Navigator: people here', snPeopleAt(id, a.name), 'Leads now at this company']]
+        : [['Sales Navigator', snCompanySearch(a.name), 'Search accounts in Sales Navigator']]),
       ['ZoomInfo', 'https://app.zoominfo.com/#/apps/search/v2', 'Open ZoomInfo search (name copied — paste it in)'],
       ['ZoomInfo profile', `https://www.google.com/search?q=${encodeURIComponent(`site:zoominfo.com/c ${a.name}`)}`, "Find the company's public ZoomInfo profile"],
       ['Google', `https://www.google.com/search?q=${encodeURIComponent([a.name, a.location].filter(Boolean).join(' '))}`, 'Search the web'],
@@ -5357,6 +5432,8 @@
     zip: ['companyzipcode', 'zipcode', 'zip', 'postalcode', 'companypostalcode'],
     companyPhone: ['companyphone', 'companyphonenumber', 'companymainphone', 'mainphone', 'hqphone', 'officephone', 'companyhqphone'],
     companyLinkedin: ['companylinkedinurl', 'linkedincompanyurl', 'companylinkedin', 'linkedincompanyprofileurl'],
+    liId: ['linkedincompanyid', 'linkedinid', 'linkedincompanyidnumber', 'salesnavigatorcompanyurl', 'salesnavigatoraccounturl', 'salesnavigatorurl', 'salesnavigatorlink', 'salesnavurl', 'salesnavigator'],
+    salesNav: ['salesnavigatorlead', 'salesnavigatorleadurl', 'salesnavleadurl', 'salesnavigatorprofileurl', 'salesnavlead'],
     first: ['firstname', 'first'],
     last: ['lastname', 'last'],
     name: ['fullname', 'name', 'contactname', 'contact', 'primarycontact'],
@@ -5417,8 +5494,8 @@
         employees: emp ? emp[0].replace(/,/g, '') : '',
         location: get(r, 'location') || [get(r, 'city'), [get(r, 'state'), get(r, 'zip')].filter(Boolean).join(' ')].filter(Boolean).join(', '),
         address: get(r, 'address'), mainPhone: get(r, 'companyPhone'),
-        companyLinkedin: get(r, 'companyLinkedin'),
-        contact: name ? { name, title: get(r, 'title'), email: get(r, 'email'), phone: get(r, 'phone'), mobile: get(r, 'mobile'), linkedin: get(r, 'linkedin'), ...(parseStay(get(r, 'stayInTouch')) ? { stayInTouch: parseStay(get(r, 'stayInTouch')), sitSince: today() } : {}) } : null,
+        companyLinkedin: get(r, 'companyLinkedin'), liId: liCompanyId(get(r, 'liId')) || liCompanyId(get(r, 'companyLinkedin')),
+        contact: name ? { name, title: get(r, 'title'), email: get(r, 'email'), phone: get(r, 'phone'), mobile: get(r, 'mobile'), linkedin: get(r, 'linkedin'), ...(get(r, 'salesNav') ? { salesNav: get(r, 'salesNav') } : {}), ...(parseStay(get(r, 'stayInTouch')) ? { stayInTouch: parseStay(get(r, 'stayInTouch')), sitSince: today() } : {}) } : null,
         value: parseMoney(get(r, 'value')), adminFees: parseMoney(get(r, 'adminFees')), vendors: parseVendors(get(r, 'vendors')),
         leadSource: LEAD_SOURCES.find((x) => x.toLowerCase() === get(r, 'leadSource').toLowerCase()) || get(r, 'leadSource'),
         stage: get(r, 'stage'), closeDate: normDate(get(r, 'closeDate')),
@@ -5477,7 +5554,8 @@
   }
   /** An existing account for an imported company: same website domain first, then same name, a normalized name,
    *  a name it also goes by (dba, parentheses), then the same name with extra words like "Insurance Services". */
-  function matchExisting(name, website) {
+  function matchExisting(name, website, liId) {
+    if (liId) { const a = state.accounts.find((x) => liIdOf(x) === liId); if (a) return { a, how: 'LinkedIn ID' }; }
     const dom = domainOf(website);
     if (dom && dom.includes('.')) { const a = state.accounts.find((x) => domainOf(x.website) === dom); if (a) return { a, how: 'website' }; }
     const exact = findAccountByName(name);
@@ -5522,7 +5600,7 @@
       if (commit) a.contacts.push(contact); else a.contacts = [...a.contacts, contact];
       return contact;
     };
-    const findOrCreate = (name, type, stage, source, website = '') => {
+    const findOrCreate = (name, type, stage, source, website = '', liId = '') => {
       const key = name.toLowerCase();
       let a = made.get(key) || made.get('n:' + companyKey(name));
       if (!a) {
@@ -5530,7 +5608,7 @@
         const picked = opts.mergeInto && opts.mergeInto.get(name);
         if (picked && getAccount(picked)) m = { a: getAccount(picked), how: 'picked' };
         else if (opts.dupes === 'create' || (opts.noMerge && opts.noMerge.has(name))) m = findAccountByName(name) ? { a: findAccountByName(name), how: 'name' } : null;
-        else m = matchExisting(name, website);
+        else m = matchExisting(name, website, liId);
         if (m && m.how !== 'name' && m.how !== 'picked' && !stats.fuzzy.has(name)) stats.fuzzy.set(name, { to: m.a.name, how: m.how, id: m.a.id });
         if (m) a = m.a;
       }
@@ -5547,12 +5625,12 @@
     };
     for (const r of records) {
       const stage = stageFromText(opts.type, r.stage) || STAGES[opts.type][0];
-      const { a, created } = findOrCreate(r.company, opts.type, stage, r.leadSource || opts.source, r.website);
+      const { a, created } = findOrCreate(r.company, opts.type, stage, r.leadSource || opts.source, r.website, r.liId);
       if (created) stats.newAccounts++;
       else if (![...made.values()].includes(a)) stats.updatedAccounts.add(a.id); // already in the CRM
       const fill = {
         website: r.website, industry: r.industry, employees: r.employees, location: r.location, address: r.address, mainPhone: r.mainPhone,
-        linkedin: r.companyLinkedin, value: r.value, adminFees: r.adminFees, closeDate: r.closeDate, leadSource: r.leadSource,
+        linkedin: /\/sales\/|f_C=/i.test(r.companyLinkedin || '') ? '' : r.companyLinkedin, liId: r.liId, value: r.value, adminFees: r.adminFees, closeDate: r.closeDate, leadSource: r.leadSource,
         lastTouchDate: r.lastTouchDate,
         ...(a.type === 'partner' ? { partnerType: r.partnerType, lastReferralDate: r.lastReferralDate } : {}),
       };
@@ -5603,7 +5681,7 @@
     const s = preview();
     const found = Object.keys(col).filter((k) => !['first', 'last', 'city', 'state', 'zip'].includes(k))
       .map((k) => ({ company: 'Company', website: 'Website', industry: 'Industry', employees: 'Employees', location: 'Location', companyLinkedin: 'Company LinkedIn',
-        name: 'Name', title: 'Title', email: 'Email', phone: 'Phone', mobile: 'Mobile', linkedin: 'LinkedIn', address: 'Street address', companyPhone: 'Main phone',
+        name: 'Name', title: 'Title', email: 'Email', phone: 'Phone', mobile: 'Mobile', linkedin: 'LinkedIn', address: 'Street address', companyPhone: 'Main phone', liId: 'LinkedIn ID', salesNav: 'Sales Navigator lead',
         value: 'Value', adminFees: 'Admin fees', vendors: 'Current vendors', leadSource: 'Lead source', stage: 'Stage', closeDate: 'Close date',
         channelPartner: 'Channel partner', channelContact: 'Channel contact', stayInTouch: 'Stay in touch', partnerType: 'Partner type', lastTouch: 'Last touch', lastReferral: 'Last referral' })[k]);
     if (col.first !== undefined || col.last !== undefined) found.push('Name');
@@ -7793,6 +7871,7 @@
         ${field('Enrolled employees', `<input name="enrolled" type="number" min="0" value="${esc(a.enrolled)}" placeholder="Defaults to employees">`, 'only-prospect')}
         ${field('Website', `<input name="website" value="${esc(a.website)}" autocapitalize="off" placeholder="company.com">`)}
         ${field('Company LinkedIn', `<input name="linkedin" value="${esc(a.linkedin)}" autocapitalize="off" placeholder="linkedin.com/company/…">`)}
+        ${field('LinkedIn ID <span class="muted">(or a Sales Navigator / See jobs link)</span>', `<input name="liId" value="${esc(liIdOf(a) || '')}" autocapitalize="off" autocomplete="off" placeholder="e.g. 16256299">`)}
         ${field('Street address', `<input name="address" value="${esc(a.address)}" placeholder="e.g. 1200 J St" autocomplete="street-address">`)}
         ${field('City, State ZIP', `<input name="location" value="${esc(a.location)}" placeholder="e.g. Sacramento, CA 95814">`)}
         ${field('Main phone', `<input name="mainPhone" type="tel" value="${esc(a.mainPhone)}" placeholder="e.g. 310-555-0147" autocomplete="tel">`)}
@@ -7842,6 +7921,18 @@
       if (!data.name.trim()) return false;
       const { c_name, c_title, c_email, c_phone, ...fields } = data;
       fields.vendors = JSON.parse(fields.vendors || '[]');
+      // LinkedIn: keep the number as the ID and the public page as the link, whichever box each was pasted in.
+      const liRaw = (fields.liId || '').trim();
+      if (liRaw && !liCompanyId(liRaw)) {
+        if (isPublicCompanyUrl(liRaw) && !fields.linkedin.trim()) fields.linkedin = liRaw;
+        else { toast('No LinkedIn ID in that link. Paste a Sales Navigator or See jobs link, or the number.'); return false; }
+      }
+      fields.liId = liCompanyId(liRaw) || liCompanyId(fields.linkedin);
+      if (fields.linkedin && /\/sales\/|f_C=/i.test(fields.linkedin)) {
+        fields.linkedin = existing && isPublicCompanyUrl(existing.linkedin) ? existing.linkedin : `linkedin.com/company/${fields.liId}`;
+      }
+      const liDup = fields.liId && state.accounts.filter((x) => x !== existing && liIdOf(x) === fields.liId);
+      if (liDup && liDup.length) setTimeout(() => toast(`Same LinkedIn page as ${liDup.map((x) => x.name).join(', ')}. One business or separate accounts?`), 400);
       if (fields.type !== 'partner') { for (const k of ['partnerType', 'lastTouchDate', 'lastReferralDate', 'agreementStatus', 'agreementEnd', 'tier', 'compPlanId', 'owner', 'nationalAgreement']) delete fields[k]; }
       else fields.nationalAgreement = !!data.nationalAgreement;
       // Linking an account to a partner counts as a referral that day.
@@ -7966,6 +8057,7 @@
         ${field('Direct phone', `<input name="phone" type="tel" value="${esc(c.phone)}">`)}
         ${field('Mobile', `<input name="mobile" type="tel" value="${esc(c.mobile)}">`)}
         ${field('LinkedIn URL', `<input name="linkedin" value="${esc(c.linkedin)}" placeholder="linkedin.com/in/…" autocapitalize="off">`)}
+        ${field('Sales Navigator lead', `<input name="salesNav" value="${esc(c.salesNav || '')}" placeholder="linkedin.com/sales/lead/…" autocapitalize="off">`)}
         ${field('Preferred channel', `<select name="channel"><option value="">—</option>${CHANNELS.map((x) => opt(x, x, c.channel)).join('')}</select>`)}
         ${field('Time zone', `<select name="timezone"><option value="">—</option>${TIMEZONES.map((x) => opt(x, x, c.timezone)).join('')}</select>`)}
         ${field('Status', `<select name="status">${CONTACT_STATUSES.map((x) => opt(x, x, c.status || 'Active')).join('')}</select>`)}
@@ -7975,9 +8067,11 @@
       </div>`, (data) => {
       if (!data.name.trim()) return false;
       const fields = {
-        name: data.name, title: data.title, email: data.email, phone: data.phone, mobile: data.mobile, linkedin: data.linkedin,
+        name: data.name, title: data.title, email: data.email, phone: data.phone, mobile: data.mobile, linkedin: data.linkedin, salesNav: (data.salesNav || '').trim(),
         channel: data.channel, timezone: data.timezone, status: data.status, role: data.role, notes: data.notes, primary: !!data.primary,
       };
+      // A Sales Navigator link pasted as the LinkedIn URL goes in its own box.
+      if (/\/sales\//i.test(fields.linkedin || '')) { if (!fields.salesNav) fields.salesNav = fields.linkedin.trim(); fields.linkedin = existing && !/\/sales\//i.test(existing.linkedin || '') ? existing.linkedin : ''; }
       if (existing && data.status !== 'Active' && existing.status !== data.status) {
         // People who left or opted out come out of any running cadence.
         for (const p of enrollmentsFor(existing.id)) finishEnrollment(p.e, 'bad');
@@ -8154,6 +8248,7 @@
       case 'back': return ui.navs > 0 ? history.back() : go('accounts');
       case 'set-view': ui.accountView = el.dataset.mode; savePrefs(); return rerender();
       case 'acct-nearby': return nearbyForm(acct);
+      case 'li-id': return liIdForm(acct);
       case 'map-fix': ui.mapFix = true; return rerender();
       case 'day-recap': return dayRecapForm(el.dataset.date || ui.routeDate || today());
       case 'map-draw': mapState.drawing = { points: [] }; mapState.placing = null; return rerender();

@@ -2150,3 +2150,11 @@ tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 .qk-grid { grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr)); }
 .qk-grid .btn { white-space: normal; min-width: 0; line-height: 1.25; }
 @media (max-width: 900px) { .qk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- Sales Navigator ---------- */
+.ext-ic.sn { color: #0a66c2; }
+.ext-ic.sn.missing { color: var(--muted); opacity: .45; }
+.ext-ic.sn.missing:hover { opacity: 1; color: #0a66c2; }
+.reach-btn.sn { color: #0a66c2; font-size: .68rem; letter-spacing: .02em; }
+.ok-text { color: var(--ok); font-weight: 600; }
+.li-get { background: var(--surface-2); border-radius: 8px; padding: .5rem .65rem; line-height: 1.5; }

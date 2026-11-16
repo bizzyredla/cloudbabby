@@ -240,6 +240,27 @@ No install, no build step: open `index.html` in a browser.
 **Web links, LinkedIn & ZoomInfo**
 - Website and LinkedIn icons on accounts (record, table, cards, board) and contacts (cards,
   cadence people). A faded LinkedIn icon means no profile is saved yet. Tap it to search LinkedIn
+- **LinkedIn company ID** (the fixed key for a LinkedIn page; the public /company/ahlem link can
+  change, the number doesn't): **Add LinkedIn ID** on the account page, or the LinkedIn ID box in
+  the account form, takes a Sales Navigator account link (/sales/company/16256299), the company
+  page's **See jobs** link (f_C=16256299), a numeric page link (/company/16256299) or just the number,
+  and keeps the number. The public page stays as the link you share. Paste a public link where the ID
+  goes and it's moved to the right box with a hint (it has no ID: open it and copy See jobs). "Get the
+  ID" opens the company page (on the web, even on a phone) or a Sales Navigator search
+- **Sales Navigator button** next to the LinkedIn icon on accounts (record, table, cards, board): with
+  an ID it opens the account in Sales Navigator; without one it's faded and searches Sales Navigator by
+  name. The account page also has **People here**, a Sales Navigator lead search for people now at the
+  company (LinkedIn doesn't document that link, so if it ever stops working, use the account page's
+  employee list). The Look up menu has both
+- **Same LinkedIn page**: two accounts with the same ID are flagged on both account pages (and when
+  you save), with links to each other, as a question: one business or separate accounts (check the
+  legal name and EIN)? Nothing merges on its own. Imports match on the ID first ("LinkedIn ID" in the
+  duplicate list), and read "LinkedIn company ID" / "Sales Navigator URL" columns
+- **Exports** carry the public LinkedIn link, the LinkedIn company ID and the Sales Navigator link, so
+  all three travel to Salesforce together; search finds an account by its ID
+- **Contacts**: a **Sales Navigator lead** link on each contact (a /sales/lead/ link pasted as the
+  LinkedIn URL is moved there). It shows as an **SN** button next to **in**, in the Look up menu and on
+  cadence LinkedIn steps, and is included in contact exports
 - **LinkedIn opens in the app on iPhone / iPad**: a saved profile (linkedin.com/in/…) or company
   page (linkedin.com/company/…) opens in the LinkedIn app. If the app doesn't open within a couple
   of seconds (not installed), the web page opens instead, and this device goes straight to the web
