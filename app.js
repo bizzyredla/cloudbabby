@@ -259,7 +259,7 @@
   }
   applyTheme();
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], colleagues: [], watchlist: [], deleted: {} }; }
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
@@ -284,6 +284,8 @@
     if (!Array.isArray(st.categories)) st.categories = [];
     if (!Array.isArray(st.territories)) st.territories = [];
     if (!Array.isArray(st.routeTemplates)) st.routeTemplates = [];
+    if (!Array.isArray(st.colleagues)) st.colleagues = [];
+    if (!Array.isArray(st.watchlist)) st.watchlist = [];
     if (!st.compPlans.length) st.compPlans = defaultCompPlans().filter((x) => !(st.deleted || {})['cp:' + x.id]);
     // Planner rows used to store only the account name; link each to its account where the name is unique.
     const byName = new Map();
@@ -314,7 +316,7 @@
   let booted = false;
   // Device-only sync bookkeeping: records waiting to upload, and how far we have read the cloud.
   const local = { dirty: new Set(), cursor: 0, user: '', seen: {} };
-  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:']];
+  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:'], ['colleagues', 'col:'], ['watchlist', 'wl:']];
 
   function loadLegacy() {
     try {
@@ -2572,7 +2574,7 @@
   }
 
   // ---------- routing ----------
-  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession, partners: renderPartners };
+  const views = { dashboard: renderDashboard, accounts: renderAccounts, account: renderAccountRecord, planner: renderPlanner, lists: renderLists, cadences: renderCadences, map: renderMap, report: renderReport, research: renderResearch, contacts: renderContacts, session: renderSession, partners: renderPartners, watchlist: renderWatchlist };
   const TAB_FOR = { account: 'accounts', report: 'dashboard', session: 'cadences', lists: 'accounts' };
 
   function route() {
@@ -2612,7 +2614,7 @@
     }
   }
   const rerender = () => route();
-  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', partners: 'Partners', session: 'Session', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude' };
+  const CRUMBS = { dashboard: 'Overview', accounts: 'Accounts', account: 'Account', contacts: 'Contacts', partners: 'Partners', session: 'Session', planner: 'Daily planner', map: 'Map', lists: 'Lists', cadences: 'Cadences', report: 'Weekly report', research: 'Ask Claude', watchlist: 'Watchlist' };
   /** Breadcrumb and sidebar counts. */
   function updateChrome(view) {
     $('#crumb-page').textContent = CRUMBS[view] || 'Overview';
@@ -2627,6 +2629,152 @@
   }
   const go = (hash) => { if (location.hash === '#' + hash) rerender(); else location.hash = hash; };
   window.addEventListener('hashchange', () => { if (!booted) return; ui.navs++; route(); window.scrollTo(0, 0); });
+
+  // ---------- watchlist: what colleagues own that you'd go after if they leave ----------
+  // Its own layer: never in accounts, views, the map, search, counts or the pipeline. Barebones on purpose:
+  // a name, a Salesforce link, whose it is and why you want it. No nudges.
+  const WL_TYPES = ['Partner', 'Account', 'Contact'];
+  const WL_STATUSES = ['Watching', 'Window Open', 'Claimed', 'Reassigned', 'Dropped'];
+  const colleagueById = (id) => state.colleagues.find((c) => c.id === id);
+  /** Mark a colleague Active or Departed. Departed opens the window on everything you were watching of theirs. */
+  function setColleagueStatus(c, status) {
+    if (c.status === status) return 0;
+    c.status = status;
+    let n = 0;
+    if (status === 'Departed') {
+      c.departed_at = today();
+      for (const it of state.watchlist) if (it.colleague_id === c.id && it.status === 'Watching') { it.status = 'Window Open'; it.window_opened_at = today(); n++; }
+    } else c.departed_at = '';
+    return n;
+  }
+  const wlOpenedOn = (it) => it.window_opened_at || (colleagueById(it.colleague_id) || {}).departed_at || (it.created_at || '').slice(0, 10) || today();
+  function renderWatchlist() {
+    const cols = state.colleagues.slice().sort((x, y) => x.name.localeCompare(y.name));
+    const pick = ui.wlCol && colleagueById(ui.wlCol) && colleagueById(ui.wlCol).status !== 'Departed' ? ui.wlCol : (cols.find((c) => c.status !== 'Departed') ? '' : '__new');
+    const row = (it) => {
+      const days = it.status === 'Window Open' ? daysBetween(wlOpenedOn(it), today()) : null;
+      return `<div class="wl-item">
+        <span class="pill wl-type wl-${esc(it.type.toLowerCase())}">${esc(it.type)}</span>
+        <div class="grow">
+          <div>${it.salesforce_url ? `<a href="${esc(extUrl(it.salesforce_url))}" target="_blank" rel="noopener" title="Open in Salesforce"><strong>${esc(it.name)}</strong> <span class="small">↗</span></a>` : `<strong>${esc(it.name)}</strong>`}
+            ${days !== null ? `<span class="wl-days">Window open · ${days ? plural(days, 'day') : 'since today'}</span>` : ''}</div>
+          ${it.why_i_want_it ? `<div class="small muted">${esc(it.why_i_want_it)}</div>` : ''}
+        </div>
+        <select class="wl-status" data-wid="${it.id}" aria-label="Status for ${esc(it.name)}">${WL_STATUSES.map((x) => opt(x, x, it.status)).join('')}</select>
+        <button type="button" class="icon-btn" data-act="wl-edit" data-wid="${it.id}" title="Edit ${esc(it.name)}" aria-label="Edit ${esc(it.name)}">✎</button>
+      </div>`;
+    };
+    const group = (cid, its) => {
+      const c = colleagueById(cid) || { name: 'No colleague', status: 'Active' };
+      its.sort((x, y) => (x.type === 'Partner' ? 0 : 1) - (y.type === 'Partner' ? 0 : 1) || x.name.localeCompare(y.name));
+      return `<div class="wl-group">
+        <div class="wlc-head"><b>${esc(c.name)}</b> ${c.status === 'Departed' ? `<span class="pill late">Departed${c.departed_at ? ` ${esc(fmtDate(c.departed_at, { month: 'short', day: 'numeric' }))}` : ''}</span>` : '<span class="pill">Active</span>'}
+          ${c.id ? `<button type="button" class="link-btn small" data-act="wl-col-status" data-col="${c.id}">${c.status === 'Departed' ? 'Mark active again' : 'Mark departed'}</button>` : ''}</div>
+        ${its.map(row).join('')}
+      </div>`;
+    };
+    const section = (status, title, note) => {
+      const its = state.watchlist.filter((x) => x.status === status);
+      if (!its.length) return '';
+      const by = new Map();
+      for (const it of its) { if (!by.has(it.colleague_id)) by.set(it.colleague_id, []); by.get(it.colleague_id).push(it); }
+      const order = [...by.keys()].sort(status === 'Window Open'
+        ? (x, y) => by.get(x).map(wlOpenedOn).sort()[0].localeCompare(by.get(y).map(wlOpenedOn).sort()[0]) // longest-open first
+        : (x, y) => ((colleagueById(x) || {}).name || '~').localeCompare((colleagueById(y) || {}).name || '~'));
+      return `<section class="card wl-section ${status === 'Window Open' ? 'open' : ''}">
+        <div class="row spread"><h2>${title} <span class="muted small">(${its.length})</span></h2><span class="small muted">${note}</span></div>
+        ${order.map((cid) => group(cid, by.get(cid))).join('')}
+      </section>`;
+    };
+    const closed = state.watchlist.filter((x) => !['Watching', 'Window Open'].includes(x.status));
+    $('#view').innerHTML = `
+      <div class="page-head">
+        <div>
+          <h1>Watchlist</h1>
+          <div class="muted small">Accounts, partners and contacts a colleague owns that you'd go after if they leave. Kept apart: not in your accounts, views, map or search.</div>
+        </div>
+      </div>
+      <form class="card wl-add" id="wl-add" autocomplete="off">
+        <input name="name" id="wl-name" placeholder="Company, partner or contact" aria-label="Name" required>
+        <select name="type" aria-label="Type">${WL_TYPES.map((x) => opt(x, x, ui.wlType || 'Account')).join('')}</select>
+        <select name="colleague" id="wl-colleague" aria-label="Colleague">
+          <option value="" ${pick === '' && !ui.wlCol ? 'selected' : ''} disabled>Whose is it?</option>
+          ${cols.filter((c) => c.status !== 'Departed').map((c) => opt(c.id, c.name, pick)).join('')}
+          ${opt('__new', '+ New colleague…', pick)}
+        </select>
+        <input name="newColleague" id="wl-new-col" placeholder="Colleague's name" aria-label="New colleague's name" ${pick === '__new' ? '' : 'hidden'}>
+        <input name="url" placeholder="Salesforce link" aria-label="Salesforce link" inputmode="url" autocapitalize="off">
+        <input name="why" placeholder="Why I want it (one line)" aria-label="Why I want it">
+        <button type="submit" class="btn">Add</button>
+      </form>
+      ${state.watchlist.length ? '' : '<div class="card"><div class="empty">Nothing on your watchlist yet. Add one above when you back off an account because a colleague owns it: the name, whose it is, the Salesforce link and why you want it.</div></div>'}
+      ${section('Window Open', 'Window open', 'Their owner left: the window to start working them is now')}
+      ${section('Watching', 'Watching', 'Owned by a colleague: hands off for now')}
+      ${closed.length ? `<details class="card wl-section"><summary><b>Claimed, reassigned or dropped</b> <span class="muted small">(${closed.length})</span></summary>
+        ${closed.slice().sort((x, y) => (y.created_at || '').localeCompare(x.created_at || '')).map(row).join('')}</details>` : ''}
+      ${cols.length ? `<details class="card wl-section"><summary><b>Colleagues</b> <span class="muted small">(${cols.length})</span></summary>
+        ${cols.map((c) => { const n = state.watchlist.filter((x) => x.colleague_id === c.id).length; return `<div class="wl-item">
+          <div class="grow"><strong>${esc(c.name)}</strong> ${c.status === 'Departed' ? '<span class="pill late">Departed</span>' : '<span class="pill">Active</span>'} <span class="small muted">${plural(n, 'item')}</span></div>
+          <button type="button" class="btn sm ghost" data-act="wl-col-status" data-col="${c.id}">${c.status === 'Departed' ? 'Mark active again' : 'Mark departed'}</button>
+          ${n ? '' : `<button type="button" class="icon-btn" data-act="wl-col-del" data-col="${c.id}" title="Remove ${esc(c.name)}" aria-label="Remove ${esc(c.name)}">✕</button>`}
+        </div>`; }).join('')}</details>` : ''}`;
+
+    const form = $('#wl-add');
+    const colSel = $('#wl-colleague');
+    colSel.addEventListener('change', () => { $('#wl-new-col').hidden = colSel.value !== '__new'; if (colSel.value === '__new') $('#wl-new-col').focus(); });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const d = Object.fromEntries(new FormData(form).entries());
+      const name = (d.name || '').trim();
+      if (!name) { $('#wl-name').focus(); return; }
+      let colId = d.colleague;
+      if (colId === '__new' || !colId) {
+        const cn = (d.newColleague || '').trim();
+        if (!cn) { toast('Whose is it? Pick a colleague or type a new name'); (colId === '__new' ? $('#wl-new-col') : colSel).focus(); return; }
+        const same = state.colleagues.find((c) => c.name.trim().toLowerCase() === cn.toLowerCase());
+        if (same) colId = same.id;
+        else { colId = uid(); state.colleagues.push({ id: colId, name: cn, status: 'Active', created_at: new Date().toISOString() }); }
+      }
+      state.watchlist.push({ id: uid(), name, salesforce_url: (d.url || '').trim(), type: WL_TYPES.includes(d.type) ? d.type : 'Account', colleague_id: colId,
+        why_i_want_it: (d.why || '').trim(), status: 'Watching', created_at: new Date().toISOString() });
+      ui.wlCol = colId; ui.wlType = d.type;
+      save();
+      toast(`${name}: watching`);
+      rerender();
+      const nm = $('#wl-name'); if (nm) nm.focus(); // ready for the next one
+    });
+    $$('.wl-status').forEach((sel) => sel.addEventListener('change', () => {
+      const it = state.watchlist.find((x) => x.id === sel.dataset.wid);
+      if (!it) return;
+      it.status = sel.value;
+      if (it.status === 'Window Open' && !it.window_opened_at) it.window_opened_at = today();
+      save(); rerender();
+    }));
+  }
+
+  /** Edit or remove a watchlist item. */
+  function wlItemForm(it) {
+    const cols = state.colleagues.slice().sort((x, y) => x.name.localeCompare(y.name));
+    openModal(`Edit · ${it.name}`, `
+      <div class="grid-2">
+        ${field('Name', `<input name="name" required value="${esc(it.name)}">`)}
+        ${field('Type', `<select name="type">${WL_TYPES.map((x) => opt(x, x, it.type)).join('')}</select>`)}
+        ${field('Colleague', `<select name="colleague_id">${cols.map((c) => opt(c.id, `${c.name}${c.status === 'Departed' ? ' (departed)' : ''}`, it.colleague_id)).join('')}</select>`)}
+        ${field('Status', `<select name="status">${WL_STATUSES.map((x) => opt(x, x, it.status)).join('')}</select>`)}
+        ${field('Salesforce link', `<input name="salesforce_url" value="${esc(it.salesforce_url || '')}" autocapitalize="off">`, 'span-2')}
+        ${field('Why I want it', `<input name="why_i_want_it" value="${esc(it.why_i_want_it || '')}">`, 'span-2')}
+      </div>
+      <button type="button" class="btn sm ghost danger" id="wl-del">Remove from watchlist</button>`, (data) => {
+      if (!data.name.trim()) return false;
+      Object.assign(it, { name: data.name.trim(), type: data.type, colleague_id: data.colleague_id, status: data.status, salesforce_url: data.salesforce_url.trim(), why_i_want_it: data.why_i_want_it.trim() });
+      if (it.status === 'Window Open' && !it.window_opened_at) it.window_opened_at = today();
+    }, 'Save');
+    $('#wl-del').addEventListener('click', () => {
+      if (!confirm(`Remove ${it.name} from your watchlist?`)) return;
+      state.watchlist = state.watchlist.filter((x) => x !== it);
+      modal.close(); save(); rerender();
+    });
+  }
 
   // ---------- dashboard ----------
   /** Remove every record. Tombstones carry the erase to other synced devices. */
@@ -8328,6 +8476,23 @@
       case 'set-view': ui.accountView = el.dataset.mode; savePrefs(); return rerender();
       case 'acct-nearby': return nearbyForm(acct);
       case 'li-id': return liIdForm(acct);
+      case 'wl-edit': { const it = state.watchlist.find((x) => x.id === el.dataset.wid); return it ? wlItemForm(it) : undefined; }
+      case 'wl-col-status': {
+        const c = colleagueById(el.dataset.col);
+        if (!c) return undefined;
+        if (c.status !== 'Departed') {
+          const n = state.watchlist.filter((x) => x.colleague_id === c.id && x.status === 'Watching').length;
+          if (!confirm(`Mark ${c.name} as departed?${n ? ` ${plural(n, 'item')} you're watching move to Window Open.` : ''}`)) return undefined;
+          const moved = setColleagueStatus(c, 'Departed');
+          toast(`${c.name}: departed${moved ? ` · ${plural(moved, 'item')} now Window Open` : ''}`);
+        } else { setColleagueStatus(c, 'Active'); toast(`${c.name}: active again (open windows stay open)`); }
+        save(); return rerender();
+      }
+      case 'wl-col-del': {
+        const c = colleagueById(el.dataset.col);
+        if (c && !state.watchlist.some((x) => x.colleague_id === c.id)) { state.colleagues = state.colleagues.filter((x) => x !== c); save(); }
+        return rerender();
+      }
       case 'book-filter': ui.bookFilter = el.dataset.f; ui.contactLimit = 100; return rerender();
       case 'book-toggle': {
         acct.book = isReserve(acct) ? 'active' : 'reserve'; touch(acct); save();

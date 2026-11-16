@@ -30,3 +30,31 @@ where key like 'a:%' and not deleted and data is not null;
 
 revoke all on public.accounts from anon;
 grant select on public.accounts to authenticated;
+
+-- Watchlist: colleagues and what they own that you'd go after if they leave.
+create or replace view public.colleagues with (security_invoker = true) as
+select
+  substring(key from 5)          as id,
+  data->>'name'                  as name,
+  data->>'status'                as status,
+  data->>'departed_at'           as departed_at,
+  data->>'created_at'            as created_at
+from public.records
+where key like 'col:%' and not deleted and data is not null;
+
+create or replace view public.watchlist_items with (security_invoker = true) as
+select
+  substring(key from 4)          as id,
+  data->>'name'                  as name,
+  data->>'salesforce_url'        as salesforce_url,
+  data->>'type'                  as type,
+  data->>'colleague_id'          as colleague_id,
+  data->>'why_i_want_it'         as why_i_want_it,
+  data->>'status'                as status,
+  data->>'window_opened_at'      as window_opened_at,
+  data->>'created_at'            as created_at
+from public.records
+where key like 'wl:%' and not deleted and data is not null;
+
+revoke all on public.colleagues, public.watchlist_items from anon;
+grant select on public.colleagues, public.watchlist_items to authenticated;

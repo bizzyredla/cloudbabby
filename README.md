@@ -314,6 +314,21 @@ No install, no build step: open `index.html` in a browser.
   imported ones start in Reserve unless you pick Active on the import screen
 - Exports carry a **Book** column, and importing an exported file puts each account back in its book
 
+**Watchlist** (sidebar on a computer; the 👁 icon in the phone's header)
+- Accounts, partners and contacts a colleague owns that you'd go after if they leave. Its own layer:
+  never in your accounts, views, map, search, counts or pipeline
+- **Quick-add** in one row at the top: the name, Account / Contact / Partner, whose it is (pick a
+  colleague, or "+ New colleague…" and type the name right there), the Salesforce link and why you
+  want it, then Add (or Enter). The colleague and type stay picked and the cursor goes back to the name,
+  so several in a row take seconds
+- **Window open** first, then **Watching**, each grouped by colleague, partners above accounts and
+  contacts. Each name opens its Salesforce record
+- **Mark departed** on a colleague flips every Watching item of theirs to Window Open, and those items
+  show "Window open · 5 days", counted from that day. Marking them active again leaves open windows open
+- Status per item: Watching, Window Open, Claimed, Reassigned, Dropped. Claimed, reassigned and dropped
+  ones fold into a list at the bottom; ✎ edits or removes an item. Colleagues are just a name and Active /
+  Departed. No nudges or notifications
+
 **Accounts table and saved views** (Lists now live here; old list links open the matching view)
 - **Columns you pick** (Columns, under the table): type, stage, value, employees, current vendor,
   renewal, last touch, days in stage, next step, follow-up, location, plus primary contact, close,
@@ -593,7 +608,7 @@ On first launch, click **Load sample data** to explore with example accounts.
 - `styles.css`: styles (light/dark mode, responsive)
 - `app.js`: all app logic
 - `supabase-setup.sql`: one-time database setup for cloud sync
-- `supabase-views.sql`: optional read-only views (`accounts`, and more as features add record types) so
+- `supabase-views.sql`: optional read-only views (`accounts`, `colleagues`, `watchlist_items`) so
   the synced data can be browsed as tables in Supabase; the app doesn't need them. Safe to re-run
 - `vendor/supabase`: Supabase client library (MIT license), bundled so nothing loads from a CDN
 - `manifest.webmanifest`, `sw.js`, `icons/`: home-screen install and offline support
