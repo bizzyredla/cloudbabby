@@ -269,7 +269,7 @@ No install, no build step: open `index.html` in a browser.
 - **Look up** menu on every account and contact: LinkedIn, Sales Navigator, ZoomInfo, the
   company's public ZoomInfo profile, and Google. The name is copied to the clipboard as well, so
   you can paste it if a site opens without the search filled in
-- **Import** (Accounts page or Settings): bring in accounts and contacts from an Excel file (.xlsx),
+- **Direct import** (Settings → Direct import; lists go through **Imports** instead): bring in accounts and contacts from an Excel file (.xlsx),
   a ZoomInfo export, or any spreadsheet saved as CSV. Opportunity columns are read too: value,
   admin fees, current vendors, lead source, stage, close date, channel partner and channel contact
   (brokers become partner accounts, linked to the accounts they referred). Columns are recognized automatically (company, website, company
@@ -290,6 +290,72 @@ No install, no build step: open `index.html` in a browser.
 - Accounts: industry, employees, value, website, city/state, lead source, current vendors,
   **vendor renewal date**, follow-up and revisit dates, tags, notes. Forms are grouped into
   compact sections, and secondary details fold away on the account page
+
+**Book: Active and Reserve** (keeps the account list to the ones you're working)
+- Every account is **Active** or **Reserve**. Active is the book you work (targets: **150 active partners**
+  and **300 active prospects**); Reserve is the layer behind it. The labels read Active Partner, Active
+  Prospect or Reserve (partner vs prospect is the account's type, so the two never disagree). It's
+  separate from the partner Tier A/B/C
+- The first time this version opened, every existing account got its closest fit: open deals (S1–S5),
+  live partners (Engaged, Met, Committed, Producing), anything with a follow-up or revisit date, in a
+  cadence or touched in the last 90 days went to Active; Closed Won / Closed Lost / closed partners and
+  quiet accounts went to Reserve. After that an account only moves when you move it
+- **Active by default**: Accounts (table, cards, board), saved views, Partners, Contacts, the Overview
+  counts and the sidebar count, map pins, field-day picks, Near me, the territory board and the cadence
+  "add people" picker. An **Active · Reserve · All** switch on Accounts, Partners and Contacts shows the
+  rest; the map has a **◌ Reserve** layer chip; the cadence picker has "Include Reserve accounts"
+- **Soft counters** beside the switch: "153 / 150 active partners · 287 / 300 active prospects". Over a
+  target the number turns amber; nothing is ever blocked
+- Reserve accounts stay **searchable** (search reaches them from the Active view and marks them with a
+  Reserve pill), open and edit normally, and keep their **follow-ups and revisits**, which still show
+  in the planner when due (and as drop stops when due)
+- Move one from its account page (Book · Move to Active / Reserve), the Book field in the account form,
+  or many at once with **Move to Active / Reserve** in the bulk bar. Hand-added accounts start Active;
+  imported ones start in Reserve unless you pick Active on the import screen
+- Exports carry a **Book** column, and importing an exported file puts each account back in its book
+
+**Watchlist** (sidebar on a computer; the 👁 icon in the phone's header)
+- Accounts, partners and contacts a colleague owns that you'd go after if they leave. Its own layer:
+  never in your accounts, views, map, search, counts or pipeline
+- **Quick-add** in one row at the top: the name, Account / Contact / Partner, whose it is (pick a
+  colleague, or "+ New colleague…" and type the name right there), the Salesforce link and why you
+  want it, then Add (or Enter). The colleague and type stay picked and the cursor goes back to the name,
+  so several in a row take seconds
+- **Window open** first, then **Watching**, each grouped by colleague, partners above accounts and
+  contacts. Each name opens its Salesforce record
+- **Mark departed** on a colleague flips every Watching item of theirs to Window Open, and those items
+  show "Window open · 5 days", counted from that day. Marking them active again leaves open windows open
+- Status per item: Watching, Window Open, Claimed, Reassigned, Dropped. Claimed, reassigned and dropped
+  ones fold into a list at the bottom; ✎ edits or removes an item. Colleagues are just a name and Active /
+  Departed. No nudges or notifications
+
+**Imports** (staging: sidebar on a computer, or Import on the Accounts page)
+- Lists from Salesforce, ZoomInfo, Mployer or anywhere else land here first. **Nothing reaches your
+  accounts or contacts until you approve a row and promote it**
+- **One template.** The header row has to be exactly these columns, in any order and any case:
+  `company_name, contact_first, contact_last, title, email, phone, website, street_address, city,
+  state, zip, employee_count, industry, salesforce_url, notes` (one row per contact). A file that
+  doesn't match is turned away with what's missing or extra. CSV or Excel .xlsx.
+  **Copy formatting instructions** puts a ready prompt (the header plus the rules) on your clipboard:
+  paste it into Claude with the raw export and upload the CSV it gives back. **Download template**
+  and **Copy header row** are there too
+- **Matching on upload**, in this order: website domain, then phone (an account's main line or a
+  contact's phone), then email, all **exact**; then company name + city, **fuzzy** (the name matching
+  knows "dba" names and "Insurance Services" suffixes). Same name in another city isn't a match but
+  shows a hint. Rows repeated in the file, and people already in an earlier list, are flagged
+- **List review** at the top of each list: not in your CRM, yours but untouched for 90+ days, missing a
+  contact or title, an employee count or any website and phone, repeats, already in another list, and
+  clusters by field territory, city and industry. Tap one to see those rows
+- The **review table**: each row's company, person, match (with a link to the account) and status
+  (New, Reviewed, Approved, Rejected), a note, and **Promote**, which only works on Approved rows.
+  Select rows to mark them reviewed, approve or reject them together
+- **Promote** a row: merge it into the account it matched (side by side, choose which fields to bring
+  over; empty ones start ticked; the person is added, or their blank title / email / phone filled), or
+  create a new account (Prospect or Partner, Book defaults to **Reserve**). A second row of a company
+  you just created offers to merge into it. **Promote N approved** does many at once: matches merge
+  (filling only empty fields), the rest become accounts, one per company
+- Promoted accounts keep the **Salesforce link** from the file (it shows on the account page and can be
+  edited in the account form). Deleting a list never touches the accounts promoted from it
 
 **Accounts table and saved views** (Lists now live here; old list links open the matching view)
 - **Columns you pick** (Columns, under the table): type, stage, value, employees, current vendor,
@@ -570,5 +636,8 @@ On first launch, click **Load sample data** to explore with example accounts.
 - `styles.css`: styles (light/dark mode, responsive)
 - `app.js`: all app logic
 - `supabase-setup.sql`: one-time database setup for cloud sync
+- `supabase-views.sql`: optional read-only views (`accounts`, `colleagues`, `watchlist_items`,
+  `import_lists`, `list_items`) so
+  the synced data can be browsed as tables in Supabase; the app doesn't need them. Safe to re-run
 - `vendor/supabase`: Supabase client library (MIT license), bundled so nothing loads from a CDN
 - `manifest.webmanifest`, `sw.js`, `icons/`: home-screen install and offline support
