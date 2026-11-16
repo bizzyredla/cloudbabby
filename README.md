@@ -261,11 +261,19 @@ No install, no build step: open `index.html` in a browser.
 - **Contacts**: a **Sales Navigator lead** link on each contact (a /sales/lead/ link pasted as the
   LinkedIn URL is moved there). It shows as an **SN** button next to **in**, in the Look up menu and on
   cadence LinkedIn steps, and is included in contact exports
-- **LinkedIn opens in the app on iPhone / iPad**: a saved profile (linkedin.com/in/…) or company
-  page (linkedin.com/company/…) opens in the LinkedIn app. If the app doesn't open within a couple
-  of seconds (not installed), the web page opens instead, and this device goes straight to the web
-  for a month. On a computer LinkedIn keeps opening in a new browser tab; searches and Sales
-  Navigator links open on the web everywhere
+- **Links from the Home Screen app (iPhone / iPad)**: the browser inside a Home Screen app doesn't
+  share Safari's sign-ins, so links go where you're already signed in
+  - a saved LinkedIn profile (linkedin.com/in/…) or company page (linkedin.com/company/…) opens the
+    **LinkedIn app**
+  - every other web link (LinkedIn searches, Sales Navigator, ZoomInfo, websites, Google) opens in
+    **Safari** (iOS 17 or later). Apple Maps, phone, text and email links work as before
+  - nothing switches on a timer, so iOS's "Open in LinkedIn?" prompt can take as long as it likes. If
+    the app or Safari hasn't opened after a few seconds, a bar offers **Open in Safari** / **Open
+    here** (LinkedIn) or **Open here** / **Always open here** (Safari)
+  - **Settings → Links** picks the default for each, per device: LinkedIn app, Safari or Inside
+    Bbars OS
+  - in a Safari tab and on a computer, links open in a new tab as usual (Safari hands LinkedIn links
+    to the app by itself)
 - **Look up** menu on every account and contact: LinkedIn, Sales Navigator, ZoomInfo, the
   company's public ZoomInfo profile, and Google. The name is copied to the clipboard as well, so
   you can paste it if a site opens without the search filled in

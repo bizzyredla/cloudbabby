@@ -238,7 +238,7 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, mapSocal: ui.mapSocal, theme: ui.theme })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, mapSocal: ui.mapSocal, theme: ui.theme, linkMode: ui.linkMode, liMode: ui.liMode })); } catch (e) { /* ignore */ }
   };
 
   // ----- appearance: follow the device, or always light / always dark (per device) -----
@@ -6224,12 +6224,23 @@ Give me the CSV file.`;
     read();
   }
 
-  // ----- LinkedIn links: the LinkedIn app on iPhone / iPad, a new browser tab on a computer -----
-  // Profile (/in/…) and company (/company/…) links try the app first. If it doesn't open within a
-  // couple of seconds (not installed), the web page opens instead and the app isn't tried again on
-  // this device for a month. Searches and Sales Navigator links open on the web everywhere.
+  // ----- links on iPhone / iPad when Bbars OS runs from the Home Screen -----
+  // There, a link to another site opens in a small browser inside the app that doesn't share Safari's
+  // sign-ins, so LinkedIn, Sales Navigator and ZoomInfo ask you to log in again. Instead:
+  // - LinkedIn profile and company links open the LinkedIn app (linkedin://in/… or linkedin://company/…)
+  // - every other web link opens in Safari (x-safari-https://…), where you're signed in
+  // Nothing falls back on a timer: if the app or Safari hasn't taken over after a few seconds (iOS
+  // still asking "Open in LinkedIn?", an older iOS, the app not installed), a bar offers the other
+  // ways. Settings → Links sets the default for this device. In a Safari tab and on a computer,
+  // links work as they always have (a new tab; Safari hands LinkedIn links to the app itself).
   const LI_APP_KEY = 'minicrm.liApp';
+  const SAFARI_KEY = 'minicrm.safariOk';
+  const LINK_MODES = { safari: 'Safari', inapp: 'Inside Bbars OS' };
+  const LI_MODES = { app: 'LinkedIn app', safari: 'Safari', inapp: 'Inside Bbars OS' };
   const onIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  const homeScreen = () => onIOS() && (navigator.standalone === true || matchMedia('(display-mode: standalone)').matches);
+  const linkMode = () => (LINK_MODES[ui.linkMode] ? ui.linkMode : 'safari');
+  const liMode = () => (LI_MODES[ui.liMode] ? ui.liMode : 'app');
   /** linkedin://in/jane-doe for a profile, linkedin://company/acme for a company page, else ''. */
   function linkedinAppUrl(href) {
     let u;
@@ -6238,30 +6249,90 @@ Give me the CSV file.`;
     const m = u.pathname.match(/^\/(in|company)\/([^/?#]+)/i);
     return m ? `linkedin://${m[1].toLowerCase()}/${m[2]}` : '';
   }
+  /** The same page, opened in Safari: x-safari-https://… (iOS 17 and later). */
+  const safariUrl = (href) => href.replace(/^http(s?):\/\//i, (m, s) => `x-safari-http${s}://`);
+  /** Where a tap on this web link should go from the Home Screen app: { to, kind } or null for "here". */
+  function linkRoute(href, webOnly) {
+    let u;
+    try { u = new URL(href, location.href); } catch (e) { return null; }
+    if (!/^https?:$/.test(u.protocol) || u.origin === location.origin) return null;
+    if (/(^|\.)maps\.apple\.com$/i.test(u.hostname)) return null; // iOS opens Apple Maps by itself
+    const li = /(^|\.)linkedin\.com$/i.test(u.hostname);
+    const app = li && !webOnly && liMode() === 'app' ? linkedinAppUrl(u.href) : '';
+    if (app) return { to: app, kind: 'li' };
+    if (li ? liMode() === 'inapp' : linkMode() === 'inapp') return null;
+    return { to: safariUrl(u.href), kind: 'safari' };
+  }
+  let linkWait = null;
+  /** Go to the app or Safari; if nothing has taken over after a few seconds, offer the other ways. */
+  function leaveFor(to, web, kind) {
+    const key = kind === 'li' ? LI_APP_KEY : SAFARI_KEY;
+    let worked = false;
+    try { worked = localStorage.getItem(key) === 'yes'; } catch (e) { /* no storage */ }
+    if (linkWait) linkWait.stop();
+    const gone = () => {
+      if (!document.hidden) return;
+      try { localStorage.setItem(key, 'yes'); } catch (e) { /* ignore */ }
+      stop(); linkHelpClose();
+    };
+    const timer = setTimeout(() => { stop(); if (!document.hidden) linkHelp(web, kind); }, worked ? 6000 : 2500);
+    function stop() { clearTimeout(timer); document.removeEventListener('visibilitychange', gone); if (linkWait && linkWait.stop === stop) linkWait = null; }
+    document.addEventListener('visibilitychange', gone);
+    linkWait = { stop };
+    linkHelpClose();
+    location.href = to;
+  }
+  /** Open the page in the browser inside the app (the old way). */
+  function openHere(web) {
+    const w = window.open(web, '_blank'); // ('noopener' would make this null even when it opened)
+    if (w) { try { w.opener = null; } catch (e) { /* ignore */ } } else location.href = web;
+  }
+  function linkHelpClose() { const el = $('#link-help'); if (el) el.remove(); }
+  function linkHelp(web, kind) {
+    linkHelpClose();
+    const el = document.createElement('div');
+    el.id = 'link-help'; el.className = 'link-help'; el.setAttribute('role', 'status');
+    el.innerHTML = kind === 'li'
+      ? `<span>LinkedIn app didn't open?</span>
+         <button type="button" class="btn sm" data-lh="safari">Open in Safari</button>
+         <button type="button" class="btn ghost sm" data-lh="here">Open here</button>
+         <button type="button" class="link-btn" data-lh="x" aria-label="Close">✕</button>`
+      : `<span>Safari didn't open?</span>
+         <button type="button" class="btn sm" data-lh="here">Open here</button>
+         <button type="button" class="btn ghost sm" data-lh="always">Always open here</button>
+         <button type="button" class="link-btn" data-lh="x" aria-label="Close">✕</button>`;
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-lh]');
+      if (!b) return;
+      const act = b.dataset.lh;
+      linkHelpClose();
+      if (act === 'safari') leaveFor(safariUrl(web), web, 'safari');
+      else if (act === 'here') openHere(web);
+      else if (act === 'always') { ui.linkMode = 'inapp'; savePrefs(); toast('Links open inside Bbars OS now. Change it in Settings → Links.'); openHere(web); }
+    });
+    document.body.appendChild(el);
+    clearTimeout(linkHelp.t);
+    linkHelp.t = setTimeout(linkHelpClose, 15000);
+  }
   document.addEventListener('click', (e) => {
-    const link = e.target.closest && e.target.closest('a[href*="linkedin.com/"]');
-    if (!link || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || !onIOS() || link.hasAttribute('data-web')) return;
-    const app = linkedinAppUrl(link.href);
-    let pref = '';
-    try { pref = localStorage.getItem(LI_APP_KEY) || ''; } catch (err) { /* no storage: just try the app */ }
-    if (!app || (pref.startsWith('no:') && Date.now() - Number(pref.slice(3)) < 30 * 864e5)) return; // the web page, as before
+    const link = e.target.closest && e.target.closest('a[href]');
+    if (!link || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || link.hasAttribute('data-inapp') || !homeScreen()) return;
+    const r = linkRoute(link.getAttribute('href'), link.hasAttribute('data-web'));
+    if (!r) return; // inside the app, as before
     e.preventDefault();
-    const web = link.href;
-    let left = false;
-    const opened = () => { left = true; try { localStorage.setItem(LI_APP_KEY, 'yes'); } catch (err) { /* ignore */ } };
-    const onHide = () => { if (document.hidden) opened(); };
-    document.addEventListener('visibilitychange', onHide);
-    window.addEventListener('pagehide', opened, { once: true });
-    // Once the app has opened on this device, wait longer: iOS may be asking "Open in LinkedIn?".
-    setTimeout(() => {
-      document.removeEventListener('visibilitychange', onHide);
-      window.removeEventListener('pagehide', opened);
-      if (left || document.hidden) return;
-      try { localStorage.setItem(LI_APP_KEY, 'no:' + Date.now()); } catch (err) { /* ignore */ }
-      location.href = web;
-    }, pref === 'yes' ? 4000 : 1800);
-    location.href = app;
+    leaveFor(r.to, link.href, r.kind);
   });
+  /** The Settings section: where links go from the Home Screen app on this device. */
+  function linkSettingsHtml() {
+    const seg = (name, modes, cur) => `<div class="seg" role="group" aria-label="${name}">${Object.entries(modes).map(([k, l]) => `<button type="button" class="${cur === k ? 'active' : ''}" data-link-pick="${name}" data-v="${k}" aria-pressed="${cur === k}">${l}</button>`).join('')}</div>`;
+    return `<section class="set-sec">
+        <h3>Links</h3>
+        <p class="small muted" style="margin:0 0 .4rem">For Bbars OS on an iPhone or iPad Home Screen. In a browser tab, links open in a new tab as usual.</p>
+        <div class="set-row"><span class="small">LinkedIn profiles and company pages</span>${seg('li', LI_MODES, liMode())}</div>
+        <div class="set-row"><span class="small">Every other link (Sales Navigator, ZoomInfo, websites)</span>${seg('web', LINK_MODES, linkMode())}</div>
+        <p class="small muted" style="margin:.35rem 0 0">Safari and the LinkedIn app keep you signed in; the browser inside Bbars OS doesn't.${homeScreen() ? '' : ' (This device isn\'t using the Home Screen app right now.)'}</p>
+      </section>`;
+  }
 
   /**
    * "Look up" menu: opens LinkedIn, Sales Navigator or ZoomInfo searching for the account or person.
@@ -9577,6 +9648,7 @@ Give me the CSV file.`;
         <div class="seg theme-seg" role="group" aria-label="Appearance">${Object.entries(THEMES).map(([k, l]) => `<button type="button" class="${(ui.theme || 'system') === k ? 'active' : ''}" data-theme-pick="${k}" aria-pressed="${(ui.theme || 'system') === k}">${l}</button>`).join('')}</div>
         <p class="small muted" style="margin:.35rem 0 0">Saved on this device. "Match device" follows your phone or computer's light / dark setting.</p>
       </section>
+      ${linkSettingsHtml()}
       <section class="set-sec">
         <h3>Cloud sync</h3>
         <div id="sync-live">${syncStatusHtml()}</div>
@@ -9607,6 +9679,11 @@ Give me the CSV file.`;
       savePrefs(); applyTheme();
       $$('[data-theme-pick]', modalForm).forEach((x) => { x.classList.toggle('active', x === b); x.setAttribute('aria-pressed', String(x === b)); });
       if (location.hash.startsWith('#map')) rerender(); // map tiles darken with the theme
+    }));
+    $$('[data-link-pick]', modalForm).forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.linkPick === 'li') ui.liMode = b.dataset.v; else ui.linkMode = b.dataset.v;
+      savePrefs();
+      $$(`[data-link-pick="${b.dataset.linkPick}"]`, modalForm).forEach((x) => { x.classList.toggle('active', x === b); x.setAttribute('aria-pressed', String(x === b)); });
     }));
     $('#set-sync').addEventListener('click', syncSettings);
     $('#set-export').addEventListener('click', exportBackup);
