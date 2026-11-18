@@ -2120,9 +2120,13 @@ tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 .eod-notes { white-space: pre-wrap; max-height: 4.5rem; overflow: hidden; }
 .terr-board .terr-table td, .terr-board .terr-table th { vertical-align: middle; }
 .terr-table .terr-sw { display: inline-block; margin-right: .35rem; vertical-align: -1px; border-style: solid; border-color: transparent; }
+.terr-table .terr-ph, .terr-table .th-short { display: none; }
 .terr-table tr.terr-overdue td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 .terr-table td.cell-bad { color: var(--danger); font-weight: 600; }
-.terr-score { grid-template-columns: repeat(3, 1fr); }
+.terr-score { grid-template-columns: repeat(4, 1fr); }
+.terr-table .terr-count { font-weight: 600; font-variant-numeric: tabular-nums; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.terr-table .terr-count:hover { text-decoration-color: currentColor; }
+.terr-table tfoot td { border-top: 2px solid var(--border); font-weight: 600; background: var(--surface-2); }
 .map-head { flex-wrap: wrap; gap: .5rem; }
 .map-head .near-btn { margin-left: auto; }
 @media (max-width: 900px) {
@@ -2142,6 +2146,18 @@ tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface));
   .map-head .seg button { flex: 1; padding-left: .4rem; padding-right: .4rem; }
   .map-head .near-btn { margin-left: 0; }
   .terr-table .col-opt { display: none; }
+  /* The board fits a phone: the number moves under the name, names wrap, tighter cells. */
+  .terr-board .terr-table { min-width: 0; }
+  .terr-table th, .terr-table td { padding-left: .3rem; padding-right: .3rem; }
+  .terr-table th:first-child, .terr-table td:first-child { display: none; }
+  .terr-table .terr-ph { display: inline; }
+  .terr-table .terr-sw.terr-ph { display: inline-block; }
+  .terr-table tr.terr-overdue td:nth-child(2) { box-shadow: inset 3px 0 0 var(--danger); padding-left: .55rem; }
+  .terr-table th .th-sort { white-space: normal; text-align: inherit; }
+  .terr-table td:last-child .btn { padding: .3rem .5rem; min-height: 0; font-size: .8rem; }
+  .terr-table .th-full { display: none; }
+  .terr-table .th-short { display: inline; }
+  .terr-table td:nth-child(9) .small { display: block; }
   .drop-row { flex-wrap: wrap; }
   .drop-acts { width: 100%; justify-content: flex-start; }
 }

@@ -168,8 +168,9 @@ No install, no build step: open `index.html` in a browser.
   territory that lists its city, else the closest one within 2 miles. The territory shows in the
   pin popup, on the account page, as an Accounts table **Territory** column (sortable) and as a
   saved-view filter ("Field territory is any of"). The territory dropdown filters the map by any
-  of the 124, and the **Territories** chip hides the layer. **Tap a territory** for its
-  scorecard: open accounts, due now, cold 30+ days, renewals in 90 days, last field day, days
+  of the 124, and the **Territories** chip hides the layer. Hovering a territory shows how many
+  accounts and partners are in it. **Tap a territory** for its
+  scorecard: accounts, partners, open accounts, due now, cold 30+ days, renewals in 90 days, last field day, days
   since the last touch, and the top 10 **field day picks** with their reasons, for any day you
   pick; add them all to that day's route or **Choose stops…**
 - **Renewal window** pin colors: red renews within 60 days, orange 61–120, yellow 121–180, blue
@@ -209,10 +210,12 @@ No install, no build step: open `index.html` in a browser.
   **Download CSV**, then tick each one entered; the ticks are kept, and "Hide entered" shows what's
   left
 - **Territories board** (Map → Territories): every territory you have accounts in, most overdue
-  first. Overdue means open accounts and no field day in 30+ days. Columns: open accounts, due,
-  cold 30+, renewals in 90 days, last field day and last touch, all sortable, with a region
-  filter. **Plan** fills the next field day's route with that territory's best stops; tap a name
-  for its scorecard
+  first. Overdue means open accounts and no field day in 30+ days. Columns: **Accounts** and
+  **Partners** in the territory (Active book), open accounts, due, cold 30+, renewals in 90 days,
+  last field day and last touch, all sortable, with a region filter and a **Total** row. Tap a
+  count to see those accounts or partners on the map, zoomed to the territory. **Plan** fills the
+  next field day's route with that territory's best stops; tap a name for its scorecard. On a
+  phone the board fits the screen: the number sits under the name and the headers shorten
 - **On a phone**: the route planner opens with a **Next stop** card (➤ Navigate, ✓ Log drop) above
   the map; route settings and map filters fold away; buttons and quick keys are full-size tap
   targets

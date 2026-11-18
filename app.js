@@ -7647,9 +7647,13 @@ Give me the CSV file.`;
     if (!socalOn() || !socalData || !mapState.map) return;
     // Territories sit in their own pane under the pins, so pins stay clickable.
     if (!mapState.map.getPane('socal')) mapState.map.createPane('socal').style.zIndex = 350;
+    const by = socalMembers();
     for (const t of socalData) {
+      const mem = (by.get(t.n) || []).filter((a) => !isReserve(a));
+      const np = mem.filter((a) => a.type === 'partner').length;
+      const counts = mem.length ? ` · ${plural(mem.length - np, 'account')} · ${plural(np, 'partner')}` : '';
       L.polygon(t.rings, { pane: 'socal', color: t.color, weight: 1.2, fillColor: t.color, fillOpacity: 0.08, interactive: !mapState.drawing && !mapState.placing })
-        .bindTooltip(`#${t.n} ${esc(t.name)} · ${esc(t.region)}`, { sticky: true })
+        .bindTooltip(`#${t.n} ${esc(t.name)} · ${esc(t.region)}${counts}`, { sticky: true })
         .on('click', () => { if (!mapState.drawing && !mapState.placing) socalCard(t); })
         .addTo(layer);
     }
@@ -7665,7 +7669,8 @@ Give me the CSV file.`;
       for (const h of a.activities) if (h.kind === 'Visit' && h.date > lastVisit && h.date <= d) lastVisit = h.date;
       const lt = lastTouchDate(a); if (lt > lastTouch) lastTouch = lt;
     }
-    return { t, members, open, due, cold, renew, lastVisit, lastTouch, sinceVisit: lastVisit ? daysBetween(lastVisit, d) : null, sinceTouch: lastTouch ? daysBetween(lastTouch, d) : null };
+    const partners = members.filter((a) => a.type === 'partner');
+    return { t, members, accts: members.length - partners.length, partners: partners.length, open, due, cold, renew, lastVisit, lastTouch, sinceVisit: lastVisit ? daysBetween(lastVisit, d) : null, sinceTouch: lastTouch ? daysBetween(lastTouch, d) : null };
   }
   /** The day to plan a field day for: the route day on screen if it's not past, else the next workday. */
   const planDay = () => (ui.routeDate && ui.routeDate >= today() ? ui.routeDate : nextWorkday(today()));
@@ -7700,7 +7705,9 @@ Give me the CSV file.`;
       <div class="small muted">${esc(t.region)} · ${esc(t.county)}</div>
       <p class="small" style="margin:.25rem 0">${esc(t.areas)}</p>
       <div class="route-summary terr-score">
-        <div><b>${st.open.length}</b><span>open accounts</span></div>
+        <div><b>${st.accts}</b><span>${st.accts === 1 ? 'account' : 'accounts'}</span></div>
+        <div><b>${st.partners}</b><span>${st.partners === 1 ? 'partner' : 'partners'}</span></div>
+        <div><b>${st.open.length}</b><span>open (not closed)</span></div>
         <div><b>${st.due.length}</b><span>due now</span></div>
         <div><b>${st.cold.length}</b><span>cold 30+ days</span></div>
         <div><b>${st.renew.length}</b><span>renew in 90 days</span></div>
@@ -8602,12 +8609,16 @@ Give me the CSV file.`;
   const TERR_SORTS = {
     overdue: (x, y) => ((y.sinceVisit ?? 1e6) - (x.sinceVisit ?? 1e6)) || (y.due.length - x.due.length) || (y.open.length - x.open.length),
     n: (x, y) => x.t.n - y.t.n,
+    accts: (x, y) => y.accts - x.accts,
+    partners: (x, y) => y.partners - x.partners,
     open: (x, y) => y.open.length - x.open.length,
     due: (x, y) => y.due.length - x.due.length,
     cold: (x, y) => y.cold.length - x.cold.length,
     renew: (x, y) => y.renew.length - x.renew.length,
     touch: (x, y) => (y.sinceTouch ?? 1e6) - (x.sinceTouch ?? 1e6),
   };
+  /** A count on the board: tap it to see those accounts or partners on the map, zoomed to the territory. */
+  const terrCount = (t, type, n) => (n ? `<button type="button" class="link-btn terr-count" data-act="terr-show" data-n="${t.n}" data-type="${type}" title="Show ${plural(n, type === 'partner' ? 'partner' : 'account')} in #${t.n} on the map">${n}</button>` : '<span class="muted">0</span>');
   function renderTerritoryBoard() {
     socalSoon();
     const head = mapHead('territories');
@@ -8640,20 +8651,27 @@ Give me the CSV file.`;
             <label class="row small" style="gap:.3rem"><input type="checkbox" id="tb-empty" style="width:auto" ${showEmpty ? 'checked' : ''}> Show empty</label>
           </div>
         </div>
-        <p class="small muted" style="margin:.35rem 0 .5rem">Overdue = open accounts and no field day in 30+ days. <b>Plan</b> fills ${esc(pd === today() ? 'today' : fmtDate(pd, { weekday: 'short', month: 'short', day: 'numeric' }))}'s route with the territory's best stops. Tap a name for its scorecard.</p>
+        <p class="small muted" style="margin:.35rem 0 .5rem">Overdue = open accounts and no field day in 30+ days. <b>Plan</b> fills ${esc(pd === today() ? 'today' : fmtDate(pd, { weekday: 'short', month: 'short', day: 'numeric' }))}'s route with the territory's best stops. Tap a name for its scorecard, a count to see them on the map. Active book only.</p>
         <div class="table-wrap"><table class="table terr-table">
-          <thead><tr>${th('n', '#')}<th>Territory</th>${th('open', 'Open')}${th('due', 'Due')}${th('cold', 'Cold 30+', 'col-opt')}${th('renew', 'Renew 90d', 'col-opt')}${th('overdue', 'Last field day')}${th('touch', 'Last touch', 'col-opt')}<th></th></tr></thead>
+          <thead><tr>${th('n', '#')}<th>Territory</th>${th('accts', '<span class="th-full">Accounts</span><span class="th-short">Accts</span>')}${th('partners', '<span class="th-full">Partners</span><span class="th-short">Ptnrs</span>')}${th('open', 'Open', 'col-opt')}${th('due', 'Due')}${th('cold', 'Cold 30+', 'col-opt')}${th('renew', 'Renew 90d', 'col-opt')}${th('overdue', '<span class="th-full">Last field day</span><span class="th-short">Last visit</span>')}${th('touch', 'Last touch', 'col-opt')}<th></th></tr></thead>
           <tbody>${all.map((x) => `<tr class="${overdue(x) ? 'terr-overdue' : ''}">
             <td class="num"><span class="terr-sw" style="background:${x.t.color}"></span>${x.t.n}</td>
-            <td><button type="button" class="link-btn" data-act="terr-open" data-n="${x.t.n}"><strong>${esc(x.t.name)}</strong></button><div class="small muted">${esc(x.t.region)}</div></td>
-            <td class="num">${x.open.length}${x.members.length !== x.open.length ? `<span class="small muted">/${x.members.length}</span>` : ''}</td>
+            <td><button type="button" class="link-btn" data-act="terr-open" data-n="${x.t.n}"><span class="terr-sw terr-ph" style="background:${x.t.color}"></span><strong>${esc(x.t.name)}</strong></button><div class="small muted"><span class="terr-ph">#${x.t.n} · </span>${esc(x.t.region)}</div></td>
+            <td class="num">${terrCount(x.t, 'prospect', x.accts)}</td>
+            <td class="num">${terrCount(x.t, 'partner', x.partners)}</td>
+            <td class="num col-opt">${x.open.length || '<span class="muted">0</span>'}</td>
             <td class="num ${x.due.length ? 'cell-warn' : ''}">${x.due.length || '<span class="muted">0</span>'}</td>
             <td class="num col-opt">${x.cold.length || '<span class="muted">0</span>'}</td>
             <td class="num col-opt ${x.renew.length ? 'cell-warn' : ''}">${x.renew.length || '<span class="muted">0</span>'}</td>
             <td class="${overdue(x) ? 'cell-bad' : ''}">${x.lastVisit ? `${esc(fmtDate(x.lastVisit, { month: 'short', day: 'numeric' }))} <span class="small muted">${x.sinceVisit} d</span>` : '<span class="small">never</span>'}</td>
             <td class="small col-opt">${x.sinceTouch === null ? 'never' : `${x.sinceTouch} d ago`}</td>
             <td>${x.open.length ? `<button type="button" class="btn sm ghost" data-act="terr-plan" data-n="${x.t.n}">Plan</button>` : ''}</td>
-          </tr>`).join('') || `<tr><td colspan="9"><div class="empty">${region ? 'No accounts in this region yet.' : 'No mapped accounts in any territory yet. Accounts land in a territory once they\'re on the map.'}</div></td></tr>`}</tbody>
+          </tr>`).join('') || `<tr><td colspan="11"><div class="empty">${region ? 'No accounts in this region yet.' : 'No mapped accounts in any territory yet. Accounts land in a territory once they\'re on the map.'}</div></td></tr>`}</tbody>
+          ${all.length > 1 ? (() => { const sum = (f) => all.reduce((n, x) => n + f(x), 0); return `<tfoot><tr class="terr-total">
+            <td></td><td><strong>Total</strong> <span class="small muted">${plural(all.length, 'territory', 'territories')}</span></td>
+            <td class="num">${sum((x) => x.accts)}</td><td class="num">${sum((x) => x.partners)}</td><td class="num col-opt">${sum((x) => x.open.length)}</td>
+            <td class="num">${sum((x) => x.due.length)}</td><td class="num col-opt">${sum((x) => x.cold.length)}</td><td class="num col-opt">${sum((x) => x.renew.length)}</td>
+            <td></td><td class="col-opt"></td><td></td></tr></tfoot>`; })() : ''}
         </table></div>
         ${outside || unmapped ? `<p class="small muted" style="margin:.5rem 0 0">${[outside ? `${plural(outside, 'mapped account')} outside the 124 territories` : '', unmapped ? `${plural(unmapped, 'account')} not on the map yet` : ''].filter(Boolean).join(' · ')} · <a href="#map">Map</a></p>` : ''}
       </div>`;
@@ -9944,6 +9962,11 @@ Give me the CSV file.`;
         const d = planDay();
         if (t && addFieldDay(t, d)) go(`map/route/${d}`);
         return undefined;
+      }
+      case 'terr-show': {
+        ui.mapFilter = { ...ui.mapFilter, type: el.dataset.type === 'partner' ? 'partner' : 'prospect', terr: `b:${el.dataset.n}`, vendor: 'all', list: '' };
+        mapState.keep = null;
+        return go('map');
       }
       case 'terr-sort': ui.terrSort = el.dataset.key; ui.terrDir = ui.terrSort === el.dataset.prev ? -(ui.terrDir || 1) : 1; return rerender();
       case 'map-near': return nearMeForm();
