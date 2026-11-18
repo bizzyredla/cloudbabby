@@ -37,7 +37,7 @@
     'S1 – Discovery Scheduled': 'S1 Discovery', 'S2 – Qualified Opportunity': 'S2 Qualified', 'S3 – Solution & Quote Development': 'S3 Quote',
     'S4 – Proposal Presented': 'S4 Proposal', 'S5 – Decision / Negotiation': 'S5 Decision', 'Closed Won': 'Won', 'Closed Lost': 'Lost',
   };
-  const stageShort = (st) => STAGE_SHORT[st] || st;
+  const stageShort = (st) => STAGE_SHORT[st] || st || 'No stage';
   // Old stage names (before the S1–S5 / channel stages) and what they become.
   const STAGE_RENAMES = {
     prospect: { New: 'S1 – Discovery Scheduled', Contacted: 'S1 – Discovery Scheduled', Qualified: 'S2 – Qualified Opportunity', Proposal: 'S4 – Proposal Presented', Negotiation: 'S5 – Decision / Negotiation', Won: 'Closed Won', Lost: 'Closed Lost' },
@@ -286,7 +286,7 @@
         : [];
       delete a.contact; delete a.title; delete a.email; delete a.phone;
     }
-    if (a.type && STAGES[a.type] && !STAGES[a.type].includes(a.stage)) {
+    if (a.type && STAGES[a.type] && a.stage !== '' && !STAGES[a.type].includes(a.stage)) {
       a.stage = STAGE_RENAMES[a.type][a.stage] || stageFromText(a.type, a.stage) || STAGES[a.type][0];
     }
     return a;
@@ -2086,7 +2086,7 @@
 
       <div class="row spread"><h3 style="margin:0">Former referrals to resell <span class="muted small">(${former.length + clients.filter((c) => c.kind === 'former').length})</span></h3></div>
       ${former.length || clients.some((c) => c.kind === 'former') ? `<ul class="list">${firstTen('pt-former', [...former.map((x) => `<li>
-          <div class="grow"><a class="title" href="#account/${x.id}">${esc(x.name)}</a><div class="small muted">${esc(x.stage)}${x.value ? ' · ' + money(x.value) : ''}${x.vendors.length ? ' · on ' + esc(x.vendors.join(', ')) : ''}${x.vendorRenewal ? ' · renews ' + esc(fmtDate(x.vendorRenewal)) : ''}</div></div>
+          <div class="grow"><a class="title" href="#account/${x.id}">${esc(x.name)}</a><div class="small muted">${esc(x.stage || 'No stage')}${x.value ? ' · ' + money(x.value) : ''}${x.vendors.length ? ' · on ' + esc(x.vendors.join(', ')) : ''}${x.vendorRenewal ? ' · renews ' + esc(fmtDate(x.vendorRenewal)) : ''}</div></div>
           <button class="btn sm ghost" data-act="resell-task" data-id="${x.id}" data-pid="${a.id}">Plan resell</button>
         </li>`), ...clients.filter((c) => c.kind === 'former').map((c) => clientRow(a, c))]).join('')}</ul>${moreBar('pt-former', former.length + clients.filter((c) => c.kind === 'former').length)}` : '<div class="empty">Deals they referred that went Closed Lost, Nurture or Revisit show here, ready to resell.</div>'}
 
@@ -3020,7 +3020,7 @@
               <div class="pa-row pa-th"><span>Account</span><span>Stage</span><span>Value</span><span>Last touch</span><span>Next step</span><span>Open</span></div>
               ${firstTen('ov-prio', prio).map(({ a, lt, open }) => { const ns = nextStepOf(a); const old = !lt || daysBetween(lt, t) > 14; return `<div class="pa-row">
                 <a class="title nm-cell" href="#account/${a.id}">${logoTile(a, 24)}<span class="ellipsis">${esc(a.name)}</span></a>
-                <span class="small">${esc(a.type === 'partner' ? `${a.stage} partner` : stageShort(a.stage))}</span>
+                <span class="small">${esc(a.type === 'partner' ? (a.stage ? `${a.stage} partner` : 'Partner') : stageShort(a.stage))}</span>
                 <span>${a.value ? money(a.value) : '<span class="muted">—</span>'}</span>
                 <span class="${old ? 'q-late' : ''}">${lt ? esc(relDays(lt)) : 'never'}</span>
                 <span class="small ${!ns || /overdue/.test(ns) ? 'q-late' : ''}">${ns ? esc(ns) : 'No next step'}</span>
@@ -3902,7 +3902,7 @@ Give me the CSV file.`;
     return sortAccounts(state.accounts.filter((a) => {
       if (view && !listHas(view, a)) return false;
       if (ui.typeFilter !== 'all' && a.type !== ui.typeFilter) return false;
-      if (ui.stageFilter !== 'all' && a.stage !== ui.stageFilter) return false;
+      if (ui.stageFilter !== 'all' && (ui.stageFilter === '__none' ? !!a.stage : a.stage !== ui.stageFilter)) return false;
       if (ui.vendorFilter !== 'all' && !a.vendors.includes(ui.vendorFilter)) return false;
       if (ui.partnerTypeFilter && ui.partnerTypeFilter !== 'all' && !(a.type === 'partner' && a.partnerType === ui.partnerTypeFilter)) return false;
       // Searching reaches Reserve too (unless you're looking at Reserve only).
@@ -3993,7 +3993,7 @@ Give me the CSV file.`;
       return `
         <div class="acard" role="link" tabindex="0" data-act="open-account" data-id="${a.id}">
           <div class="row spread" style="flex-wrap:nowrap"><span class="row nm-cell" style="gap:.55rem;flex-wrap:nowrap;min-width:0">${logoTile(a, 36)}<strong class="acard-name">${esc(a.name)}</strong></span>${typePill(a)}</div>
-          <div class="small muted">${esc(a.stage)}${a.type === 'partner' && a.partnerType ? ' · ' + esc(a.partnerType) : ''}${a.value ? ' · ' + money(a.value) : ''}${a.industry ? ' · ' + esc(a.industry) : ''}</div>
+          <div class="small muted">${esc(a.stage || 'No stage')}${a.type === 'partner' && a.partnerType ? ' · ' + esc(a.partnerType) : ''}${a.value ? ' · ' + money(a.value) : ''}${a.industry ? ' · ' + esc(a.industry) : ''}</div>
           ${a.location ? `<div class="small acard-loc">📍 ${esc(a.location)}</div>` : ''}
           ${p ? `<div class="small">${esc(p.name)}${p.title ? ` <span class="muted">· ${esc(p.title)}</span>` : ''}${a.contacts.length > 1 ? ` <span class="muted">+${a.contacts.length - 1}</span>` : ''}</div>` : ''}
           ${a.vendors.length ? `<div class="row">${vendorPills(a)}</div>` : ''}
@@ -4019,12 +4019,12 @@ Give me the CSV file.`;
         <button type="button" class="${type === 'partner' ? 'active' : ''}" data-act="board-type" data-type="partner">Partner pipeline (${list.filter((a) => a.type === 'partner').length})</button>
       </div>`}
       <div class="board">
-        ${(type === 'prospect' ? ['Referred', ...STAGES.prospect.filter((x) => x !== 'Referred')] : STAGES[type]).map((stage) => {
+        ${[...(items.some((a) => !a.stage) ? [''] : []), ...(type === 'prospect' ? ['Referred', ...STAGES.prospect.filter((x) => x !== 'Referred')] : STAGES[type])].map((stage) => {
           const col = sortAccounts(items.filter((a) => a.stage === stage));
           const total = col.reduce((n, a) => n + (Number(a.value) || 0), 0);
           return `
             <section class="kcol" data-stage="${esc(stage)}">
-              <header><strong>${esc(stage)}</strong> <span class="pill">${col.length}</span>${total ? `<div class="small muted">${money(total)}</div>` : ''}</header>
+              <header><strong>${esc(stage || 'No stage')}</strong> <span class="pill">${col.length}</span>${total ? `<div class="small muted">${money(total)}</div>` : ''}</header>
               <div class="kcol-body">
                 ${col.slice(0, BOARD_CAP).map((a) => {
                   const p = primaryContact(a);
@@ -4035,7 +4035,7 @@ Give me the CSV file.`;
                     ${p ? `<div class="small muted">${esc(p.name)}</div>` : ''}
                     ${a.vendors.length ? `<div class="small">${esc(a.vendors.join(', '))}</div>` : ''}
                     <div class="row small" style="margin-top:.3rem">${a.value ? `<span>${money(a.value)}</span>` : ''}${a.closeDate ? `<span class="muted">Close</span> ${dueChip(a.closeDate)}` : a.nextFollowUp ? dueChip(a.nextFollowUp) : ''}</div>
-                    ${touchUI ? `<select class="kcard-stage" data-id="${a.id}" aria-label="Move ${esc(a.name)} to stage">${STAGES[type].map((s2) => opt(s2, s2, a.stage)).join('')}</select>` : ''}
+                    ${touchUI ? `<select class="kcard-stage" data-id="${a.id}" aria-label="Move ${esc(a.name)} to stage">${a.stage ? '' : opt('', 'No stage', '')}${STAGES[type].map((s2) => opt(s2, s2, a.stage)).join('')}</select>` : ''}
                   </div>`;
                 }).join('') || '<div class="kcol-empty">Drop here</div>'}
                 ${col.length > BOARD_CAP ? `<div class="kcol-empty">+${col.length - BOARD_CAP} more · narrow with filters or search</div>` : ''}
@@ -4047,8 +4047,8 @@ Give me the CSV file.`;
 
   /** Record a stage change in the account's history (from the board, edit form or activity log). */
   function logStageChange(a, from, to) {
-    if (!from || !to || from === to) return;
-    a.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Stage changed: ${from} → ${to}`, notes: '', createdAt: new Date().toISOString() });
+    if (!to || from === to) return;
+    a.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Stage changed: ${from || 'No stage'} → ${to}`, notes: '', createdAt: new Date().toISOString() });
     if (a.channelPartnerId) partnerUpdateTask(a, to); // rule 3
     setTimeout(() => afterStageChange(a, to), 80); // once the current dialog has closed
   }
@@ -4094,7 +4094,7 @@ Give me the CSV file.`;
     logStageChange(a, a.stage, stage);
     a.stage = stage;
     touch(a); save(); rerender();
-    toast(`${a.name} moved to ${stage}`);
+    toast(`${a.name} moved to ${stage || 'No stage'}`);
   }
 
   function bindCollection() {
@@ -4186,7 +4186,7 @@ Give me the CSV file.`;
       const live = isLive(a);
       switch (k) {
         case 'type': return `<td>${typePill(a)}</td>`;
-        case 'stage': return `<td><select class="cell-edit" data-inline="stage" data-id="${a.id}" aria-label="Stage for ${esc(a.name)}" title="${esc(STAGE_HINTS[a.stage] || '')}">${lazy ? opt(a.stage, stageShort(a.stage), a.stage) : STAGES[a.type].map((x) => opt(x, stageShort(x), a.stage)).join('')}</select>${a.type === 'partner' && a.partnerType ? `<div class="small muted">${esc(a.partnerType)}</div>` : ''}</td>`;
+        case 'stage': return `<td><select class="cell-edit" data-inline="stage" data-id="${a.id}" aria-label="Stage for ${esc(a.name)}" title="${esc(STAGE_HINTS[a.stage] || '')}">${lazy ? opt(a.stage, a.stage ? stageShort(a.stage) : '—', a.stage) : `${a.stage ? '' : opt('', '—', '')}${STAGES[a.type].map((x) => opt(x, stageShort(x), a.stage)).join('')}`}</select>${a.type === 'partner' && a.partnerType ? `<div class="small muted">${esc(a.partnerType)}</div>` : ''}</td>`;
         case 'value': return `<td class="num"><input class="cell-edit cell-num" data-inline="value" data-id="${a.id}" type="text" inputmode="numeric" value="${a.value ? esc(money(a.value)) : ''}" placeholder="—" aria-label="Value for ${esc(a.name)}"></td>`;
         case 'employees': return `<td class="num">${a.employees ? esc(a.employees) : muted}</td>`;
         case 'vendor': return `<td>${vendorPills(a) || muted}</td>`;
@@ -4476,6 +4476,7 @@ Give me the CSV file.`;
         </select>
         <select id="acct-stage" aria-label="Stage">
           <option value="all">All stages</option>
+          <option value="__none" ${ui.stageFilter === '__none' ? 'selected' : ''}>No stage yet</option>
           ${(ui.typeFilter === 'all' ? ['prospect', 'partner'] : [ui.typeFilter]).map((ty) => `<optgroup label="${ty === 'partner' ? 'Partner (channel) stages' : 'Prospect (deal) stages'}">${STAGES[ty].map((x) => `<option value="${esc(x)}" ${ui.stageFilter === x ? 'selected' : ''} title="${esc(STAGE_HINTS[x] || '')}">${esc(x)}</option>`).join('')}</optgroup>`).join('')}
         </select>
         ${ui.typeFilter !== 'prospect' ? `<select id="acct-ptype" aria-label="Partner type">
@@ -4563,7 +4564,7 @@ Give me the CSV file.`;
       const el = e.currentTarget;
       if (el.options.length > 1) return;
       const a = getAccount(el.dataset.id);
-      if (a) el.innerHTML = STAGES[a.type].map((x) => opt(x, stageShort(x), a.stage)).join('');
+      if (a) el.innerHTML = `${a.stage ? '' : opt('', '—', '')}${STAGES[a.type].map((x) => opt(x, stageShort(x), a.stage)).join('')}`;
     };
     $$('.cell-edit[data-inline=stage]', root).forEach((el) => {
       el.addEventListener('mousedown', fillStages);
@@ -4610,7 +4611,7 @@ Give me the CSV file.`;
       <div class="card stack">
         <div class="detail-head">
           <div>
-            <div class="row"><button type="button" class="logo-btn" data-act="logo-menu" data-id="${a.id}" title="Change the logo" aria-label="Change the logo for ${esc(a.name)}">${logoTile(a, 48)}<span class="logo-edit" aria-hidden="true">✎</span></button><h1 style="margin:0">${esc(a.name)}</h1>${accountLinks(a)}<span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span><span class="pill" title="${esc(STAGE_HINTS[a.stage] || '')}">${esc(a.stage)}</span>${a.type === 'partner' && a.partnerType ? `<span class="pill">${esc(a.partnerType)}</span>` : ''}</div>
+            <div class="row"><button type="button" class="logo-btn" data-act="logo-menu" data-id="${a.id}" title="Change the logo" aria-label="Change the logo for ${esc(a.name)}">${logoTile(a, 48)}<span class="logo-edit" aria-hidden="true">✎</span></button><h1 style="margin:0">${esc(a.name)}</h1>${accountLinks(a)}<span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span><span class="pill" title="${esc(STAGE_HINTS[a.stage] || '')}">${esc(a.stage || 'No stage')}</span>${a.type === 'partner' && a.partnerType ? `<span class="pill">${esc(a.partnerType)}</span>` : ''}</div>
             ${a.tags ? `<div class="row small muted" style="margin-top:.35rem">${tagList(a).map((x) => `<span class="pill">#${esc(x)}</span>`).join('')}</div>` : ''}
           </div>
           <div class="row">
@@ -4714,7 +4715,7 @@ Give me the CSV file.`;
               const pc = x.channelContactId && a.contacts.find((c) => c.id === x.channelContactId);
               return `<li>
                 <div class="grow"><a class="title" href="#account/${x.id}">${esc(x.name)}</a>
-                  <div class="small muted">${esc(x.stage)}${x.value ? ' · ' + money(x.value) : ''}${x.location ? ' · ' + esc(x.location) : ''}${pc ? ' · via ' + esc(pc.name) : ''}</div></div>
+                  <div class="small muted">${esc(x.stage || 'No stage')}${x.value ? ' · ' + money(x.value) : ''}${x.location ? ' · ' + esc(x.location) : ''}${pc ? ' · via ' + esc(pc.name) : ''}</div></div>
                 ${x.closeDate ? `<span class="small muted">Close</span> ${dueChip(x.closeDate)}` : ''}
               </li>`;
             }).join('')}</ul>
@@ -5061,7 +5062,7 @@ Give me the CSV file.`;
     valueMin: Number(fd.get('valueMin')) || 0, valueMax: Number(fd.get('valueMax')) || 0, tiers: fd.getAll('tiers'), terrs: fd.getAll('terrs'),
   });
   /** Today's Accounts filters as view criteria, for "+ Save view". */
-  const criteriaFromFilters = () => ({ ...emptyCriteria(), type: ui.typeFilter || 'all', stages: ui.stageFilter && ui.stageFilter !== 'all' ? [ui.stageFilter] : [],
+  const criteriaFromFilters = () => ({ ...emptyCriteria(), type: ui.typeFilter || 'all', stages: ui.stageFilter && ui.stageFilter !== 'all' ? [ui.stageFilter === '__none' ? '' : ui.stageFilter] : [],
     vendors: ui.vendorFilter && ui.vendorFilter !== 'all' ? [ui.vendorFilter] : [], partnerTypes: ui.partnerTypeFilter && ui.partnerTypeFilter !== 'all' ? [ui.partnerTypeFilter] : [], text: (ui.search || '').trim() });
 
   function listForm(existing, preset) {
@@ -8474,7 +8475,7 @@ Give me the CSV file.`;
     const p = primaryContact(a);
     return `<div class="map-pop">
       <strong>${esc(a.name)}</strong> ${typePill(a)}
-      <div class="small muted">${esc(a.stage)}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</div>
+      <div class="small muted">${esc(a.stage || 'No stage')}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</div>
       ${geoQuery(a) ? `<div class="small">${esc(geoQuery(a))}${a.geo && a.geo.approx ? ' <span class="pill med" title="Pinned to the city, not the street address">approx.</span>' : ''}${a.geo && a.geo.check && !a.geo.manual ? ` <span class="pill med" title="The map found this street in ${esc(a.geo.check)}, not the city on the address">check: found in ${esc(a.geo.check)}</span>` : ''}</div>` : ''}
       ${noDrop(a) ? `<div class="small warn-text">⚠ ${esc(noDrop(a))}: not a drop stop</div>` : ''}
       ${(() => { const t = socalOf(a); return t ? `<div class="small muted">Territory #${t.n} ${esc(t.name)} · ${esc(t.region)}</div>` : ''; })()}
@@ -8570,7 +8571,7 @@ Give me the CSV file.`;
             <div class="side-list">${firstTen('map-near', near).map(({ a, d }) => `
               <div class="side-item">
                 <button type="button" class="link-btn" data-act="map-focus" data-id="${a.id}"><strong>${esc(a.name)}</strong></button>
-                <span class="small muted">${fmtMiles(d)} · ${esc(a.stage)}</span>
+                <span class="small muted">${fmtMiles(d)} · ${esc(a.stage || 'No stage')}</span>
                 <button type="button" class="btn sm ghost" data-act="route-add" data-id="${a.id}">+ Route</button>
               </div>`).join('') || '<div class="empty">No mapped accounts yet.</div>'}</div>${moreBar('map-near', near.length)}` : ''}
           ${missing.length ? `
@@ -10112,13 +10113,13 @@ Give me the CSV file.`;
     [...state.accounts].sort((a, b) => a.name.localeCompare(b.name)).map((a) => opt(a.id, a.name, cur)).join('');
 
   function accountForm(existing, preset = {}) {
-    const a = existing || { type: 'prospect', stage: STAGES.prospect[0], ...preset };
+    const a = existing || { type: 'prospect', stage: '', ...preset };
     openModal(existing ? 'Edit account' : 'New account', `
       <fieldset class="form-sec"><legend>Company</legend><div class="grid-3">
         ${field('Account name *', `<input name="name" required value="${esc(a.name)}">`)}
         ${field('Type', `<select name="type" id="f-type">${opt('prospect', 'Prospect (deal pipeline)', a.type)}${opt('partner', 'Partner (channel / referral)', a.type)}</select>`)}
         ${field('Book', `<select name="book">${opt('active', 'Active (working it)', existing ? bookOf(a) : (a.book || 'active'))}${opt('reserve', 'Reserve (out of the active lists)', existing ? bookOf(a) : (a.book || 'active'))}</select>`)}
-        ${field(`<span id="f-stage-label">${a.type === 'partner' ? 'Channel stage' : 'Deal stage'}</span>`, `<select name="stage" id="f-stage">${STAGES[a.type].map((s) => opt(s, s, a.stage)).join('')}</select><span class="small muted" id="f-stage-hint">${esc(STAGE_HINTS[a.stage] || STAGE_HINTS[STAGES[a.type][0]])}</span>`)}
+        ${field(`<span id="f-stage-label">${a.type === 'partner' ? 'Channel stage' : 'Deal stage'}</span>`, `<select name="stage" id="f-stage"><option value="">— No stage yet —</option>${STAGES[a.type].map((s) => opt(s, s, a.stage)).join('')}</select><span class="small muted" id="f-stage-hint">${esc(STAGE_HINTS[a.stage] || 'Optional: pick one once there\'s an opportunity.')}</span>`)}
         ${field('Industry', `<input name="industry" value="${esc(a.industry)}">`)}
         ${field('Employees', `<input name="employees" type="number" min="0" value="${esc(a.employees)}">`)}
         ${field(a.type === 'partner' ? 'Annual value ($)' : 'Deal value ($)', `<input name="value" type="number" min="0" step="any" value="${esc(a.value)}">`)}
@@ -10214,9 +10215,9 @@ Give me the CSV file.`;
         toast('Account created');
       }
     }, 'Save', { wide: true });
-    const stageHint = () => { $('#f-stage-hint').textContent = STAGE_HINTS[$('#f-stage').value] || ''; };
+    const stageHint = () => { $('#f-stage-hint').textContent = STAGE_HINTS[$('#f-stage').value] || 'Optional: pick one once there\'s an opportunity.'; };
     $('#f-type').addEventListener('change', (e) => {
-      $('#f-stage').innerHTML = STAGES[e.target.value].map((s) => opt(s, s, '')).join('');
+      $('#f-stage').innerHTML = `<option value="">— No stage yet —</option>${STAGES[e.target.value].map((s) => opt(s, s, '')).join('')}`;
       $('#f-stage-label').textContent = e.target.value === 'partner' ? 'Channel stage' : 'Deal stage';
       stageHint();
     });
@@ -10367,7 +10368,7 @@ Give me the CSV file.`;
         ${field('Notes', `<textarea name="notes" rows="5" placeholder="What was discussed, decisions, objections, next steps…">${esc(h.notes)}</textarea>`, 'span-2')}
         ${existing ? '' : `
         ${field('Set next follow-up', `<input name="nextFollowUp" type="date" value="${esc(preset ? acct.nextFollowUp || '' : acct.nextFollowUp && acct.nextFollowUp > today() ? acct.nextFollowUp : addDays(today(), 7))}">`)}
-        ${field('Update stage', `<select name="stage">${STAGES[acct.type].map((s) => opt(s, s, acct.stage)).join('')}</select>`)}
+        ${field('Update stage', `<select name="stage">${acct.stage ? '' : '<option value="">— No stage yet —</option>'}${STAGES[acct.type].map((s) => opt(s, s, acct.stage)).join('')}</select>`)}
         <label class="row span-2 small"><input type="checkbox" name="addTask" style="width:auto"> Also add the follow-up to my daily planner</label>`}
       </div>`, (data) => {
       if (!data.summary.trim()) return false;
@@ -10668,7 +10669,7 @@ Give me the CSV file.`;
       case 'pt-qbr': return copyText(qbrText(acct), 'Partner review summary copied');
       case 'pt-client-edit': { const c = (acct.clients || []).find((x) => x.id === el.dataset.client); return c ? clientEditForm(acct, c) : undefined; }
       case 'pt-open-tab': ui.recordId = id; ui.partnerTab = el.dataset.tab; return go(`account/${id}`);
-      case 'new-partner': return accountForm(null, { type: 'partner', stage: STAGES.partner[0] });
+      case 'new-partner': return accountForm(null, { type: 'partner' });
       case 'log-referral': return referralForm(id);
       case 'pt-view': ui.ptView = el.dataset.v; return rerender();
       case 'pa-all': ui.paAll = !ui.paAll; return rerender();
@@ -11044,7 +11045,7 @@ Give me the CSV file.`;
       const accountsHtml = (accts.length ? `<div class="gs-h">Accounts</div>${accts.map((a) => `
           <a class="gs-item" href="#account/${a.id}" data-close>
             ${logoTile(a, 28)}
-            <span class="grow"><strong>${esc(a.name)}</strong><span class="small muted"> · ${esc(a.stage)}${a.partnerType ? ' · ' + esc(a.partnerType) : ''}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</span></span>${typePill(a)}
+            <span class="grow"><strong>${esc(a.name)}</strong><span class="small muted"> · ${esc(a.stage || 'No stage')}${a.partnerType ? ' · ' + esc(a.partnerType) : ''}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</span></span>${typePill(a)}
           </a>`).join('')}` : '');
       const peopleHtml = (people.length ? `<div class="gs-h">Contacts</div>${people.map(({ a, c }) => `
           <a class="gs-item" href="#account/${a.id}" data-cid="${c.id}" data-close>

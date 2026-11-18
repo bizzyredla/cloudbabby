@@ -15,6 +15,12 @@ No install, no build step: open `index.html` in a browser.
     talked with us) → Met (meeting held, partnership discussed) → Committed (agreed to refer, no
     referral yet) → Producing (referral in the last 6 months) → Dormant (open or signed, no referral
     in 6+ months) → Closed (declined, or exclusive elsewhere)
+  - **The stage is optional.** A new account (or partner) starts with **no stage yet** and no
+    follow-up date: pick a stage once there's an opportunity. A blank stage shows as "No stage",
+    has its own **No stage yet** filter on Accounts and a **No stage** column first on the board,
+    and isn't in open pipeline. Picking one later is logged ("Stage changed: No stage → S1 …").
+    Logging an activity on such an account leaves the stage blank unless you pick one. Imports
+    still start rows without a stage at S1
   - Open pipeline counts prospects in S1–S5 only. Older stage names convert automatically
     (e.g. Proposal → S4, Won → Closed Won, Active → Producing, At Risk → Dormant)
   - Spreadsheet imports accept the full name, just "S3", the words after the dash, or an old name
