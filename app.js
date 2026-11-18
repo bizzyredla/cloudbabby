@@ -7650,7 +7650,8 @@ Give me the CSV file.`;
     }
     return { pros, cli, ptn, ref, pipe, head, new30, gap: pros >= gapMin() && !ptn };
   }
-  /** Territories that share a border with t (or come within a quarter mile of it). Worked out once each. */
+  /** Territories next door to t: any within 0.6 mi of its edge, closest first. Where unincorporated land leaves
+   *  gaps (Santa Clarita), the nearest ones within 6 mi make up at least three. Worked out once each. */
   const socalNbCache = new Map();
   function socalNeighbors(t) {
     if (!socalData) return [];
@@ -7658,10 +7659,13 @@ Give me the CSV file.`;
     const pts = [];
     for (const poly of t.rings) { const r = poly[0]; const step = Math.max(1, Math.floor(r.length / 120)); for (let i = 0; i < r.length; i += step) pts.push(r[i]); }
     const near = (b, c, pad) => !(b[0] > c[2] + pad || b[2] < c[0] - pad || b[1] > c[3] + pad || b[3] < c[1] - pad);
-    const out = socalData.filter((c) => c !== t && near(c.box, t.box, 0.01)
-      && pts.some((pt) => inBox(pt, c.box, 0.006) && (inRings(pt, c.rings) || milesToEdge(pt, c) < 0.3)));
-    socalNbCache.set(t.n, out);
-    return out;
+    const gap = (c) => { let m = Infinity; for (const pt of pts) { if (inBox(pt, c.box) && inRings(pt, c.rings)) return 0; m = Math.min(m, milesToEdge(pt, c)); } return m; };
+    const ds = socalData.filter((c) => c !== t && near(c.box, t.box, 0.12)).map((c) => ({ c, d: gap(c) })).sort((x, y) => x.d - y.d);
+    const out = ds.filter((x) => x.d < 0.6);
+    for (const x of ds) { if (out.length >= 3) break; if (!out.includes(x) && x.d < 6) out.push(x); }
+    const res = out.map((x) => x.c);
+    socalNbCache.set(t.n, res);
+    return res;
   }
   /** What each territory's number on the map shows. */
   const TNUM = { off: 'Off', accts: 'Accounts', ptn: 'Partners', pipe: 'Open pipeline', new30: 'New in 30 days', gaps: 'Partner gaps' };
@@ -10423,7 +10427,7 @@ Give me the CSV file.`;
       case 'terr-view': ui.terrView = el.dataset.v; savePrefs(); return rerender();
       case 'terr-gaponly': ui.terrGapOnly = !ui.terrGapOnly; return rerender();
       case 'terr-pin': return pinMissingForm();
-      case 'terr-map': ui.terrNum = el.dataset.v || 'accts'; savePrefs(); ui.mapSocal = true; mapState.keep = null; return go('map');
+      case 'terr-map': ui.terrNum = el.dataset.v || 'accts'; ui.mapSocal = true; savePrefs(); mapState.keep = null; return go('map');
       case 'dp-go': return go(`map/route/${el.dataset.date}`);
       case 'dp-week': return go(`map/route/${addDays(ui.routeDate, Number(el.dataset.n))}`);
       case 'dp-tab': ui.dpTab = el.dataset.tab; return rerender();
