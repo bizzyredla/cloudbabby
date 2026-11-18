@@ -252,7 +252,7 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, mapSocal: ui.mapSocal, theme: ui.theme, linkMode: ui.linkMode, liMode: ui.liMode, moreOpen: ui.moreOpen, webLogos: ui.webLogos })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, mapSocal: ui.mapSocal, theme: ui.theme, linkMode: ui.linkMode, liMode: ui.liMode, moreOpen: ui.moreOpen, webLogos: ui.webLogos, terrNum: ui.terrNum, terrView: ui.terrView, gapMin: ui.gapMin })); } catch (e) { /* ignore */ }
   };
 
   // ----- appearance: follow the device, or always light / always dark (per device) -----
@@ -7630,6 +7630,60 @@ Give me the CSV file.`;
     return by;
   }
   const socalOn = () => ui.mapSocal !== false;
+  const terrByN = (n) => (socalData || []).find((t) => t.n === Number(n)) || null;
+  const isClient = (a) => a.type !== 'partner' && a.stage === 'Closed Won';
+  const gapMin = () => Number(ui.gapMin) || 10;
+  const kMoney = (v) => (v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${Math.round(v)}`);
+  /** Who's in a territory and what it's worth: prospects (open or not started), clients (won), partners (not closed),
+   *  accounts partners referred in 12 months, open pipeline (S1–S5 value), employees, accounts added in 30 days. */
+  function terrFigures(members, d = today()) {
+    const yAgo = yearAgo(); const mAgo = addDays(d, -30);
+    let pros = 0; let cli = 0; let ptn = 0; let ref = 0; let pipe = 0; let head = 0; let new30 = 0;
+    for (const a of members) {
+      if (a.type === 'partner') { if (a.stage !== 'Closed') ptn++; }
+      else if (a.stage === 'Closed Won') cli++;
+      else if (a.stage !== 'Closed Lost') pros++;
+      if (a.type !== 'partner' && a.stage !== 'Closed Lost') head += Number(a.employees) || 0;
+      if (isOpenDeal(a)) pipe += Number(a.value) || 0;
+      if (a.channelPartnerId && a.referredAt && a.referredAt >= yAgo) ref++;
+      if ((a.createdAt || '').slice(0, 10) >= mAgo) new30++;
+    }
+    return { pros, cli, ptn, ref, pipe, head, new30, gap: pros >= gapMin() && !ptn };
+  }
+  /** Territories that share a border with t (or come within a quarter mile of it). Worked out once each. */
+  const socalNbCache = new Map();
+  function socalNeighbors(t) {
+    if (!socalData) return [];
+    if (socalNbCache.has(t.n)) return socalNbCache.get(t.n);
+    const pts = [];
+    for (const poly of t.rings) { const r = poly[0]; const step = Math.max(1, Math.floor(r.length / 120)); for (let i = 0; i < r.length; i += step) pts.push(r[i]); }
+    const near = (b, c, pad) => !(b[0] > c[2] + pad || b[2] < c[0] - pad || b[1] > c[3] + pad || b[3] < c[1] - pad);
+    const out = socalData.filter((c) => c !== t && near(c.box, t.box, 0.01)
+      && pts.some((pt) => inBox(pt, c.box, 0.006) && (inRings(pt, c.rings) || milesToEdge(pt, c) < 0.3)));
+    socalNbCache.set(t.n, out);
+    return out;
+  }
+  /** What each territory's number on the map shows. */
+  const TNUM = { off: 'Off', accts: 'Accounts', ptn: 'Partners', pipe: 'Open pipeline', new30: 'New in 30 days', gaps: 'Partner gaps' };
+  const TNUM_NOTE = { accts: 'Prospects + clients. Darker = more.', ptn: 'Partners. Darker = more.', pipe: 'Open deal value (S1–S5). Darker = more.', new30: 'Accounts added in the last 30 days.', gaps: `Orange: ${'{n}'}+ prospects and no partner. The number is prospects.` };
+  const tnumKey = () => (TNUM[ui.terrNum] ? ui.terrNum : 'accts');
+  const terrNumText = (metric, v) => (metric === 'pipe' ? kMoney(v) : metric === 'new30' ? `+${v}` : String(v));
+  function terrNumbers(metric) {
+    if (!socalData || metric === 'off') return null;
+    const by = socalMembers(); const d = today();
+    const val = new Map(); const gap = new Set(); const figs = new Map();
+    for (const t of socalData) {
+      const mem = (by.get(t.n) || []).filter((a) => !isReserve(a));
+      if (!mem.length) continue;
+      const f = terrFigures(mem, d); figs.set(t.n, f);
+      if (f.gap) gap.add(t.n);
+      const v = metric === 'accts' ? f.pros + f.cli : metric === 'ptn' ? f.ptn : metric === 'pipe' ? f.pipe : metric === 'new30' ? f.new30 : f.gap ? f.pros : 0;
+      if (v) val.set(t.n, v);
+    }
+    const max = Math.max(1, ...val.values());
+    const top = new Set([...val].sort((x, y) => y[1] - x[1]).slice(0, 12).map(([n]) => n));
+    return { metric, val, gap, max, top, figs };
+  }
   /** Fill territory placeholders ([data-terr=accountId]) once the territories are here. */
   function fillTerr() {
     $$('[data-terr]').forEach((el) => { const a = getAccount(el.dataset.terr); if (a) el.textContent = terrName(a) || (hasGeo(a) ? 'Outside the territories' : 'Not on the map yet'); });
@@ -7643,19 +7697,41 @@ Give me the CSV file.`;
       if (/^#(map|accounts|imports)/.test(location.hash) && !busy) rerender();
     }).catch(() => { /* the app works without the layer */ });
   }
-  function drawSocal(layer) {
+  function drawSocal(layer, opts = {}) {
     if (!socalOn() || !socalData || !mapState.map) return;
-    // Territories sit in their own pane under the pins, so pins stay clickable.
-    if (!mapState.map.getPane('socal')) mapState.map.createPane('socal').style.zIndex = 350;
+    const map = mapState.map;
+    // Territories sit in their own pane under the pins, so pins stay clickable; numbers sit between the two.
+    if (!map.getPane('socal')) map.createPane('socal').style.zIndex = 350;
+    const hi = opts.hi && opts.hi.size ? opts.hi : null;
+    const num = hi ? null : opts.num || null;
+    if (num && !map.getPane('terrnum')) map.createPane('terrnum').style.zIndex = 450;
     const by = socalMembers();
     for (const t of socalData) {
       const mem = (by.get(t.n) || []).filter((a) => !isReserve(a));
-      const np = mem.filter((a) => a.type === 'partner').length;
-      const counts = mem.length ? ` · ${plural(mem.length - np, 'account')} · ${plural(np, 'partner')}` : '';
-      L.polygon(t.rings, { pane: 'socal', color: t.color, weight: 1.2, fillColor: t.color, fillOpacity: 0.08, interactive: !mapState.drawing && !mapState.placing })
+      const f = mem.length ? terrFigures(mem) : null;
+      const counts = f ? ` · ${plural(f.pros, 'prospect')} · ${plural(f.cli, 'client')} · ${plural(f.ptn, 'partner')}` : '';
+      let style = { color: t.color, weight: 1.2, fillColor: t.color, fillOpacity: 0.08 };
+      if (hi) style = hi.has(t.n) ? { color: t.color, weight: 3, fillColor: t.color, fillOpacity: 0.22 } : { color: t.color, weight: 1, opacity: 0.5, fillColor: t.color, fillOpacity: 0.03 };
+      else if (num) {
+        const v = num.val.get(t.n) || 0; const g = num.metric === 'gaps';
+        style = { color: '#52615a', weight: 1, opacity: 0.55, fillColor: g && num.gap.has(t.n) ? '#e8892b' : '#2f6b52', fillOpacity: g ? (num.gap.has(t.n) ? 0.45 : 0.04) : 0.04 + 0.52 * (v / num.max) };
+      }
+      L.polygon(t.rings, { pane: 'socal', ...style, interactive: !mapState.drawing && !mapState.placing })
         .bindTooltip(`#${t.n} ${esc(t.name)} · ${esc(t.region)}${counts}`, { sticky: true })
         .on('click', () => { if (!mapState.drawing && !mapState.placing) socalCard(t); })
         .addTo(layer);
+      const v = num && num.val.get(t.n);
+      if (v && t.pt) {
+        L.marker(t.pt, { pane: 'terrnum', keyboard: false, icon: L.divIcon({ className: `terr-num-pin${num.top.has(t.n) ? '' : ' minor'}`, iconSize: null,
+          html: `<span class="terr-num${num.metric === 'gaps' ? ' gap' : ''}" title="#${t.n} ${esc(t.name)}: ${esc(terrNumText(num.metric, v))} ${esc(TNUM[num.metric].toLowerCase())}"><b>${esc(terrNumText(num.metric, v))}</b><i>#${t.n}</i></span>` }) })
+          .on('click', () => { if (!mapState.drawing && !mapState.placing) socalCard(t); })
+          .addTo(layer);
+      }
+    }
+    if (num && !map._tnHook) {
+      // Far out, only the 12 biggest numbers show; very far out, none (the shading still does).
+      const zc = () => { const z = map.getZoom(); const el = map.getContainer(); el.classList.toggle('tn-far', z < 9); el.classList.toggle('tn-vfar', z < 7); };
+      map.on('zoomend', zc); map._tnHook = true; zc();
     }
   }
   /** A territory's numbers: who's inside, what's due, cold or renewing, and when you were last there. */
@@ -7669,8 +7745,7 @@ Give me the CSV file.`;
       for (const h of a.activities) if (h.kind === 'Visit' && h.date > lastVisit && h.date <= d) lastVisit = h.date;
       const lt = lastTouchDate(a); if (lt > lastTouch) lastTouch = lt;
     }
-    const partners = members.filter((a) => a.type === 'partner');
-    return { t, members, accts: members.length - partners.length, partners: partners.length, open, due, cold, renew, lastVisit, lastTouch, sinceVisit: lastVisit ? daysBetween(lastVisit, d) : null, sinceTouch: lastTouch ? daysBetween(lastTouch, d) : null };
+    return { t, members, ...terrFigures(members, d), open, due, cold, renew, lastVisit, lastTouch, sinceVisit: lastVisit ? daysBetween(lastVisit, d) : null, sinceTouch: lastTouch ? daysBetween(lastTouch, d) : null };
   }
   /** The day to plan a field day for: the route day on screen if it's not past, else the next workday. */
   const planDay = () => (ui.routeDate && ui.routeDate >= today() ? ui.routeDate : nextWorkday(today()));
@@ -7698,16 +7773,19 @@ Give me the CSV file.`;
         <div class="row" style="gap:.4rem;flex-wrap:wrap">
           <button type="button" class="btn" id="terr-card-add">Add these ${cands.length} to the route</button>
           <button type="button" class="btn ghost" id="terr-card-pick">Choose stops…</button>
+          <button type="button" class="btn ghost" id="terr-card-plan">Open in the day planner</button>
         </div>`
-        : `<div class="empty">${st.open.length ? 'Nothing due, renewing or cold here right now.' : 'No mapped accounts in this territory yet.'}</div>`}`;
+        : `<div class="empty">${st.open.length ? 'Nothing due, renewing or cold here right now.' : 'No mapped accounts in this territory yet.'}</div>
+        <div class="row"><button type="button" class="btn ghost" id="terr-card-plan">Open in the day planner</button></div>`}`;
     };
     openModal(`#${t.n} ${t.name}`, `
       <div class="small muted">${esc(t.region)} · ${esc(t.county)}</div>
       <p class="small" style="margin:.25rem 0">${esc(t.areas)}</p>
       <div class="route-summary terr-score">
-        <div><b>${st.accts}</b><span>${st.accts === 1 ? 'account' : 'accounts'}</span></div>
-        <div><b>${st.partners}</b><span>${st.partners === 1 ? 'partner' : 'partners'}</span></div>
-        <div><b>${st.open.length}</b><span>open (not closed)</span></div>
+        <div><b>${st.pros}</b><span>${st.pros === 1 ? 'prospect' : 'prospects'}</span></div>
+        <div><b>${st.cli}</b><span>${st.cli === 1 ? 'client' : 'clients'}</span></div>
+        <div class="${st.gap ? 'gap-tile' : ''}"><b>${st.ptn}</b><span>${st.ptn === 1 ? 'partner' : 'partners'}${st.gap ? ' · gap' : ''}</span></div>
+        <div><b>${kMoney(st.pipe)}</b><span>open pipeline</span></div>
         <div><b>${st.due.length}</b><span>due now</span></div>
         <div><b>${st.cold.length}</b><span>cold 30+ days</span></div>
         <div><b>${st.renew.length}</b><span>renew in 90 days</span></div>
@@ -7725,6 +7803,8 @@ Give me the CSV file.`;
       if (add) add.addEventListener('click', () => { if (addFieldDay(t, rd)) { modal.close(); go(`map/route/${rd}`); } });
       const pick = $('#terr-card-pick');
       if (pick) pick.addEventListener('click', () => { ui.routeDate = rd; stopPickerForm(rd, `b:${t.n}`); });
+      const plan = $('#terr-card-plan');
+      if (plan) plan.addEventListener('click', () => { modal.close(); planTerritory(t, rd); });
     };
     $('#terr-card-day').addEventListener('change', (e) => { if (e.target.value) { rd = e.target.value; $('#terr-card-body').innerHTML = body(); wire(); } });
     wire();
@@ -8044,6 +8124,7 @@ Give me the CSV file.`;
         b.textContent = '✓ On today\'s route'; b.disabled = true;
       }));
       $$('[data-pop=visit]', el).forEach((b) => b.addEventListener('click', () => { map.closePopup(); visitLogForm(getAccount(b.dataset.id)); }));
+      $$('[data-pop=dpadd]', el).forEach((b) => b.addEventListener('click', () => { map.closePopup(); addRouteStop(ui.routeDate, b.dataset.id); dpState().picked.delete(b.dataset.id); rerender(); }));
       $$('[data-pop=near]', el).forEach((b) => b.addEventListener('click', () => { map.closePopup(); nearbyForm(getAccount(b.dataset.id)); }));
     });
   }
@@ -8068,6 +8149,7 @@ Give me the CSV file.`;
             <button type="button" class="chip-tog ${f.reserve ? 'on' : ''}" id="mf-reserve" aria-pressed="${!!f.reserve}" title="Reserve accounts (off the active lists)">◌ Reserve</button>
             <button type="button" class="chip-tog ${socalOn() ? 'on' : ''}" id="mf-socal" aria-pressed="${socalOn()}">▦ Territories${mapState.socalFail ? ' (failed to load)' : ''}</button>
           </div>
+          ${socalOn() && socalData ? `<div class="tnum-row"><label class="small row" style="gap:.35rem">Numbers on territories <select id="mf-tnum" style="width:auto">${Object.entries(TNUM).map(([k, l]) => opt(k, l, tnumKey())).join('')}</select></label>${tnumKey() !== 'off' ? `<span class="small muted">${esc(TNUM_NOTE[tnumKey()].replace('{n}', gapMin()))} Tap a number for the territory's scorecard.</span>` : ''}</div>` : ''}
           <details class="map-filters" ${window.innerWidth > 900 || f.vendor !== 'all' || f.list || f.terr ? 'open' : ''}><summary class="small"><b>Filters and pin colours</b>${(() => { const n = [f.vendor !== 'all', !!f.list, !!f.terr, (ui.mapColor || 'touch') !== 'touch'].filter(Boolean).length; return n ? ` <span class="pill">${n} on</span>` : ''; })()}</summary>
           <div class="filters">
             <select id="mf-vendor" aria-label="Vendor"><option value="all">All vendors</option>${allVendors().map((v) => opt(v, v, f.vendor)).join('')}</select>
@@ -8140,6 +8222,7 @@ Give me the CSV file.`;
     if ($('#mf-terr')) $('#mf-terr').addEventListener('change', (e) => { ui.mapFilter.terr = e.target.value; rerender(); });
     $('#mf-color').addEventListener('change', (e) => { ui.mapColor = e.target.value; savePrefs(); rerender(); });
     $('#mf-socal').addEventListener('click', () => { ui.mapSocal = !socalOn(); savePrefs(); rerender(); });
+    if ($('#mf-tnum')) $('#mf-tnum').addEventListener('change', (e) => { ui.terrNum = e.target.value; savePrefs(); rerender(); });
     $('#mf-reserve').addEventListener('click', () => { ui.mapFilter.reserve = !ui.mapFilter.reserve; rerender(); });
     if (ui.mapFix) { ui.mapFix = false; const el = $('.map-side h3 + .side-list, .approx-box'); if (el) el.scrollIntoView({ block: 'center' }); }
     const run = mapState.runId;
@@ -8148,7 +8231,7 @@ Give me the CSV file.`;
       if (run !== mapState.runId || mapState.view !== 'accounts' || !$('#map')) return;
       const { map, restored } = mountMap();
       wirePopups(map);
-      drawSocal(mapState.layer);
+      drawSocal(mapState.layer, { num: terrNumbers(tnumKey()) });
       drawTerritories(mapState.layer);
       if (dr && dr.points.length) { dr.shape = null; const pts = dr.points; dr.points = []; pts.forEach((x) => drawClick({ latlng: { lat: x[0], lng: x[1] } })); }
       mapped.forEach(addAccountMarker);
@@ -8171,8 +8254,179 @@ Give me the CSV file.`;
     </div>`;
   }
 
+  // ----- day planner: the week, the day's field territories, Planned | accounts to add | Map -----
+  const DP_SCOPES = { terr: 'In territories', near: 'Near my route', any: 'Anywhere' };
+  const DP_TYPES = { all: 'All', prospect: 'Prospects', partner: 'Partners', client: 'Clients' };
+  const DP_FLAGS = { due: 'Due', renew: 'Renewing', cold: 'No touch 30+ d', never: 'Never dropped' };
+  const DP_SORTS = { best: 'Best first', close: 'Closest to my route', idle: 'Longest since a touch', name: 'Name' };
+  /** The list's search, scope, filters, sort and ticks, for this session. Search and ticks reset with the day. */
+  const dpState = () => (ui.dp ||= { day: '', q: '', scope: '', type: 'all', flags: [], sort: 'best', show: 25, picked: new Set() });
+  /** Open day d with territory t picked (added to any it already has). Nothing is added to the route. */
+  function planTerritory(t, d) {
+    const r = getRoute(d);
+    if (!(r.terrs || []).includes(t.n)) setRoute(d, { terrs: [...(r.terrs || []), t.n] });
+    dpState().scope = 'terr';
+    ui.dpTab = 'terr';
+    toast(`#${t.n} ${t.name} is on ${d === today() ? 'today' : fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' })}'s plan`);
+    go(`map/route/${d}`);
+  }
+  /** Who could be added to day d: its field territories, near the route, or anywhere. Search covers the whole book. */
+  function dayCandidates(d, r, stops) {
+    const st = dpState();
+    const onRoute = new Set(stops.map((x) => x.a.id));
+    const terrs = new Set((r.terrs || []).map(Number));
+    const q = st.q.trim().toLowerCase();
+    const scope = st.scope || (terrs.size ? 'terr' : 'any');
+    const pts = stops.filter((x) => hasGeo(x.a)).map((x) => ll(x.a));
+    const from = pts.length ? 'route' : ui.home ? 'home' : '';
+    const ref = pts.length ? pts : ui.home ? [[ui.home.lat, ui.home.lng]] : [];
+    let pool = state.accounts.filter((a) => !onRoute.has(a.id));
+    if (q) pool = pool.filter((a) => `${a.name} ${a.location || ''} ${a.address || ''}`.toLowerCase().includes(q));
+    else {
+      pool = pool.filter((a) => a.stage !== 'Closed Lost' && !(a.type === 'partner' && a.stage === 'Closed') && (!isReserve(a) || dueBy(a, d)));
+      if (scope === 'terr') pool = terrs.size ? pool.filter((a) => { const t = socalOf(a); return t && terrs.has(t.n); }) : [];
+      if (scope === 'near') pool = ref.length ? pool.filter(hasGeo) : [];
+    }
+    if (st.type === 'client') pool = pool.filter(isClient);
+    else if (st.type === 'prospect') pool = pool.filter((a) => a.type === 'prospect' && !isClient(a));
+    else if (st.type === 'partner') pool = pool.filter((a) => a.type === 'partner');
+    let rows = pool.map((a) => ({ a, ...dropScore(a, d), dist: ref.length && hasGeo(a) ? Math.min(...ref.map((pt) => miles(pt, ll(a)))) : null }));
+    if (!q && scope === 'near') rows = rows.filter((x) => x.dist !== null && x.dist <= 2);
+    const F = { due: (x) => x.due || x.why.some((w) => w.c === 'due'), renew: (x) => !!x.renew, cold: (x) => x.idle === null || x.idle >= 30, never: (x) => !x.dropped };
+    if (st.flags.length) rows = rows.filter((x) => st.flags.some((f) => F[f](x)));
+    const far = 1e9;
+    const S = {
+      best: (x, y) => y.score - x.score || (x.dist ?? far) - (y.dist ?? far),
+      close: (x, y) => (x.dist ?? far) - (y.dist ?? far) || y.score - x.score,
+      idle: (x, y) => (y.idle ?? far) - (x.idle ?? far) || y.score - x.score,
+      name: (x, y) => x.a.name.localeCompare(y.a.name),
+    };
+    rows.sort(S[st.sort] || S.best);
+    return { rows, scope, from, q, hasRef: ref.length > 0 };
+  }
+  function dayCandRow(x, picked, from) {
+    const a = x.a; const t = socalOf(a);
+    const where = [t ? `<span class="terr-sw" style="background:${t.color}"></span>#${t.n}` : '', esc((a.location || '').split(',')[0]),
+      x.dist !== null ? `<b>${fmtMiles(x.dist)}</b> ${from === 'route' ? 'off route' : 'from home'}` : hasGeo(a) ? '' : 'not on the map'].filter(Boolean).join(' · ');
+    return `<div class="drop-row dp-row ${noDrop(a) ? 'nodrop' : ''} ${picked ? 'picked' : ''}" data-id="${a.id}">
+      <input type="checkbox" class="dp-pick" data-id="${a.id}" ${picked ? 'checked' : ''} aria-label="Select ${esc(a.name)}">
+      ${logoTile(a, 30)}
+      <div class="grow"><a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a> ${a.type === 'partner' ? '<span class="pill partner">Partner</span>' : isClient(a) ? '<span class="pill won">Client</span>' : ''}
+        <div class="why">${whyChips(x.why, 3)}</div>
+        <div class="small muted dp-where">${where}</div></div>
+      <button type="button" class="btn sm" data-act="dp-add" data-id="${a.id}" aria-label="Add ${esc(a.name)} to the route">+ Add</button>
+    </div>`;
+  }
+  /** The week strip: Mon–Fri around day d, each with its territories and stops. */
+  function dayWeekHtml(d) {
+    const ws = weekStart(d); const td = today();
+    const days = [0, 1, 2, 3, 4].map((i) => addDays(ws, i));
+    return `<div class="card dp-week" role="group" aria-label="Week of ${esc(fmtDate(ws, { month: 'short', day: 'numeric' }))}">
+      <button type="button" class="btn ghost sm dp-wk-nav" data-act="dp-week" data-n="-7" aria-label="Previous week">‹</button>
+      ${days.map((x) => {
+        const rr = getRoute(x); const st = routeStops(x); const done = st.filter((y) => visitedRow(x, y.a)).length; const past = x < td;
+        const ts = (rr.terrs || []).map(terrByN).filter(Boolean);
+        const tag = x === td ? '<span class="dp-tag today">Today</span>' : past && st.length ? '<span class="dp-tag done">Done</span>' : '';
+        return `<button type="button" class="dp-day ${x === d ? 'on' : ''}" data-act="dp-go" data-date="${x}" aria-pressed="${x === d}" aria-label="${esc(fmtDate(x, { weekday: 'long', month: 'short', day: 'numeric' }))}: ${plural(st.length, 'stop')}">
+          <span class="dp-day-top"><b>${esc(fmtDate(x, { weekday: 'short' }))}</b> <span class="muted">${esc(fmtDate(x, { month: 'short', day: 'numeric' }))}</span>${tag}</span>
+          <span class="dp-day-terrs">${ts.map((t) => `<span class="terr-sw" style="background:${t.color}"></span>#${t.n}`).join(' ') || '<span class="muted">No territory</span>'}</span>
+          <span class="small muted">${st.length ? (past ? `${done} of ${st.length} visited` : `${plural(st.length, 'stop')}${done ? ` · ${done} visited` : ''}`) : 'Plan this day'}</span>
+        </button>`;
+      }).join('')}
+      <button type="button" class="btn ghost sm dp-wk-nav" data-act="dp-week" data-n="7" aria-label="Next week">›</button>
+    </div>`;
+  }
+  /** The day: date, field territories (+ Neighbor), and the day's total against the workday. */
+  function dayHeadHtml(d, r, stops, terrs) {
+    const by = socalData ? socalMembers() : new Map();
+    const onRoute = new Set(stops.map((x) => x.a.id));
+    const waiting = (n) => (by.get(n) || []).filter((a) => !onRoute.has(a.id) && a.stage !== 'Closed Lost' && !(a.type === 'partner' && a.stage === 'Closed') && (!isReserve(a) || dueBy(a, d))).length;
+    const picked = new Set(terrs.map((t) => t.n));
+    const nb = [...new Set(terrs.flatMap((t) => socalNeighbors(t)))].filter((t) => !picked.has(t.n));
+    const regions = socalData ? [...new Set(socalData.map((t) => t.region))] : [];
+    const label = (t) => { const w = by.has(t.n) ? waiting(t.n) : 0; return `#${t.n} ${t.name}${w ? ` · ${w} waiting` : ''}`; };
+    return `<div class="card dp-head">
+      <div class="row spread dp-head-top">
+        <div class="row dp-date">
+          <h2 class="dp-title">${esc(fmtDate(d, { weekday: 'long', month: 'short', day: 'numeric' }))}${d === today() ? ' <span class="dp-tag today">Today</span>' : ''}</h2>
+          <span class="row" style="gap:.25rem;flex-wrap:nowrap"><button type="button" class="btn ghost sm" data-act="route-day" data-n="-1" aria-label="Previous day">‹</button><input type="date" id="route-date" value="${d}" aria-label="Day to plan" style="width:auto"><button type="button" class="btn ghost sm" data-act="route-day" data-n="1" aria-label="Next day">›</button></span>
+        </div>
+        <div class="row" style="gap:.4rem;flex-wrap:wrap">
+          <button type="button" class="btn ghost sm" data-act="dp-copy">Copy to…</button>
+          <button type="button" class="btn ghost sm" data-act="day-recap" data-date="${d}">End of day</button>
+          <a class="btn ghost sm" href="#planner/${d}">Planner</a>
+        </div>
+      </div>
+      <div class="dp-terrs">
+        <span class="dp-label">Field territories</span>
+        ${terrs.map((t) => `<span class="dp-chip"><span class="terr-sw" style="background:${t.color}"></span><b>#${t.n}</b> ${esc(t.name)} <span class="small muted">${waiting(t.n)} waiting</span><button type="button" class="dp-chip-x" data-act="dp-terr-del" data-n="${t.n}" aria-label="Remove #${t.n} ${esc(t.name)}" title="Remove">×</button></span>`).join('')}
+        ${socalData ? `<select id="dp-terr-add" class="dp-terr-add" aria-label="${terrs.length ? 'Add a neighboring territory' : 'Pick a field territory'}">
+          <option value="">${terrs.length ? '+ Neighbor' : '+ Pick a territory'}</option>
+          ${nb.length ? `<optgroup label="Next door">${nb.map((t) => `<option value="${t.n}">${esc(label(t))}</option>`).join('')}</optgroup>` : ''}
+          ${regions.map((g) => `<optgroup label="${esc(g)}">${socalData.filter((t) => t.region === g && !picked.has(t.n)).map((t) => `<option value="${t.n}">${esc(label(t))}</option>`).join('')}</optgroup>`).join('')}
+        </select>` : `<span class="small muted">${mapState.socalFail ? 'Territories failed to load.' : 'Loading territories…'}</span>`}
+      </div>
+      <div class="dp-total" id="dp-total">${dayTotalHtml(r, stops.length, stops.filter((x) => hasGeo(x.a)).length, undefined)}</div>
+    </div>`;
+  }
+  const hhmm = (v, dflt) => { const [h, m] = String(v || dflt).split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+  /** "8 stops · 41 mi · 1 h 20 min driving · back by 3:40 PM" and a bar from the start time to the end of the workday. */
+  function dayTotalHtml(r, n, nMapped, tm) {
+    if (!n) return '<b>0 stops</b> <span class="muted">· nothing planned yet</span>';
+    if (tm === undefined) return `<b>${plural(n, 'stop')}</b> <span class="muted">· working out the drive…</span>`;
+    if (!tm) return `<b>${plural(n, 'stop')}</b> <span class="muted">· none on the map yet, so no drive times</span>`;
+    const s0 = hhmm(r.startTime, '08:30'); const e0 = hhmm(r.endTime, '17:00');
+    const fin = s0 + tm.t / 60; const over = fin > e0 + 0.5;
+    const pct = Math.max(2, Math.min(100, Math.round(((fin - s0) / Math.max(30, e0 - s0)) * 100)));
+    const endTxt = clock('00:00', e0 * 60);
+    return `<div class="dp-total-line"><b>${plural(n, 'stop')}</b> · ${fmtMiles(tm.mi)} · ${fmtDur(tm.driveSec)} driving${tm.estimated ? ' (est.)' : ''} · <b class="${over ? 'dp-over' : 'dp-ok'}">${tm.back ? 'back' : 'done'} by ${clock(r.startTime, tm.t)}</b>${n > nMapped ? ` <span class="muted small">· ${n - nMapped} without a pin</span>` : ''}</div>
+      <div class="dp-bar"><span class="small muted">${clock(r.startTime, 0)}</span><div class="dp-track" role="img" aria-label="Day from ${clock(r.startTime, 0)} to ${clock(r.startTime, tm.t)}, workday ends ${endTxt}"><i class="${over ? 'over' : ''}" style="width:${pct}%"></i></div><span class="small muted">${endTxt}</span>
+      <span class="small ${over ? 'dp-over' : 'muted'}">${over ? `Runs past ${endTxt} by ${fmtDur((fin - e0) * 60)}` : `${fmtDur((e0 - fin) * 60)} to spare`}</span></div>`;
+  }
+  /** Copy a day's territories and stops onto another day (added to what's there). */
+  function copyDayForm(d) {
+    const r = getRoute(d); const ids = routeStops(d).map((x) => x.a.id);
+    let to = nextWorkdayAfter(d);
+    for (let i = 0; i < 10 && routeStops(to).length; i++) to = nextWorkdayAfter(to);
+    openModal(`Copy ${fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' })}`, `
+      ${field('To', `<input type="date" name="to" value="${to}" required>`)}
+      <label class="row small" style="gap:.4rem"><input type="checkbox" name="terrs" style="width:auto" ${(r.terrs || []).length ? 'checked' : 'disabled'}> Field territories ${(r.terrs || []).length ? `(${(r.terrs || []).map((n) => `#${n}`).join(', ')})` : '(none)'}</label>
+      <label class="row small" style="gap:.4rem"><input type="checkbox" name="stops" style="width:auto" ${ids.length ? 'checked' : 'disabled'}> ${ids.length ? `The ${plural(ids.length, 'stop')}` : 'Stops (none)'}</label>
+      <p class="small muted" style="margin:0">Added to whatever that day already has. Nothing is marked visited.</p>`, (data, fd) => {
+      const tgt = data.to;
+      if (!tgt || tgt === d) { toast('Pick another day'); return false; }
+      const tr = getRoute(tgt); const patch = {};
+      if (fd.get('terrs')) patch.terrs = [...new Set([...(tr.terrs || []), ...(r.terrs || [])])];
+      if (fd.get('stops')) { patch.extra = [...new Set([...tr.extra, ...ids])]; patch.removed = tr.removed.filter((x) => !ids.includes(x)); }
+      setRoute(tgt, patch);
+      toast(`Copied to ${fmtDate(tgt, { weekday: 'short', month: 'short', day: 'numeric' })}`);
+      rerender();
+    }, 'Copy');
+  }
+  /** Hollow pins for the accounts in the list; a tap opens a card with + Add to route. */
+  function drawCandPins() {
+    const lay = mapState.candLayer;
+    if (!lay || !mapState.map) return;
+    lay.clearLayers();
+    for (const x of (mapState.dpRows || []).filter((y) => hasGeo(y.a)).slice(0, 300)) {
+      const t = socalOf(x.a);
+      L.circleMarker(ll(x.a), { radius: 7, color: t ? t.color : '#2f6b52', weight: 3, fillColor: '#ffffff', fillOpacity: 1 })
+        .bindTooltip(esc(x.a.name))
+        .bindPopup(`<div class="map-pop"><strong>${esc(x.a.name)}</strong><div class="why">${whyChips(x.why, 3)}</div>
+          <div class="small muted">${esc([t ? `#${t.n} ${t.name}` : '', x.dist !== null ? `${fmtMiles(x.dist)} away` : ''].filter(Boolean).join(' · '))}</div>
+          <div class="row map-pop-actions"><button type="button" class="btn sm" data-pop="dpadd" data-id="${x.a.id}">+ Add to route</button><a class="btn sm ghost" href="#account/${x.a.id}">Open</a></div></div>`, { minWidth: 210 })
+        .addTo(lay);
+    }
+  }
+  function addStops(d, ids) {
+    const r = getRoute(d); const add = ids.filter((x) => x && !r.extra.includes(x));
+    setRoute(d, { extra: [...r.extra, ...add], removed: r.removed.filter((x) => !add.includes(x)) });
+    dpState().picked.clear();
+    toast(`${plural(add.length, 'stop')} added`);
+  }
+
   // ----- route planner -----
-  const ROUTE_DEFAULTS = { extra: [], removed: [], order: [], start: 'home', roundTrip: true, startTime: '08:30', visitMins: 30 };
+  const ROUTE_DEFAULTS = { extra: [], removed: [], order: [], start: 'home', roundTrip: true, startTime: '08:30', visitMins: 30, endTime: '17:00', terrs: [] };
   const getRoute = (d) => ({ ...ROUTE_DEFAULTS, ...(getDay(d).route || {}) });
   function setRoute(d, patch) {
     state.days[d] = { ...getDay(d), route: { ...getRoute(d), ...patch } };
@@ -8426,9 +8680,21 @@ Give me the CSV file.`;
     const taken = new Set(stops.map((s) => s.a.id));
     const sugg = onDay.map((t) => ({ t, list: territorySuggestions(t, d, taken).slice(0, 6) })).filter((x) => x.list.length);
     const tpls = state.routeTemplates || [];
+    const st = dpState();
+    if (st.day !== d) { st.day = d; st.q = ''; st.show = 25; st.picked = new Set(); }
+    const phone = window.innerWidth <= 900;
+    const tab = phone ? (ui.dpTab || 'planned') : '';
+    const terrs = (r.terrs || []).map(terrByN).filter(Boolean);
+    const scope0 = st.scope || (terrs.length ? 'terr' : 'any');
+    const seg = (id, label, opts, cur) => `<div class="seg dp-seg" id="${id}" role="group" aria-label="${label}">${Object.entries(opts).map(([k, l]) => `<button type="button" data-v="${k}" class="${cur === k ? 'active' : ''}" aria-pressed="${cur === k}">${esc(k === 'terr' && terrs.length ? `In ${terrs.map((t) => `#${t.n}`).join(' + ')}` : l)}</button>`).join('')}</div>`;
     $('#view').innerHTML = `
       ${mapHead('route')}
-      <div class="map-layout map-route">
+      ${dayWeekHtml(d)}
+      ${dayHeadHtml(d, r, stops, terrs)}
+      <div class="dp-tabs" role="tablist" aria-label="Day planner">
+        ${[['planned', 'Planned', String(stops.length)], ['terr', terrs.length ? 'Territory' : 'Add stops', ''], ['map', 'Map', null]].map(([k, l, n]) => `<button type="button" role="tab" class="${tab === k ? 'on' : ''}" aria-selected="${tab === k}" data-act="dp-tab" data-tab="${k}">${l}${n === null ? '' : ` <span class="dp-tab-n"${k === 'terr' ? ' id="dp-tab-n"' : ''}>${n}</span>`}</button>`).join('')}
+      </div>
+      <div class="map-layout map-route dp-layout" data-tab="${tab}">
         <aside class="card map-side">
           ${(() => {
             if (d !== today()) return '';
@@ -8445,19 +8711,12 @@ Give me the CSV file.`;
               </div>
             </div>`;
           })()}
-          <div class="row spread">
-            <div class="row" style="gap:.3rem">
-              <button class="btn ghost sm" data-act="route-day" data-n="-1" aria-label="Previous day">‹</button>
-              <input type="date" id="route-date" value="${d}" style="width:auto">
-              <button class="btn ghost sm" data-act="route-day" data-n="1" aria-label="Next day">›</button>
-            </div>
-            <span class="row" style="gap:.6rem"><button type="button" class="link-btn small" data-act="day-recap" data-date="${d}">End of day</button><a class="small" href="#planner/${d}">Planner →</a></span>
-          </div>
           <details class="route-settings" ${window.innerWidth > 900 ? 'open' : ''}><summary class="small"><b>Route settings</b> <span class="muted">· start, leave at, minutes per stop, home base</span></summary>
           <div class="grid-2 route-opts">
             ${field('Start from', `<select id="r-start">${opt('home', homeOk ? `Home base` : 'Home base (not set)', r.start)}${opt('gps', 'My current location', r.start)}${opt('first', 'First stop', r.start)}</select>`)}
             ${field('Leave at', `<input id="r-time" type="time" value="${esc(r.startTime)}">`)}
             ${field('Minutes per visit', `<input id="r-mins" type="number" min="0" step="1" value="${esc(r.visitMins)}">`)}
+            ${field('Workday ends', `<input id="r-end" type="time" value="${esc(r.endTime || '17:00')}">`)}
             <label class="row small" style="align-self:end"><input id="r-round" type="checkbox" style="width:auto" ${r.roundTrip ? 'checked' : ''}> Return to start</label>
           </div>
           <div class="small"><button type="button" class="link-btn" data-act="set-home">${homeOk ? `Home base: ${esc(ui.home.label)} · change` : 'Set your home base'}</button></div>
@@ -8483,7 +8742,7 @@ Give me the CSV file.`;
                   <button class="icon-btn" data-act="route-remove" data-id="${s.a.id}" title="Remove from this route">✕</button>
                 </span>
               </li>`;
-            }).join('') || '<div class="empty">No visits planned for this day. Add stops below, or put accounts in the planner\'s Visits / Revisits.</div>'}
+            }).join('') || `<div class="empty">Nothing planned for this day yet. ${terrs.length ? '<b>+ Add</b> accounts from the list' : 'Pick a field territory above, then <b>+ Add</b> its accounts'}, or put accounts in the planner\'s Visits / Revisits.</div>`}
           </ol>
           ${sugg.map(({ t, list }) => `<div class="terr-sugg" style="--c:${t.color}">
             <div class="row spread"><b>${esc(fmtDate(d, { weekday: 'long' }))} is ${esc(t.name)}</b><button type="button" class="btn sm" data-act="route-add-many" data-ids="${list.map((x) => x.a.id).join(',')}">Add these ${list.length}</button></div>
@@ -8492,9 +8751,6 @@ Give me the CSV file.`;
           <div class="row">
             <button type="button" class="btn ghost grow" id="route-add" data-act="route-pick">+ Add stops <span class="small muted">· ranked: due, renewing, never dropped, cold</span></button>
           </div>
-          ${socalData ? `<div class="row">
-            <select id="route-fieldday" style="flex:1"><option value="">⚑ Field day: fill from a territory…</option>${socalData.map((t) => `<option value="${t.n}">#${t.n} ${esc(t.name)} · ${esc(t.region)}</option>`).join('')}</select>
-          </div>` : ''}
           <div class="saved-routes">
             <div class="row spread"><h3 style="margin:0">Saved routes</h3>${stops.length ? '<button type="button" class="btn sm ghost" data-act="route-save">Save this route</button>' : ''}</div>
             ${tpls.length ? `<div class="side-list">${tpls.map((x) => `<div class="side-item"><strong>${esc(x.name)}</strong>
@@ -8503,6 +8759,16 @@ Give me the CSV file.`;
               : '<div class="small muted">Save a loop you run often (a monthly Westside loop) and load it onto any day.</div>'}
           </div>
         </aside>
+        <section class="card dp-cands" aria-label="Accounts to add">
+          <div class="row spread dp-c-head"><h3 class="dp-h" id="dp-c-title">&nbsp;</h3>
+            <span class="row" style="gap:.4rem"><button type="button" class="btn sm ghost" id="dp-best" hidden>Add the best 10</button>
+            <label class="small muted row" style="gap:.3rem">Sort <select id="dp-sort">${Object.entries(DP_SORTS).map(([k, l]) => opt(k, l, st.sort)).join('')}</select></label></span></div>
+          <input type="search" id="dp-q" value="${esc(st.q)}" placeholder="Search any account in your book…" aria-label="Search any account" autocomplete="off" enterkeyhint="search">
+          <div class="row dp-ctl">${seg('dp-scope', 'Where', DP_SCOPES, scope0)}${seg('dp-type', 'Type', DP_TYPES, st.type)}</div>
+          <div class="row dp-flags" id="dp-flags" role="group" aria-label="Only">${Object.entries(DP_FLAGS).map(([k, l]) => `<button type="button" class="chip-tog ${st.flags.includes(k) ? 'on' : ''}" data-v="${k}" aria-pressed="${st.flags.includes(k)}">${l}</button>`).join('')}</div>
+          <div class="dp-bulk" id="dp-bulk" hidden><span id="dp-bulk-n"></span><span class="row" style="gap:.4rem"><button type="button" class="btn sm ghost" id="dp-bulk-clear">Clear</button><button type="button" class="btn sm" id="dp-bulk-add">Add to route</button></span></div>
+          <div class="drop-list dp-list" id="dp-list"></div>
+        </section>
         <div class="card map-card"><div id="map" class="map"></div></div>
       </div>`;
 
@@ -8514,11 +8780,62 @@ Give me the CSV file.`;
     $('#r-time').addEventListener('change', (e) => { setRoute(d, { startTime: e.target.value }); rerender(); });
     $('#r-mins').addEventListener('change', (e) => { setRoute(d, { visitMins: Math.max(0, Number(e.target.value) || 0) }); rerender(); });
     $('#r-round').addEventListener('change', (e) => { setRoute(d, { roundTrip: e.target.checked }); rerender(); });
-    if ($('#route-fieldday')) $('#route-fieldday').addEventListener('change', (e) => {
-      const t = (socalData || []).find((x) => String(x.n) === e.target.value);
+    $('#r-end').addEventListener('change', (e) => { setRoute(d, { endTime: e.target.value || '17:00' }); rerender(); });
+    if ($('#dp-terr-add')) $('#dp-terr-add').addEventListener('change', (e) => {
+      const t = terrByN(e.target.value);
       if (!t) return;
-      if (addFieldDay(t, d)) rerender(); else e.target.value = '';
+      setRoute(d, { terrs: [...(r.terrs || []), t.n] });
+      if (!st.scope || st.scope === 'any') st.scope = 'terr';
+      rerender();
     });
+
+    // The list of accounts to add: redrawn on its own as you search and filter, with the map's hollow pins.
+    const drawCands = () => {
+      const { rows, scope, from, q, hasRef } = dayCandidates(d, r, stops);
+      mapState.dpRows = rows;
+      const empty = q ? 'No account matches that search.'
+        : scope === 'terr' && !terrs.length ? 'Pick a field territory above to see its accounts, or switch to Near my route or Anywhere.'
+          : scope === 'near' && !hasRef ? 'Add a stop with an address, or set your home base, to see who\'s nearby.'
+            : 'Nothing left to add here with these filters.';
+      $('#dp-list').innerHTML = rows.slice(0, st.show).map((x) => dayCandRow(x, st.picked.has(x.a.id), from)).join('')
+        + (rows.length > st.show ? `<button type="button" class="btn ghost sm" id="dp-more">Show ${Math.min(25, rows.length - st.show)} more</button>` : '')
+        || `<div class="empty">${empty}</div>`;
+      $('#dp-c-title').innerHTML = `${esc(q ? 'Search: your whole book' : scope === 'terr' ? `In ${terrs.map((t) => `#${t.n}`).join(' + ') || 'your territories'}` : scope === 'near' ? 'Near my route · 2 mi' : 'Best stops anywhere')} <span class="count-pill">${rows.length}</span>`;
+      const tn = $('#dp-tab-n'); if (tn) tn.textContent = rows.length;
+      const best = $('#dp-best'); best.hidden = q || rows.length < 2;
+      bulk();
+      drawCandPins();
+    };
+    const bulk = () => {
+      const n = st.picked.size;
+      $('#dp-bulk').hidden = !n;
+      $('#dp-bulk-n').textContent = `${n} selected`;
+    };
+    $('#dp-q').addEventListener('input', (e) => { st.q = e.target.value; st.show = 25; clearTimeout(st.timer); st.timer = setTimeout(drawCands, 120); });
+    $('#dp-sort').addEventListener('change', (e) => { st.sort = e.target.value; drawCands(); });
+    const segWire = (id, key) => $$(`#${id} [data-v]`).forEach((b) => b.addEventListener('click', () => {
+      st[key] = b.dataset.v; st.show = 25;
+      $$(`#${id} [data-v]`).forEach((x) => { x.classList.toggle('active', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+      drawCands();
+    }));
+    segWire('dp-scope', 'scope'); segWire('dp-type', 'type');
+    $$('#dp-flags [data-v]').forEach((b) => b.addEventListener('click', () => {
+      const k = b.dataset.v; const on = !st.flags.includes(k);
+      st.flags = on ? [...st.flags, k] : st.flags.filter((x) => x !== k);
+      b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+      drawCands();
+    }));
+    $('#dp-list').addEventListener('change', (e) => {
+      const c = e.target.closest('.dp-pick'); if (!c) return;
+      if (c.checked) st.picked.add(c.dataset.id); else st.picked.delete(c.dataset.id);
+      c.closest('.dp-row').classList.toggle('picked', c.checked);
+      bulk();
+    });
+    $('#dp-list').addEventListener('click', (e) => { if (e.target.closest('#dp-more')) { st.show += 25; drawCands(); } });
+    $('#dp-bulk-clear').addEventListener('click', () => { st.picked.clear(); drawCands(); });
+    $('#dp-bulk-add').addEventListener('click', () => { addStops(d, [...st.picked]); rerender(); });
+    $('#dp-best').addEventListener('click', () => { addStops(d, (mapState.dpRows || []).filter((x) => !noDrop(x.a)).slice(0, 10).map((x) => x.a.id)); rerender(); });
+    drawCands();
 
     const run = mapState.runId;
     // Keep the best order automatically whenever the stops or start change (GPS waits until location is known).
@@ -8526,46 +8843,65 @@ Give me the CSV file.`;
       optimizeRoute(d, true);
       return;
     }
-    Promise.all([loadLeaflet(), startPoint(r, false)]).then(async ([, start]) => {
-      if (run !== mapState.runId || !$('#map')) return;
-      const { map, restored } = mountMap();
-      const pts = mappedStops.map((s) => ll(s.a));
-      drawSocal(mapState.layer);
-      drawTerritories(mapState.layer);
-      if (start) L.marker(start, { icon: L.divIcon({ className: 'home-pin', html: '⌂', iconSize: [26, 26] }) }).bindTooltip('Start').addTo(mapState.layer);
-      mappedStops.forEach((s, i) => {
-        const v = visitedRow(d, s.a);
-        L.marker(ll(s.a), { icon: L.divIcon({ className: `stop-pin ${v ? 'visited' : ''} ${s.a.type === 'partner' ? 'partner' : ''}`, html: String(stops.indexOf(s) + 1), iconSize: [26, 26] }) })
-          .bindPopup(accountPopup(s.a), { minWidth: 220 }).bindTooltip(esc(s.a.name)).addTo(mapState.layer);
-      });
-      wirePopups(map);
-      const bounds = [...pts, ...(start ? [start] : [])];
-      if (!restored && bounds.length) map.fitBounds(L.latLngBounds(bounds).pad(0.2), { maxZoom: 13, animate: false });
-      if (!pts.length) return;
+    const timing = (async () => {
+      const start = await startPoint(r, false);
+      const pts = mappedStops.map((x) => ll(x.a));
+      if (!pts.length) { const tot = $('#dp-total'); if (tot) tot.innerHTML = dayTotalHtml(r, stops.length, 0, null); return null; }
       const gm = $('#route-gmaps');
-      gm.href = googleRouteUrl(start, pts, r.roundTrip);
+      if (gm) gm.href = googleRouteUrl(start, pts, r.roundTrip);
       const legPts = [...(start ? [start] : []), ...pts, ...(start && r.roundTrip ? [start] : [])];
       const { legs, line, estimated } = legPts.length > 1 ? await routeLegs(legPts) : { legs: [], line: [], estimated: true };
-      if (run !== mapState.runId || !$('#map')) return;
-      if (line.length > 1) L.polyline(line, { color: '#2f6b52', weight: 4, opacity: 0.8, dashArray: estimated ? '6 8' : null }).addTo(mapState.layer);
+      if (run !== mapState.runId) return null;
       // Arrival times: drive legs plus time spent at each stop.
       let t = 0; let driveSec = 0; let mi = 0;
       const legOffset = start ? 0 : -1;
-      mappedStops.forEach((s, i) => {
+      mappedStops.forEach((x, i) => {
         const leg = legs[i + legOffset];
         if (leg) { t += leg.sec; driveSec += leg.sec; mi += leg.mi; }
-        const li = $(`#route-stops .stop[data-id="${s.a.id}"] .stop-eta`);
+        const li = $(`#route-stops .stop[data-id="${x.a.id}"] .stop-eta`);
         if (li) li.innerHTML = `Arrive ~${clock(r.startTime, t)}${leg ? ` · ${fmtDur(leg.sec)} drive (${fmtMiles(leg.mi)})` : ''}`;
         t += r.visitMins * 60;
       });
       const back = start && r.roundTrip ? legs[legs.length - 1] : null;
       if (back) { t += back.sec; driveSec += back.sec; mi += back.mi; }
-      $('#route-summary').innerHTML = `
+      const sum = $('#route-summary');
+      if (sum) {
+        sum.innerHTML = `
         <div><b>${mappedStops.length}</b><span>stops</span></div>
         <div><b>${fmtDur(driveSec)}</b><span>driving${estimated ? ' (est.)' : ''}</span></div>
         <div><b>${fmtMiles(mi)}</b><span>total</span></div>
         <div><b>${clock(r.startTime, t)}</b><span>${back ? 'back home' : 'done'}</span></div>`;
-      if (mappedStops.length > 10) $('#route-summary').insertAdjacentHTML('beforeend', '<p class="small muted span-all">Google Maps opens the first 10 stops; use ➤ on each stop for the rest.</p>');
+        if (mappedStops.length > 10) sum.insertAdjacentHTML('beforeend', '<p class="small muted span-all">Google Maps opens the first 10 stops; use ➤ on each stop for the rest.</p>');
+      }
+      const tot = $('#dp-total');
+      if (tot) tot.innerHTML = dayTotalHtml(r, stops.length, mappedStops.length, { t, driveSec, mi, back: !!back, estimated });
+      return { line, estimated };
+    })();
+    if (phone && tab !== 'map') return;
+    loadLeaflet().then(async () => {
+      const start = await startPoint(r, false);
+      if (run !== mapState.runId || !$('#map')) return;
+      const { map, restored } = mountMap();
+      const pts = mappedStops.map((x) => ll(x.a));
+      drawSocal(mapState.layer, { hi: new Set(terrs.map((t) => t.n)) });
+      drawTerritories(mapState.layer);
+      if (start) L.marker(start, { icon: L.divIcon({ className: 'home-pin', html: '⌂', iconSize: [26, 26] }) }).bindTooltip('Start').addTo(mapState.layer);
+      mapState.candLayer = L.layerGroup().addTo(mapState.layer);
+      drawCandPins();
+      mappedStops.forEach((x) => {
+        const v = visitedRow(d, x.a);
+        L.marker(ll(x.a), { icon: L.divIcon({ className: `stop-pin ${v ? 'visited' : ''} ${x.a.type === 'partner' ? 'partner' : ''}`, html: String(stops.indexOf(x) + 1), iconSize: [26, 26] }) })
+          .bindPopup(accountPopup(x.a), { minWidth: 220 }).bindTooltip(esc(x.a.name)).addTo(mapState.layer);
+      });
+      wirePopups(map);
+      const bounds = [...pts, ...(start ? [start] : [])];
+      if (!restored) {
+        if (bounds.length) map.fitBounds(L.latLngBounds(bounds).pad(0.2), { maxZoom: 13, animate: false });
+        else if (terrs.length) map.fitBounds(L.latLngBounds(terrs.flatMap((t) => [[t.box[0], t.box[1]], [t.box[2], t.box[3]]])).pad(0.05), { animate: false });
+      }
+      const tm = await timing;
+      if (!tm || run !== mapState.runId || !$('#map')) return;
+      if (tm.line.length > 1) L.polyline(tm.line, { color: '#2f6b52', weight: 4, opacity: 0.8, dashArray: tm.estimated ? '6 8' : null }).addTo(mapState.layer);
     }).catch((e) => { const m = $('#map'); if (m) m.innerHTML = `<div class="empty" style="padding:1rem">${esc(e.message)}</div>`; });
   }
 
@@ -8605,12 +8941,17 @@ Give me the CSV file.`;
     if (ui.mapMode === 'route') renderRoutePlanner(); else if (ui.mapMode === 'territories') renderTerritoryBoard(); else renderMapAccounts();
   }
 
-  /** Every territory you have accounts in, most overdue first: when you were last there, what's due, cold or renewing. */
+  /** Every territory you have accounts in: who's there (Coverage), what it's worth (Pipeline), when you were last there (Field). */
   const TERR_SORTS = {
     overdue: (x, y) => ((y.sinceVisit ?? 1e6) - (x.sinceVisit ?? 1e6)) || (y.due.length - x.due.length) || (y.open.length - x.open.length),
     n: (x, y) => x.t.n - y.t.n,
-    accts: (x, y) => y.accts - x.accts,
-    partners: (x, y) => y.partners - x.partners,
+    pros: (x, y) => y.pros - x.pros,
+    cli: (x, y) => y.cli - x.cli,
+    ptn: (x, y) => y.ptn - x.ptn,
+    ref: (x, y) => y.ref - x.ref,
+    new30: (x, y) => y.new30 - x.new30,
+    pipe: (x, y) => y.pipe - x.pipe,
+    head: (x, y) => y.head - x.head,
     open: (x, y) => y.open.length - x.open.length,
     due: (x, y) => y.due.length - x.due.length,
     cold: (x, y) => y.cold.length - x.cold.length,
@@ -8619,6 +8960,28 @@ Give me the CSV file.`;
   };
   /** A count on the board: tap it to see those accounts or partners on the map, zoomed to the territory. */
   const terrCount = (t, type, n) => (n ? `<button type="button" class="link-btn terr-count" data-act="terr-show" data-n="${t.n}" data-type="${type}" title="Show ${plural(n, type === 'partner' ? 'partner' : 'account')} in #${t.n} on the map">${n}</button>` : '<span class="muted">0</span>');
+  const ZERO = '<span class="muted">0</span>';
+  /** Board columns: label (and a short one for phones), how a cell reads, and the number the Total row adds up. */
+  const TERR_COLS = {
+    pros: { label: 'Prospects', short: 'Pros', v: (x) => x.pros, cell: (x) => terrCount(x.t, 'prospect', x.pros) },
+    cli: { label: 'Clients', v: (x) => x.cli, opt: true, cell: (x) => x.cli || ZERO },
+    ptn: { label: 'Partners', short: 'Ptnrs', v: (x) => x.ptn, cell: (x) => `${terrCount(x.t, 'partner', x.ptn)}${x.gap ? ` <span class="gap-badge" title="${gapMin()}+ prospects and no partner">Gap</span>` : ''}` },
+    ref: { label: 'Referred 12 mo', short: 'Ref.', v: (x) => x.ref, opt: true, cell: (x) => (x.ref ? `<span class="ref-n">${x.ref}</span>` : ZERO) },
+    new30: { label: 'New 30 d', short: 'New', v: (x) => x.new30, fmt: (v) => `+${v}`, cell: (x) => (x.new30 ? `<span class="new-n">+${x.new30}</span>` : ZERO) },
+    pipe: { label: 'Open pipeline', short: 'Pipeline', v: (x) => x.pipe, fmt: kMoney, cell: (x, mx) => `<span class="pipe-bar" aria-hidden="true"><i style="width:${Math.round((x.pipe / mx) * 100)}%"></i></span>${x.pipe ? kMoney(x.pipe) : ZERO}` },
+    head: { label: 'Headcount', short: 'Emp.', v: (x) => x.head, opt: true, fmt: (v) => v.toLocaleString(), cell: (x) => (x.head ? x.head.toLocaleString() : ZERO) },
+    open: { label: 'Open', v: (x) => x.open.length, cell: (x) => x.open.length || ZERO },
+    due: { label: 'Due', v: (x) => x.due.length, cls: (x) => (x.due.length ? 'cell-warn' : ''), cell: (x) => x.due.length || ZERO },
+    cold: { label: 'Cold 30+', v: (x) => x.cold.length, opt: true, cell: (x) => x.cold.length || ZERO },
+    renew: { label: 'Renew 90 d', v: (x) => x.renew.length, opt: true, cls: (x) => (x.renew.length ? 'cell-warn' : ''), cell: (x) => x.renew.length || ZERO },
+    overdue: { label: 'Last field day', short: 'Last visit', text: true, cls: (x, od) => `tb-fd ${od ? 'cell-bad' : ''}`, cell: (x) => (x.lastVisit ? `${esc(fmtDate(x.lastVisit, { month: 'short', day: 'numeric' }))} <span class="small muted">${x.sinceVisit} d</span>` : '<span class="small">never</span>') },
+    touch: { label: 'Last touch', text: true, opt: true, cls: () => 'small', cell: (x) => (x.sinceTouch === null ? 'never' : `${x.sinceTouch} d ago`) },
+  };
+  const TERR_VIEWS = {
+    coverage: { label: 'Coverage', cols: ['pros', 'cli', 'ptn', 'ref', 'new30', 'overdue'], def: 'pros', map: 'accts', note: 'Who is in each territory: prospects, clients and partners, accounts partners referred in the last 12 months, and accounts added in the last 30 days.' },
+    pipeline: { label: 'Pipeline', cols: ['pros', 'cli', 'pipe', 'head', 'renew', 'due'], def: 'pipe', map: 'pipe', note: 'Where the money is: open deal value (S1–S5) and employees across each territory\'s accounts, with renewals in 90 days and what\'s due.' },
+    field: { label: 'Field', cols: ['open', 'due', 'cold', 'renew', 'overdue', 'touch'], def: 'overdue', map: 'accts', note: 'When you were last there. Overdue (red) = open accounts and no field day in 30+ days.' },
+  };
   function renderTerritoryBoard() {
     socalSoon();
     const head = mapHead('territories');
@@ -8629,20 +8992,66 @@ Give me the CSV file.`;
     const by = socalMembers();
     const region = ui.terrRegion || '';
     const showEmpty = !!ui.terrEmpty;
+    const gapOnly = !!ui.terrGapOnly;
+    const vk = TERR_VIEWS[ui.terrView] ? ui.terrView : 'coverage';
+    const view = TERR_VIEWS[vk];
     const regions = [...new Set(socalData.map((t) => t.region))];
     const act = (t) => (by.get(t.n) || []).filter((a) => !isReserve(a));
-    const all = socalData.filter((t) => (!region || t.region === region) && (showEmpty || act(t).length)).map((t) => socalStats(t, act(t)));
-    const key = TERR_SORTS[ui.terrSort] ? ui.terrSort : 'overdue';
-    const dir = ui.terrDir || 1;
+    const inRegion = socalData.filter((t) => !region || t.region === region);
+    const withAccts = inRegion.filter((t) => act(t).length).map((t) => socalStats(t, act(t)));
+    const statOf = new Map(withAccts.map((x) => [x.t.n, x]));
+    let all = showEmpty ? inRegion.map((t) => statOf.get(t.n) || socalStats(t, [])) : [...withAccts];
+    if (gapOnly) all = all.filter((x) => x.gap);
+    const key = view.cols.includes(ui.terrSort) || ui.terrSort === 'n' ? ui.terrSort : view.def;
+    const dir = key === ui.terrSort ? (ui.terrDir || 1) : 1;
     all.sort((x, y) => TERR_SORTS[key](x, y) * dir || x.t.n - y.t.n);
     const overdue = (x) => x.open.length && (x.sinceVisit === null || x.sinceVisit >= 30);
-    const top = all.filter(overdue).sort(TERR_SORTS.overdue)[0];
+    const top = withAccts.filter(overdue).sort(TERR_SORTS.overdue)[0];
     const mapped = state.accounts.filter(hasGeo);
     const outside = mapped.filter((a) => !socalOf(a)).length;
     const unmapped = state.accounts.filter((a) => !hasGeo(a)).length;
+    const lbl = (c) => (c.short ? `<span class="th-full">${c.label}</span><span class="th-short">${c.short}</span>` : c.label);
     const th = (k, label, cls = '') => `<th class="${cls}"><button type="button" class="th-sort ${key === k ? 'on' : ''}" data-act="terr-sort" data-key="${k}" data-prev="${key}">${label}${key === k ? (dir > 0 ? ' ▼' : ' ▲') : ''}</button></th>`;
     const pd = planDay();
+    const pdTxt = pd === today() ? 'today' : fmtDate(pd, { weekday: 'short', month: 'short', day: 'numeric' });
+    const maxPipe = Math.max(1, ...all.map((x) => x.pipe));
+    const min = gapMin();
+    const gaps = withAccts.filter((x) => x.gap).sort((x, y) => y.pros - x.pros);
+    const pipeAll = withAccts.reduce((n, x) => n + x.pipe, 0);
+    const headAll = withAccts.reduce((n, x) => n + x.head, 0);
+    const newAll = withAccts.reduce((n, x) => n + x.new30, 0);
+    const topPipe = withAccts.filter((x) => x.pipe).sort((x, y) => y.pipe - x.pipe).slice(0, 3);
+    const topNew = withAccts.filter((x) => x.new30).sort((x, y) => y.new30 - x.new30).slice(0, 3);
+    const maxTop = Math.max(1, ...topPipe.map((x) => x.pipe));
+    const shortName = (t) => t.name.split(' & ')[0];
+    const brokerUrl = (t) => `https://www.google.com/search?q=${encodeURIComponent(`employee benefits insurance brokers ${String(t.areas || t.name).split(',').slice(0, 2).map((c) => c.trim()).join(' OR ')} CA`)}`;
+    const tname = (x) => `<button type="button" class="link-btn" data-act="terr-open" data-n="${x.t.n}"><b>#${x.t.n}</b> ${esc(shortName(x.t))}</button>`;
+    const cols = view.cols.map((k) => ({ k, ...TERR_COLS[k] }));
     $('#view').innerHTML = `${head}
+      <div class="terr-cards">
+        <section class="card terr-card ${gaps.length ? 'is-gap' : ''}" aria-label="Partner gaps">
+          <div class="tc-head"><b>Partner gaps</b><span class="tc-num">${gaps.length}</span></div>
+          <p class="small muted">${gaps.length ? `${min}+ prospects and no partner. A broker here could feed you referrals.` : `No gaps: every territory with ${min}+ prospects has a partner.`}
+            <label class="tc-min">Gap at <select id="tb-gapmin" aria-label="Prospects that make a gap">${[5, 10, 15, 20, 25].map((n) => opt(String(n), String(n), String(min))).join('')}</select>+ prospects</label></p>
+          ${gaps.slice(0, 4).map((x) => `<div class="tc-row"><span class="terr-sw" style="background:${x.t.color}"></span><span class="grow">${tname(x)} <span class="small muted">· ${x.pros} prospects</span></span><a class="btn sm ghost" href="${esc(brokerUrl(x.t))}" target="_blank" rel="noopener">Find brokers</a></div>`).join('')}
+          ${gaps.length > 4 ? `<button type="button" class="link-btn small" data-act="terr-gaponly">See all ${gaps.length}</button>` : ''}
+        </section>
+        <section class="card terr-card" aria-label="Open pipeline">
+          <div class="tc-head"><b>Open pipeline</b><span class="tc-num">${kMoney(pipeAll)}</span></div>
+          <p class="small muted">Across ${plural(withAccts.length, 'territory', 'territories')} · ${headAll.toLocaleString()} employees</p>
+          ${topPipe.map((x) => `<div class="tc-row">${tname(x)}<span class="tc-bar"><i style="width:${Math.round((x.pipe / maxTop) * 100)}%"></i></span><b class="tc-val">${kMoney(x.pipe)}</b></div>`).join('') || '<p class="small muted" style="margin:0">No open deals (S1–S5) with a value yet.</p>'}
+        </section>
+        <section class="card terr-card" aria-label="New in 30 days">
+          <div class="tc-head"><b>New in 30 days</b><span class="tc-num tc-good">+${newAll}</span></div>
+          <p class="small muted">Accounts added, by territory: where you're building.</p>
+          ${topNew.map((x) => `<div class="tc-row"><span class="terr-sw" style="background:${x.t.color}"></span><span class="grow">${tname(x)}</span><b class="tc-good">+${x.new30}</b></div>`).join('') || '<p class="small muted" style="margin:0">Nothing added in the last 30 days.</p>'}
+        </section>
+        <section class="card terr-card" aria-label="Not on the map">
+          <div class="tc-head"><b>Not on the map</b><span class="tc-num">${unmapped}</span></div>
+          <p class="small muted">${unmapped ? 'No territory counts these until they have a pin.' : 'Every account has a pin, so every territory count is complete.'}${outside ? ` ${plural(outside, 'pin')} ${outside === 1 ? 'is' : 'are'} outside the 124 territories.` : ''}</p>
+          ${unmapped ? '<button type="button" class="btn sm" data-act="terr-pin">Pin them</button>' : ''}
+        </section>
+      </div>
       <div class="card terr-board">
         <div class="row spread" style="gap:.5rem;flex-wrap:wrap">
           <div>${top ? `<b>Most overdue:</b> #${top.t.n} ${esc(top.t.name)}, ${plural(top.open.length, 'open account')}, ${top.lastVisit ? `last field day ${esc(relDays(top.lastVisit))}` : 'never visited'}` : '<b>No territory is overdue.</b> Every territory with open accounts had a field day in the last 30 days.'}</div>
@@ -8651,32 +9060,85 @@ Give me the CSV file.`;
             <label class="row small" style="gap:.3rem"><input type="checkbox" id="tb-empty" style="width:auto" ${showEmpty ? 'checked' : ''}> Show empty</label>
           </div>
         </div>
-        <p class="small muted" style="margin:.35rem 0 .5rem">Overdue = open accounts and no field day in 30+ days. <b>Plan</b> fills ${esc(pd === today() ? 'today' : fmtDate(pd, { weekday: 'short', month: 'short', day: 'numeric' }))}'s route with the territory's best stops. Tap a name for its scorecard, a count to see them on the map. Active book only.</p>
+        <div class="row tb-ctl">
+          <div class="seg" role="group" aria-label="View">${Object.entries(TERR_VIEWS).map(([k, v]) => `<button type="button" class="${vk === k ? 'active' : ''}" aria-pressed="${vk === k}" data-act="terr-view" data-v="${k}">${v.label}</button>`).join('')}</div>
+          <button type="button" class="chip-tog ${gapOnly ? 'on gap-on' : ''}" data-act="terr-gaponly" aria-pressed="${gapOnly}">Partner gaps only</button>
+          <button type="button" class="link-btn small tb-maplink" data-act="terr-map" data-v="${view.map}">See it on the map →</button>
+        </div>
+        <p class="small muted" style="margin:.35rem 0 .5rem">${esc(view.note)} <b>Plan</b> opens ${esc(pdTxt)}'s day planner with the territory picked. Tap a name for its scorecard, a count to see them on the map. Active book only.</p>
         <div class="table-wrap"><table class="table terr-table">
-          <thead><tr>${th('n', '#')}<th>Territory</th>${th('accts', '<span class="th-full">Accounts</span><span class="th-short">Accts</span>')}${th('partners', '<span class="th-full">Partners</span><span class="th-short">Ptnrs</span>')}${th('open', 'Open', 'col-opt')}${th('due', 'Due')}${th('cold', 'Cold 30+', 'col-opt')}${th('renew', 'Renew 90d', 'col-opt')}${th('overdue', '<span class="th-full">Last field day</span><span class="th-short">Last visit</span>')}${th('touch', 'Last touch', 'col-opt')}<th></th></tr></thead>
-          <tbody>${all.map((x) => `<tr class="${overdue(x) ? 'terr-overdue' : ''}">
+          <thead><tr>${th('n', '#')}<th>Territory</th>${cols.map((c) => th(c.k, lbl(c), c.opt ? 'col-opt' : '')).join('')}<th><span class="sr-only">Plan</span></th></tr></thead>
+          <tbody>${all.map((x) => { const od = overdue(x); return `<tr class="${od ? 'terr-overdue' : x.gap ? 'terr-gap' : ''}">
             <td class="num"><span class="terr-sw" style="background:${x.t.color}"></span>${x.t.n}</td>
             <td><button type="button" class="link-btn" data-act="terr-open" data-n="${x.t.n}"><span class="terr-sw terr-ph" style="background:${x.t.color}"></span><strong>${esc(x.t.name)}</strong></button><div class="small muted"><span class="terr-ph">#${x.t.n} · </span>${esc(x.t.region)}</div></td>
-            <td class="num">${terrCount(x.t, 'prospect', x.accts)}</td>
-            <td class="num">${terrCount(x.t, 'partner', x.partners)}</td>
-            <td class="num col-opt">${x.open.length || '<span class="muted">0</span>'}</td>
-            <td class="num ${x.due.length ? 'cell-warn' : ''}">${x.due.length || '<span class="muted">0</span>'}</td>
-            <td class="num col-opt">${x.cold.length || '<span class="muted">0</span>'}</td>
-            <td class="num col-opt ${x.renew.length ? 'cell-warn' : ''}">${x.renew.length || '<span class="muted">0</span>'}</td>
-            <td class="${overdue(x) ? 'cell-bad' : ''}">${x.lastVisit ? `${esc(fmtDate(x.lastVisit, { month: 'short', day: 'numeric' }))} <span class="small muted">${x.sinceVisit} d</span>` : '<span class="small">never</span>'}</td>
-            <td class="small col-opt">${x.sinceTouch === null ? 'never' : `${x.sinceTouch} d ago`}</td>
+            ${cols.map((c) => `<td class="${c.text ? '' : 'num'} ${c.opt ? 'col-opt' : ''} ${c.cls ? c.cls(x, od) : ''}">${c.cell(x, maxPipe)}</td>`).join('')}
             <td>${x.open.length ? `<button type="button" class="btn sm ghost" data-act="terr-plan" data-n="${x.t.n}">Plan</button>` : ''}</td>
-          </tr>`).join('') || `<tr><td colspan="11"><div class="empty">${region ? 'No accounts in this region yet.' : 'No mapped accounts in any territory yet. Accounts land in a territory once they\'re on the map.'}</div></td></tr>`}</tbody>
-          ${all.length > 1 ? (() => { const sum = (f) => all.reduce((n, x) => n + f(x), 0); return `<tfoot><tr class="terr-total">
-            <td></td><td><strong>Total</strong> <span class="small muted">${plural(all.length, 'territory', 'territories')}</span></td>
-            <td class="num">${sum((x) => x.accts)}</td><td class="num">${sum((x) => x.partners)}</td><td class="num col-opt">${sum((x) => x.open.length)}</td>
-            <td class="num">${sum((x) => x.due.length)}</td><td class="num col-opt">${sum((x) => x.cold.length)}</td><td class="num col-opt">${sum((x) => x.renew.length)}</td>
-            <td></td><td class="col-opt"></td><td></td></tr></tfoot>`; })() : ''}
+          </tr>`; }).join('') || `<tr><td colspan="${cols.length + 3}"><div class="empty">${gapOnly ? `No partner gaps${region ? ' in this region' : ''}.` : region ? 'No accounts in this region yet.' : 'No mapped accounts in any territory yet. Accounts land in a territory once they\'re on the map.'}</div></td></tr>`}</tbody>
+          ${all.length > 1 ? `<tfoot><tr class="terr-total"><td></td><td><strong>Total</strong> <span class="small muted">${plural(all.length, 'territory', 'territories')}</span></td>
+            ${cols.map((c) => `<td class="${c.text ? '' : 'num'} ${c.opt ? 'col-opt' : ''}">${c.v ? (c.fmt || String)(all.reduce((n, x) => n + c.v(x), 0)) : ''}</td>`).join('')}<td></td></tr></tfoot>` : ''}
         </table></div>
-        ${outside || unmapped ? `<p class="small muted" style="margin:.5rem 0 0">${[outside ? `${plural(outside, 'mapped account')} outside the 124 territories` : '', unmapped ? `${plural(unmapped, 'account')} not on the map yet` : ''].filter(Boolean).join(' · ')} · <a href="#map">Map</a></p>` : ''}
+        ${unmapped || outside ? `<div class="pin-banner"><span class="grow small">${unmapped ? `<b>${plural(unmapped, 'account')} ${unmapped === 1 ? 'isn\'t' : 'aren\'t'} on the map</b>, so no territory counts ${unmapped === 1 ? 'it' : 'them'}.` : ''}${outside ? ` ${plural(outside, 'mapped account')} outside the 124 territories.` : ''}</span>
+          ${unmapped ? '<button type="button" class="btn sm" data-act="terr-pin">Pin the missing ones</button>' : ''}<a class="btn sm ghost" href="#map">Map</a></div>` : ''}
       </div>`;
     $('#tb-region').addEventListener('change', (e) => { ui.terrRegion = e.target.value; rerender(); });
     $('#tb-empty').addEventListener('change', (e) => { ui.terrEmpty = e.target.checked; rerender(); });
+    $('#tb-gapmin').addEventListener('change', (e) => { ui.gapMin = Number(e.target.value) || 10; savePrefs(); rerender(); });
+  }
+
+  /** Accounts without a pin: look up their addresses here, add one, or drop the pin by hand on the map. */
+  function pinMissingForm() {
+    const list = () => state.accounts.filter((a) => !hasGeo(a));
+    const status = (a) => (!geoQuery(a) ? 'No address' : geoMissed(a) ? 'Address not found' : 'Not looked up yet');
+    const found = [];
+    let busy = null; let closed = false;
+    openModal('Pin the missing ones', `
+      <p class="small muted" style="margin:0">Accounts without a map pin aren't in any territory, so the board doesn't count them. Look up their addresses, add one, or drop the pin by hand.</p>
+      <div class="row" id="pm-bar"></div>
+      <div id="pm-found"></div>
+      <div class="drop-list" id="pm-list"></div>`, () => {}, 'Done', { wide: true });
+    const cancel = modalForm.querySelector('.modal-actions [data-close]');
+    if (cancel) cancel.remove();
+    const draw = () => {
+      const l = list(); const todo = l.filter(needsGeo);
+      $('#pm-bar').innerHTML = busy ? `<div class="grow"><div class="small">Looking up addresses… ${busy.done}/${busy.total}</div><div class="progress"><div style="width:${Math.round((busy.done / busy.total) * 100)}%"></div></div></div>`
+        : todo.length ? `<button type="button" class="btn sm" id="pm-look">Look up ${plural(todo.length, 'address', 'addresses')}</button>`
+          : `<span class="small muted">${l.length ? 'Nothing left to look up: add an address or drop the pin.' : 'Every account is on the map.'}</span>`;
+      $('#pm-found').innerHTML = found.length ? `<div class="pm-found small">${found.map(({ a, ok }) => `<div>${ok ? '✓' : '✗'} <b>${esc(a.name)}</b> ${ok ? `→ ${esc(terrName(a) || 'outside the territories')}` : '· not found'}</div>`).join('')}</div>` : '';
+      $('#pm-list').innerHTML = l.map((a) => `<div class="drop-row"><div class="grow"><strong>${esc(a.name)}</strong>
+          <div class="small muted">${esc(geoQuery(a))}${geoQuery(a) ? ' · ' : ''}<b>${status(a)}</b></div></div>
+          <button type="button" class="btn sm ghost" data-pm="addr" data-id="${a.id}">Address</button>
+          <button type="button" class="btn sm ghost" data-pm="pin" data-id="${a.id}">Drop pin</button></div>`).join('') || '<div class="empty">Every account is on the map.</div>';
+      const look = $('#pm-look');
+      if (look) look.addEventListener('click', lookUp);
+    };
+    const lookUp = async () => {
+      const todo = list().filter(needsGeo);
+      busy = { done: 0, total: todo.length }; draw();
+      for (const a of todo) {
+        if (closed) break;
+        const q = geoQuery(a);
+        try {
+          const hit = await geocode(q);
+          a.geo = hit ? { ...hit, q } : { q, miss: true };
+          touch(a); save();
+          found.push({ a, ok: !!hit });
+        } catch (e) { toast('Address lookup is unavailable right now. Try again later.'); break; }
+        busy.done++;
+        if (!closed) draw();
+        await new Promise((res) => setTimeout(res, 1100));
+      }
+      busy = null;
+      if (!closed) draw();
+    };
+    $('#pm-list').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-pm]'); if (!b) return;
+      const a = getAccount(b.dataset.id); if (!a) return;
+      closed = true; modal.close();
+      if (b.dataset.pm === 'addr') accountForm(a);
+      else { mapState.placing = a.id; mapState.keep = null; go('map'); setTimeout(() => toast('Tap the map where this account is'), 300); }
+    });
+    modal.addEventListener('close', () => { closed = true; if (found.length && location.hash.startsWith('#map/territories')) rerender(); }, { once: true });
+    draw();
   }
 
   // ---------- weekly activity report ----------
@@ -9957,12 +10419,17 @@ Give me the CSV file.`;
       case 'map-geo-retry': mapState.geoPausedUntil = 0; return rerender();
       case 'map-mode': return go(el.dataset.mode === 'route' ? `map/route/${ui.routeDate || today()}` : el.dataset.mode === 'territories' ? 'map/territories' : 'map');
       case 'terr-open': { const t = (socalData || []).find((x) => String(x.n) === el.dataset.n); return t ? socalCard(t) : undefined; }
-      case 'terr-plan': {
-        const t = (socalData || []).find((x) => String(x.n) === el.dataset.n);
-        const d = planDay();
-        if (t && addFieldDay(t, d)) go(`map/route/${d}`);
-        return undefined;
-      }
+      case 'terr-plan': { const t = terrByN(el.dataset.n); return t ? planTerritory(t, planDay()) : undefined; }
+      case 'terr-view': ui.terrView = el.dataset.v; savePrefs(); return rerender();
+      case 'terr-gaponly': ui.terrGapOnly = !ui.terrGapOnly; return rerender();
+      case 'terr-pin': return pinMissingForm();
+      case 'terr-map': ui.terrNum = el.dataset.v || 'accts'; savePrefs(); ui.mapSocal = true; mapState.keep = null; return go('map');
+      case 'dp-go': return go(`map/route/${el.dataset.date}`);
+      case 'dp-week': return go(`map/route/${addDays(ui.routeDate, Number(el.dataset.n))}`);
+      case 'dp-tab': ui.dpTab = el.dataset.tab; return rerender();
+      case 'dp-copy': return copyDayForm(ui.routeDate);
+      case 'dp-terr-del': { const r = getRoute(ui.routeDate); setRoute(ui.routeDate, { terrs: (r.terrs || []).filter((n) => n !== Number(el.dataset.n)) }); return rerender(); }
+      case 'dp-add': addRouteStop(ui.routeDate, id); dpState().picked.delete(id); return rerender();
       case 'terr-show': {
         ui.mapFilter = { ...ui.mapFilter, type: el.dataset.type === 'partner' ? 'partner' : 'prospect', terr: `b:${el.dataset.n}`, vendor: 'all', list: '' };
         mapState.keep = null;
