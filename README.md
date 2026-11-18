@@ -144,8 +144,8 @@ No install, no build step: open `index.html` in a browser.
 - **Copy summary**: a plain-text recap to paste into an email; **Export activities (CSV)**
 
 **Map & route planner**
-- Three screens: **Accounts** (the map), **Route** (the day's stops) and **Territories** (which
-  territory is overdue). **📍 Near me** is in the header of all three
+- Three screens: **Accounts** (the map), **Route** (the day planner) and **Territories** (who's in
+  each territory, what it's worth, which is overdue). **📍 Near me** is in the header of all three
 - **Accounts map**: every account with an address is pinned. **Color pins by** last touch (green
   within 30 days, amber 30–60, red 60+ or never: the red pins are your prospecting plan), by
   stage, by type or by renewal window; an orange ring means a follow-up or revisit is due.
@@ -168,10 +168,18 @@ No install, no build step: open `index.html` in a browser.
   territory that lists its city, else the closest one within 2 miles. The territory shows in the
   pin popup, on the account page, as an Accounts table **Territory** column (sortable) and as a
   saved-view filter ("Field territory is any of"). The territory dropdown filters the map by any
-  of the 124, and the **Territories** chip hides the layer. **Tap a territory** for its
-  scorecard: open accounts, due now, cold 30+ days, renewals in 90 days, last field day, days
-  since the last touch, and the top 10 **field day picks** with their reasons, for any day you
-  pick; add them all to that day's route or **Choose stops…**
+  of the 124, and the **Territories** chip hides the layer. Hovering a territory shows its
+  prospects, clients and partners. **Tap a territory** for its scorecard: prospects, clients,
+  partners (flagged when it's a partner gap), open pipeline, due now, cold 30+ days, renewals in
+  90 days, last field day, days since the last touch, and the top 10 **field day picks** with
+  their reasons, for any day you pick; add them all to that day's route, **Choose stops…**, or
+  **Open in the day planner** with the territory picked
+- **Numbers on territories** (Accounts map): each territory is shaded darker the more it has,
+  with its number on it, so you can read the map on a phone without hovering. Pick what the
+  number is: **Accounts** (prospects + clients, the default), **Partners**, **Open pipeline**,
+  **New in 30 days** or **Partner gaps** (orange where there are 10+ prospects and no partner),
+  or **Off**. Zoomed far out only the 12 biggest numbers show. Tap a number for the scorecard.
+  The choice is remembered on the device
 - **Renewal window** pin colors: red renews within 60 days, orange 61–120, yellow 121–180, blue
   further out, gray no renewal date. Renewals come from the vendor (PEO) renewal, **Benefits
   renewal** and **Workers' comp renewal** dates on the account, plus open key dates mentioning
@@ -186,8 +194,6 @@ No install, no build step: open `index.html` in a browser.
   the territory most of the day's stops are in. Switch to everywhere, near this route (5 mi), near
   you, any territory or any drawn zone; search by name or city; Prospects / Partners; add several
   without closing it
-- **Field day** (route planner): pick any of the 124 territories to fill the day's route with
-  its 10 best picks
 - **Outcome quick keys** on Log drop: Met the decision maker, Gatekeeper - left materials,
   Left at door, Meeting set, Asked to return, Nobody available / no access, Bad address / moved,
   Not a fit. Each sets a fitting default next follow-up (Meeting set → next workday, Asked to
@@ -208,14 +214,30 @@ No install, no build step: open `index.html` in a browser.
   Log a Call, **Copy all as table** (paste into a spreadsheet or Data Loader), **Copy as text** or
   **Download CSV**, then tick each one entered; the ticks are kept, and "Hide entered" shows what's
   left
-- **Territories board** (Map → Territories): every territory you have accounts in, most overdue
-  first. Overdue means open accounts and no field day in 30+ days. Columns: open accounts, due,
-  cold 30+, renewals in 90 days, last field day and last touch, all sortable, with a region
-  filter. **Plan** fills the next field day's route with that territory's best stops; tap a name
-  for its scorecard
-- **On a phone**: the route planner opens with a **Next stop** card (➤ Navigate, ✓ Log drop) above
-  the map; route settings and map filters fold away; buttons and quick keys are full-size tap
-  targets
+- **Territories board** (Map → Territories), Active book only. Four cards on top:
+  **Partner gaps** (territories with 10+ prospects and no partner, each with **Find brokers**, a
+  search for employee benefits brokers in its cities; the 10 is a setting on the card), **Open
+  pipeline** (total, employees, and the top three territories), **New in 30 days** (accounts
+  added, and where) and **Not on the map** (accounts no territory counts yet, with **Pin them**).
+  The table has three views:
+  - **Coverage**: Prospects, Clients, Partners (with a **Gap** flag), Referred 12 mo (accounts a
+    partner referred in the last year), New 30 d and the last field day
+  - **Pipeline**: Prospects, Clients, Open pipeline (S1–S5 value, with a bar), Headcount, Renew
+    90 d and Due
+  - **Field**: Open, Due, Cold 30+, Renew 90 d, last field day and last touch; overdue (open
+    accounts and no field day in 30+ days) is red
+
+  Every column sorts, with a region filter, **Show empty**, **Partner gaps only** and a **Total**
+  row. Tap a prospect or partner count to see them on the map, zoomed to the territory; **See it
+  on the map** turns on the matching numbers. **Plan** opens the next field day in the day
+  planner with that territory picked (nothing is added until you choose). On a phone the
+  board fits the screen: the number sits under the name and the headers shorten
+- **Pin the missing ones** (Territories board): every account without a pin and why (not looked
+  up yet, address not found, no address). **Look up** the addresses in one go and see which
+  territory each lands in, fix an **Address**, or **Drop pin** by hand on the map
+- **On a phone**: the day planner has three tabs, **Planned · Territory · Map**; on today, the
+  **Next stop** card (➤ Navigate, ✓ Log drop) is at the top of Planned. Route settings and map
+  filters fold away; buttons and quick keys are full-size tap targets
 - **Territories (drawn)**: draw your own zones on the map and pick the weekdays you're
   usually there. On those days the route planner suggests the zone's accounts that are due or
   haven't been touched in 30+ days ("Wednesday is Westside · Add these 6"). Synced
@@ -226,6 +248,23 @@ No install, no build step: open `index.html` in a browser.
   "E Huntington Dr" in Monrovia instead of Arcadia), the pin is kept but flagged "found in Monrovia
   91016". The map says how many accounts have no location or need a check (pinned only to a city,
   or found in a different city), with a Fix list: correct the address or **Drop pin** by hand
+- **Day planner** (Map → Route):
+  - **The week** across the top, Mon–Fri, each day with its territories and stop count (past days
+    show how many were visited). Tap a day to plan it; ‹ › move a week. **Copy to…** puts a day's
+    territories and stops onto another day
+  - **Field territories** for the day: pick one, then **+ Neighbor** lists the territories that
+    share its border, with how many accounts are waiting in each. Take one off with ×. Saved with
+    the day and synced
+  - **The day's total**: stops, miles, drive time and when you're back, with a bar from your
+    start time to the end of your workday (**Workday ends** in route settings, 5:00 PM by
+    default) that turns orange, with "Runs past 5:00 PM by 25 min", when the day is too full
+  - **Planned** (the route, below) next to **the accounts to add**: in the day's territories, near
+    the route (2 mi), or anywhere, best first with the reasons and how far each is from the route.
+    The search box always covers the whole book. Filter by Prospects, Partners or Clients and by
+    Due, Renewing, No touch 30+ d or Never dropped; sort best first, closest, longest since a
+    touch or by name. **+ Add** one, tick several and **Add to route**, or **Add the best 10**
+  - **The map** shows the day's territories, your numbered stops and a hollow pin for each
+    account in the list; tap one for **+ Add to route**
 - **Route planner** for any day: stops come in automatically from that day's planner Visits and
   Revisits, due revisit dates and cadence Visit steps. Add or remove stops as needed. The route
   re-optimizes itself whenever stops change, using real drive times (OSRM), from your home base
