@@ -1527,6 +1527,9 @@
   const PA_TAG = { win: 'News to share', news: 'News to share', chase: 'Promise to chase', mine: 'Your move', update: 'Update due', renew: 'Client renewing', balance: 'Give back', agreement: 'Agreement', touch: 'Touch target' };
   function partnerActions() {
     const t = today(); const out = [];
+    const byName = new Map();
+    for (const a of state.accounts) { const k = nameKey(a); byName.set(k, byName.has(k) ? null : a); }
+    const acctOf = (c) => (c.accountId && getAccount(c.accountId)) || byName.get((c.name || '').trim().toLowerCase()) || null;
     const refsBy = new Map();
     for (const a of state.accounts) {
       if (!isReferral(a)) continue;
@@ -1559,8 +1562,16 @@
           add('mine', `mine:${x.a.id}`, `${x.a.name}: ${x.a.nextWhat || (x.intro ? 'book the meeting' : 'next step')}, ${x.due < t ? `${plural(daysBetween(x.due, t), 'day')} overdue` : 'due today'}.`, { label: 'Open', href: `#account/${x.a.id}` }, daysBetween(x.due, t));
         }
       }
-      const cm = clientMap(p).worth.find((y) => y.soon && !(y.acct && isOpenDeal(y.acct)));
-      if (cm) add('renew', `renew:${cm.c.id}`, `Their client ${cm.c.name} renews ${dShort(cm.renewal)}${cm.incumbent ? ` on ${cm.incumbent}` : ''}.`, { label: 'Copy call agenda', act: 'pt-agenda', attrs: `data-id="${p.id}"` });
+      // The client renewing soonest in the next 90 days (names looked up once, not per client: big books stay fast).
+      let cm = null;
+      for (const c of partnerClients(p)) {
+        if (c.kind === 'former') continue;
+        const ac = acctOf(c); const r = c.renewal || (ac && ac.vendorRenewal) || '';
+        const left = r ? daysBetween(t, r) : null;
+        if (left === null || left < 0 || left > 90 || (ac && isOpenDeal(ac))) continue;
+        if (!cm || r < cm.r) cm = { c, r, inc: c.vendor || (ac ? ac.vendors.filter(NON_VENDOR)[0] || '' : '') };
+      }
+      if (cm) add('renew', `renew:${cm.c.id}`, `Their client ${cm.c.name} renews ${dShort(cm.r)}${cm.inc ? ` on ${cm.inc}` : ''}.`, { label: 'Copy call agenda', act: 'pt-agenda', attrs: `data-id="${p.id}"` });
       const got = referrals12(p).length;
       if (got >= 2 && !gives12(p).length) add('balance', 'balance', `Sent you ${got} referrals this year; you haven't logged anything back.`, { label: '+ Give something', act: 'pt-give', attrs: `data-id="${p.id}" data-kind="Benchmark report"` });
       const left = agreementLeft(p);
