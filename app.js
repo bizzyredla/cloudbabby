@@ -252,7 +252,7 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, mapSocal: ui.mapSocal, theme: ui.theme, linkMode: ui.linkMode, liMode: ui.liMode, moreOpen: ui.moreOpen })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, mapSocal: ui.mapSocal, theme: ui.theme, linkMode: ui.linkMode, liMode: ui.liMode, moreOpen: ui.moreOpen, webLogos: ui.webLogos })); } catch (e) { /* ignore */ }
   };
 
   // ----- appearance: follow the device, or always light / always dark (per device) -----
@@ -956,7 +956,7 @@
       <div class="card ct-table">
         <div class="ct-row ct-headrow">
           <input type="checkbox" id="ct-all" aria-label="Select all shown">
-          <span>Name</span><span>Account</span><span>Role</span><span>Reach</span><span>Stay in touch</span><span>Last touch</span><span>Next due</span><span></span>
+          <span>Name</span><span>Account</span><span>Role</span><span>Actions</span><span>Stay in touch</span><span>Last touch</span><span>Next due</span><span></span>
         </div>
         ${shown.map(({ a, c, s, last }) => {
           const active = isActiveContact(c);
@@ -965,15 +965,15 @@
         <div class="ct-row ${active ? '' : 'inactive'}">
           <input type="checkbox" class="ct-pick" data-id="${a.id}" data-cid="${c.id}" aria-label="Select ${esc(c.name)}">
           <div class="ct-name">
-            <span class="avatar sm" aria-hidden="true">${esc(initials(c.name))}</span>
+            <button type="button" class="photo-btn" data-act="photo-menu" data-id="${a.id}" data-cid="${c.id}" title="${c.photo ? 'Change the photo' : 'Add a photo'}" aria-label="Photo for ${esc(c.name)}">${personAvatar(c, a, 34)}</button>
             <div class="grow">
               <button type="button" class="link-btn title" data-act="open-contact" data-id="${a.id}" data-cid="${c.id}">${esc(c.name)}</button>${c.primary ? ' <span class="pill primary">Primary</span>' : ''}${c.flag ? ` <span class="pill overdue" title="${esc(c.flag)}">⚠</span>` : ''}
               <div class="small muted ellipsis">${esc(c.title || '') || '&nbsp;'}</div>
             </div>
           </div>
-          <div class="ct-acct small"><a href="#account/${a.id}">${esc(a.name)}</a> <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span></div>
+          <div class="ct-acct small">${logoTile(a, 20)}<a href="#account/${a.id}">${esc(a.name)}</a> <span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span></div>
           <div class="ct-role"><select class="role-sel ${ROLE_CLASS[c.role] || (c.role ? 'other' : 'none')}" data-ct-role data-id="${a.id}" data-cid="${c.id}" aria-label="Role for ${esc(c.name)}"><option value="">No role</option>${CONTACT_ROLES.map((r) => opt(r, r, c.role || '')).join('')}</select></div>
-          ${contactReach(c, a)}
+          ${contactActions(a, c)}
           <div class="ct-sit">${active ? staySelect(a, c, true) : `<select class="status-sel" data-ct-status data-id="${a.id}" data-cid="${c.id}" aria-label="Status for ${esc(c.name)}">${CONTACT_STATUSES.map((x) => opt(x, x, c.status)).join('')}</select>`}</div>
           <div class="ct-last small ${lateTouch ? 'pt-late' : ''}"><span class="ct-lbl">Last touch </span>${last ? esc(relDays(last)) : '<span class="muted">Never</span>'}</div>
           <div class="ct-next small"><span class="ct-lbl">Next </span>${s ? `<span class="pill ${dueClass(s.next)}">${esc(s.next <= t ? stayWhen(s.next) : shortDate(s.next))}</span>` : '<span class="muted">—</span>'}</div>
@@ -1501,14 +1501,15 @@
           <select id="pt-owner" aria-label="Owner"><option value="all">Any owner</option>${owners.map((x) => `<option ${ui.ptOwner === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
         </div>
         ${shown.length ? `<div class="rs-wrap"><table class="rs-table ptt-table">
-          <thead><tr>${PT_COLS.map(([k, l]) => `<th><button type="button" class="th-sort ${ui.ptSort === k ? 'on' : ''}" data-act="pt-sort" data-k="${k}">${esc(l)}${ui.ptSort === k ? (dir === 1 ? ' ▴' : ' ▾') : ''}</button></th>`).join('')}</tr></thead>
+          <thead><tr>${PT_COLS.map(([k, l]) => `<th><button type="button" class="th-sort ${ui.ptSort === k ? 'on' : ''}" data-act="pt-sort" data-k="${k}">${esc(l)}${ui.ptSort === k ? (dir === 1 ? ' ▴' : ' ▾') : ''}</button></th>`).join('').replace('</th>', '</th><th class="qa-col">Actions</th>')}</tr></thead>
           <tbody>${shown.slice(0, limit).map((r) => {
             const { p } = r;
             const ns = r.ns ? `<span class="${r.ns.date < t ? 'pt-late' : ''}">${esc(r.ns.title)} · ${esc(relDays(r.ns.date))}</span>`
               : r.enr ? `<span class="muted">${esc(r.enr.cad.name)} · step ${r.enr.e.step + 1} of ${r.enr.cad.steps.length}</span>`
               : `<span class="${r.tier === 'A' || r.tier === 'B' ? 'pt-late' : 'muted'}">Nothing planned</span>`;
             return `<tr class="ptt-row" data-act="open-account" data-id="${p.id}">
-              <td><strong>${esc(p.name)}</strong>${p.owner && p.owner !== 'Me' ? `<div class="small muted">${esc(p.owner)}</div>` : ''}</td>
+              <td><div class="nm-cell">${logoTile(p, 30)}<div class="nm-txt"><strong>${esc(p.name)}</strong>${p.owner && p.owner !== 'Me' ? `<div class="small muted">${esc(p.owner)}</div>` : ''}</div></div></td>
+              <td class="qa-col">${acctActions(p)}</td>
               <td title="${esc(r.tier ? `${TIERS[r.tier].name}: ${p.tier ? 'set by hand' : TIERS[r.tier].why}` : 'Closed')}">${tierPill(r.tier)}</td>
               <td class="small">${esc(p.partnerType || '—')}</td>
               <td>${r.refs12}${r.refsAll > r.refs12 ? ` <span class="small muted">(${r.refsAll} all)</span>` : ''}</td>
@@ -2328,7 +2329,7 @@
         <span class="q-check-sp" aria-hidden="true">${mode === 'done' ? '✓' : ''}</span>
         ${stepIcon({ type: it.type })}
         <div class="q-main"><div class="q-title">${esc(it.title)}</div><div class="q-sub">${esc((it.sub && !(it.acct && it.sub === it.acct.name) ? it.sub : it.why) || '')}</div></div>
-        <div class="q-acct">${it.acct ? `<a href="#account/${it.acct.id}">${esc(it.acct.name)}</a>` : ''}</div>
+        <div class="q-acct">${it.acct ? `<a class="q-acct-name" href="#account/${it.acct.id}">${logoTile(it.acct, 20)}<span>${esc(it.acct.name)}</span></a>` : ''}</div>
         <div class="q-due">${esc(fmtDate(it.due, { weekday: 'short', month: 'short', day: 'numeric' }))}</div>
         ${mode === 'future' && it.btn ? `<button class="btn sm ghost" data-act="${it.btn.act}" ${it.btn.attrs}>${esc(it.btn.act === 'enr-log' ? 'Do it early' : it.btn.label)}</button>` : '<span></span>'}
       </div>`;
@@ -2365,7 +2366,7 @@
         <input type="checkbox" data-act="q-check" data-key="${esc(it.key)}" aria-label="Done: ${esc(it.title)}">
         ${stepIcon({ type: it.type })}
         <div class="q-main"><div class="q-title">${esc(it.title)}</div><div class="q-sub">${esc(it.sub || it.why)}</div></div>
-        <div class="q-acct">${it.acct ? `<a href="#account/${it.acct.id}">${esc(it.acct.name)}</a><div class="small muted">${esc(it.acct.type === 'partner' ? `${stageShort(it.acct.stage)} partner` : stageShort(it.acct.stage))}</div>` : ''}</div>
+        <div class="q-acct">${it.acct ? `<a class="q-acct-name" href="#account/${it.acct.id}">${logoTile(it.acct, 20)}<span>${esc(it.acct.name)}</span></a><div class="small muted">${esc(it.acct.type === 'partner' ? `${stageShort(it.acct.stage)} partner` : stageShort(it.acct.stage))}</div>` : ''}</div>
         <div class="q-due ${it.late ? 'late' : ''}">${it.late ? esc(plural(it.late, 'day') + ' overdue') : it.due === t ? 'Today' : esc(fmtDate(it.due, { weekday: 'short', month: 'short', day: 'numeric' }))}</div>
         <button class="btn sm ${it.btn.primary ? '' : 'ghost'}" data-act="${it.btn.act}" ${it.btn.attrs}>${esc(it.btn.label)}</button>
       </div>`;
@@ -2635,7 +2636,7 @@
             ${prio.length ? `<div class="pa-table">
               <div class="pa-row pa-th"><span>Account</span><span>Stage</span><span>Value</span><span>Last touch</span><span>Next step</span><span>Open</span></div>
               ${firstTen('ov-prio', prio).map(({ a, lt, open }) => { const ns = nextStepOf(a); const old = !lt || daysBetween(lt, t) > 14; return `<div class="pa-row">
-                <a class="title" href="#account/${a.id}">${esc(a.name)}</a>
+                <a class="title nm-cell" href="#account/${a.id}">${logoTile(a, 24)}<span class="ellipsis">${esc(a.name)}</span></a>
                 <span class="small">${esc(a.type === 'partner' ? `${a.stage} partner` : stageShort(a.stage))}</span>
                 <span>${a.value ? money(a.value) : '<span class="muted">—</span>'}</span>
                 <span class="${old ? 'q-late' : ''}">${lt ? esc(relDays(lt)) : 'never'}</span>
@@ -3607,7 +3608,7 @@ Give me the CSV file.`;
       const p = primaryContact(a);
       return `
         <div class="acard" role="link" tabindex="0" data-act="open-account" data-id="${a.id}">
-          <div class="row spread"><span class="row" style="gap:.35rem"><strong class="acard-name">${esc(a.name)}</strong>${accountLinks(a)}</span>${typePill(a)}</div>
+          <div class="row spread" style="flex-wrap:nowrap"><span class="row nm-cell" style="gap:.55rem;flex-wrap:nowrap;min-width:0">${logoTile(a, 36)}<strong class="acard-name">${esc(a.name)}</strong></span>${typePill(a)}</div>
           <div class="small muted">${esc(a.stage)}${a.type === 'partner' && a.partnerType ? ' · ' + esc(a.partnerType) : ''}${a.value ? ' · ' + money(a.value) : ''}${a.industry ? ' · ' + esc(a.industry) : ''}</div>
           ${a.location ? `<div class="small acard-loc">📍 ${esc(a.location)}</div>` : ''}
           ${p ? `<div class="small">${esc(p.name)}${p.title ? ` <span class="muted">· ${esc(p.title)}</span>` : ''}${a.contacts.length > 1 ? ` <span class="muted">+${a.contacts.length - 1}</span>` : ''}</div>` : ''}
@@ -3617,6 +3618,7 @@ Give me the CSV file.`;
             <span>Follow-up ${dueChip(a.nextFollowUp)}</span>
             <span>Revisit ${dueChip(a.revisitDate)}</span>
           </div>
+          <div class="acard-qa">${acctActions(a, true)}</div>
         </div>`;
     }).join('')}</div>`;
   }
@@ -3644,7 +3646,7 @@ Give me the CSV file.`;
                   const p = primaryContact(a);
                   return `
                   <div class="kcard" draggable="${!touchUI}" data-id="${a.id}" data-act="open-account">
-                    <div class="row spread" style="gap:.3rem;flex-wrap:nowrap"><strong>${esc(a.name)}</strong>${accountLinks(a)}</div>
+                    <div class="row" style="gap:.45rem;flex-wrap:nowrap;min-width:0">${logoTile(a, 24)}<strong>${esc(a.name)}</strong></div>
                     ${a.location ? `<div class="small muted">📍 ${esc(a.location)}</div>` : ''}
                     ${p ? `<div class="small muted">${esc(p.name)}</div>` : ''}
                     ${a.vendors.length ? `<div class="small">${esc(a.vendors.join(', '))}</div>` : ''}
@@ -3822,7 +3824,8 @@ Give me the CSV file.`;
     };
     const rowHtml = (a) => `<tr class="click-row ${sel.has(a.id) ? 'picked' : ''}" data-act="open-account" data-id="${a.id}">
                 <td class="pick-col"><input type="checkbox" class="row-pick" data-id="${a.id}" ${sel.has(a.id) ? 'checked' : ''} aria-label="Select ${esc(a.name)}"></td>
-                <td class="sticky-col"><strong>${esc(a.name)}</strong>${fresh && fresh.has(a.id) ? ' <span class="pill new-pill">New</span>' : ''}<div class="row" style="gap:.35rem">${cols.includes('type') ? '' : typePill(a)}${accountLinks(a)}</div></td>
+                <td class="sticky-col"><div class="nm-cell">${logoTile(a, 32)}<div class="nm-txt"><strong>${esc(a.name)}</strong>${fresh && fresh.has(a.id) ? ' <span class="pill new-pill">New</span>' : ''}${cols.includes('type') ? '' : `<div class="row" style="gap:.35rem">${typePill(a)}</div>`}</div></div></td>
+                <td class="qa-col">${acctActions(a)}</td>
                 ${cols.map((k) => cell(a, k)).join('')}
               </tr>`;
     acctTable.row = rowHtml;
@@ -3830,7 +3833,7 @@ Give me the CSV file.`;
       <div class="card table-card">
         <div class="table-wrap">
           <table class="table acct-table">
-            <thead><tr><th class="pick-col"><input type="checkbox" class="row-pick" id="pick-all" aria-label="Select all shown" ${list.length && list.every((a) => sel.has(a.id)) ? 'checked' : ''}></th><th><button type="button" class="th-sort ${ui.sort === 'name' ? 'on' : ''}" data-act="sort" data-key="name">Account${ui.sort === 'name' ? (ui.sortDir > 0 ? ' ▲' : ' ▼') : ''}</button></th>${cols.map(th).join('')}</tr></thead>
+            <thead><tr><th class="pick-col"><input type="checkbox" class="row-pick" id="pick-all" aria-label="Select all shown" ${list.length && list.every((a) => sel.has(a.id)) ? 'checked' : ''}></th><th><button type="button" class="th-sort ${ui.sort === 'name' ? 'on' : ''}" data-act="sort" data-key="name">Account${ui.sort === 'name' ? (ui.sortDir > 0 ? ' ▲' : ' ▼') : ''}</button></th><th class="qa-col">Actions</th>${cols.map(th).join('')}</tr></thead>
             <tbody>${list.map(rowHtml).join('')}</tbody>
           </table>
         </div>
@@ -4223,7 +4226,7 @@ Give me the CSV file.`;
       <div class="card stack">
         <div class="detail-head">
           <div>
-            <div class="row"><h1 style="margin:0">${esc(a.name)}</h1>${accountLinks(a)}<span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span><span class="pill" title="${esc(STAGE_HINTS[a.stage] || '')}">${esc(a.stage)}</span>${a.type === 'partner' && a.partnerType ? `<span class="pill">${esc(a.partnerType)}</span>` : ''}</div>
+            <div class="row"><button type="button" class="logo-btn" data-act="logo-menu" data-id="${a.id}" title="Change the logo" aria-label="Change the logo for ${esc(a.name)}">${logoTile(a, 48)}<span class="logo-edit" aria-hidden="true">✎</span></button><h1 style="margin:0">${esc(a.name)}</h1>${accountLinks(a)}<span class="pill ${a.type}">${a.type === 'partner' ? 'Partner' : 'Prospect'}</span><span class="pill" title="${esc(STAGE_HINTS[a.stage] || '')}">${esc(a.stage)}</span>${a.type === 'partner' && a.partnerType ? `<span class="pill">${esc(a.partnerType)}</span>` : ''}</div>
             ${a.tags ? `<div class="row small muted" style="margin-top:.35rem">${tagList(a).map((x) => `<span class="pill">#${esc(x)}</span>`).join('')}</div>` : ''}
           </div>
           <div class="row">
@@ -4292,7 +4295,7 @@ Give me the CSV file.`;
           ${a.contacts.length ? `<div class="contact-grid">${[...a.contacts].sort((x, y) => (y.primary ? 1 : 0) - (x.primary ? 1 : 0)).map((c) => `
             <div class="contact-card" data-contact="${c.id}">
               <div class="row spread">
-                <div><strong>${esc(c.name)}</strong> ${c.primary ? '<span class="pill primary">Primary</span>' : ''}</div>
+                <div class="cc-who"><button type="button" class="photo-btn" data-act="photo-menu" data-id="${a.id}" data-cid="${c.id}" title="${c.photo ? 'Change the photo' : 'Add a photo'}" aria-label="Photo for ${esc(c.name)}">${personAvatar(c, null, 32)}</button><div><strong>${esc(c.name)}</strong> ${c.primary ? '<span class="pill primary">Primary</span>' : ''}</div></div>
                 <div class="row" style="gap:0">
                   ${researchMenu(a, c)}
                   <button class="icon-btn" data-act="enroll-contact" data-id="${a.id}" data-cid="${c.id}" title="Add to cadence">⇉</button>
@@ -6417,6 +6420,350 @@ Give me the CSV file.`;
         <a href="#research/${a.id}" class="ask-claude" title="Research ${esc(a.name)} with Claude and add the results to the CRM">✦ Ask Claude</a>
       </div>
     </details>`;
+  }
+
+  // ---------- logos, contact photos and the row quick actions ----------
+  // A logo tile is: the logo you pasted or uploaded, else the company website's own icon (its large phone
+  // icon, then its small browser icon through Google), else colored initials. Which website icon worked is
+  // remembered per domain on this device. Settings → Links can turn the website lookups off.
+  const LOGO_COLORS = ['#0e7490', '#7c3aed', '#b45309', '#1d4ed8', '#4d7c0f', '#be185d', '#0f766e', '#c2410c', '#334155', '#6d28d9', '#15803d', '#9a3412'];
+  const hashStr = (s) => { let h = 7; for (const ch of String(s || '')) h = (h * 31 + ch.charCodeAt(0)) | 0; return Math.abs(h); };
+  const tileColor = (name) => LOGO_COLORS[hashStr(name) % LOGO_COLORS.length];
+  const tileInitials = (name) => {
+    const w = String(name || '?').replace(/[^\p{L}\p{N}& ]+/gu, ' ').replace(/\b(inc|llc|ltd|co|corp|the|of|and)\b/gi, ' ').split(/\s+/).filter((x) => x && x !== '&');
+    return (((w[0] || '?')[0] || '?') + ((w[1] || '')[0] || '')).toUpperCase();
+  };
+  const LOGO_CACHE_KEY = 'minicrm.logoSrc';
+  let logoCache = {};
+  try { logoCache = JSON.parse(localStorage.getItem(LOGO_CACHE_KEY)) || {}; } catch (e) { /* none yet */ }
+  const saveLogoCache = () => { try { localStorage.setItem(LOGO_CACHE_KEY, JSON.stringify(logoCache)); } catch (e) { /* ignore */ } };
+  const webLogosOn = () => ui.webLogos !== false;
+  const LOGO_STEPS = ['touch', 'icon', 'none'];
+  const logoUrl = (dom, step) => (step === 'touch' ? `https://${dom}/apple-touch-icon.png` : `https://www.google.com/s2/favicons?domain=${encodeURIComponent(dom)}&sz=128`);
+  /** A square logo tile for an account (partner or prospect). */
+  function logoTile(a, size = 32) {
+    let img = '';
+    if (a.logo) img = `<img class="lt-img" src="${esc(a.logo)}" alt="" data-own="1">`;
+    else if (webLogosOn() && !a.noWebLogo && a.website) {
+      const dom = domainOf(a.website);
+      const step = dom ? logoCache[dom] || 'touch' : 'none';
+      if (step !== 'none') img = `<img class="lt-img" src="${esc(logoUrl(dom, step))}" alt="" loading="lazy" referrerpolicy="no-referrer" data-dom="${esc(dom)}" data-step="${step}">`;
+    }
+    return `<span class="logo-tile" style="--lt:${size}px;--lt-bg:${tileColor(a.name)}" aria-hidden="true">${esc(tileInitials(a.name))}${img}</span>`;
+  }
+  /** A person: their photo, else initials; with their company's logo as a small badge. */
+  function personAvatar(c, a, size = 34) {
+    return `<span class="p-av" style="--pa:${size}px" aria-hidden="true">${c.photo ? `<img class="pa-img" src="${esc(c.photo)}" alt="">` : esc(initials(c.name))}${a ? `<span class="p-badge">${logoTile(a, Math.max(14, Math.round(size * 0.46)))}</span>` : ''}</span>`;
+  }
+  function nextLogo(img) {
+    const dom = img.dataset.dom;
+    if (!dom) { img.remove(); return; }
+    const step = LOGO_STEPS[LOGO_STEPS.indexOf(img.dataset.step) + 1] || 'none';
+    if (step === 'none') { logoCache[dom] = 'none'; saveLogoCache(); img.remove(); return; }
+    img.dataset.step = step; img.src = logoUrl(dom, step);
+  }
+  document.addEventListener('load', (e) => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement) || !img.classList.contains('lt-img')) return;
+    if (img.dataset.dom && img.naturalWidth < 32) { nextLogo(img); return; } // a stand-in globe, not their logo
+    img.parentElement.classList.add('lt-on');
+    const dom = img.dataset.dom;
+    if (dom && logoCache[dom] !== img.dataset.step) { logoCache[dom] = img.dataset.step; saveLogoCache(); }
+  }, true);
+  document.addEventListener('error', (e) => {
+    const img = e.target;
+    if (img instanceof HTMLImageElement && img.classList.contains('lt-img')) nextLogo(img);
+  }, true);
+
+  /** An image (file or pasted) as a small square picture: a logo fits inside with its plain border trimmed; a photo is cropped. */
+  async function imageToTile(blob, { size = 128, cover = false } = {}) {
+    if (!blob || !/^image\//.test(blob.type || 'image/')) throw new Error('That isn\'t an image.');
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('That image could not be read.')); i.src = url; });
+      let sx = 0; let sy = 0; let sw = img.naturalWidth; let sh = img.naturalHeight;
+      if (!sw || !sh) throw new Error('That image is empty.');
+      if (cover) { const s = Math.min(sw, sh); sx = (sw - s) / 2; sy = (sh - s) / 2; sw = s; sh = s; } else {
+        const k = Math.min(1, 400 / Math.max(sw, sh)); const w = Math.max(1, Math.round(sw * k)); const h = Math.max(1, Math.round(sh * k));
+        const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0, w, h);
+        const d = cx.getImageData(0, 0, w, h).data;
+        const bg = [d[0], d[1], d[2], d[3]];
+        let x0 = w; let y0 = h; let x1 = -1; let y1 = -1;
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4;
+          if (Math.abs(d[i] - bg[0]) + Math.abs(d[i + 1] - bg[1]) + Math.abs(d[i + 2] - bg[2]) + Math.abs(d[i + 3] - bg[3]) > 40) {
+            if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+          }
+        }
+        if (x1 >= x0 && y1 >= y0) { sx = x0 / k; sy = y0 / k; sw = (x1 - x0 + 1) / k; sh = (y1 - y0 + 1) / k; }
+      }
+      const out = document.createElement('canvas'); out.width = size; out.height = size; const o = out.getContext('2d');
+      o.imageSmoothingQuality = 'high';
+      if (cover) o.drawImage(img, sx, sy, sw, sh, 0, 0, size, size);
+      else { const pad = size * 0.08; const box = size - pad * 2; const r = Math.min(box / sw, box / sh); o.drawImage(img, sx, sy, sw, sh, (size - sw * r) / 2, (size - sh * r) / 2, sw * r, sh * r); }
+      return cover ? out.toDataURL('image/jpeg', 0.85) : out.toDataURL('image/png');
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  /** Logo or photo: paste, upload, (logos) find on Google, use the website icon, remove. */
+  function pictureMenu(a, c) {
+    const isPhoto = !!c;
+    const dom = isPhoto ? '' : domainOf(a.website || '');
+    const now = isPhoto ? (c.photo ? 'Your photo' : 'Initials (no photo yet)')
+      : a.logo ? 'Your logo' : webLogosOn() && !a.noWebLogo && dom ? `The icon from ${dom} when it has one, else initials` : 'Initials (no logo yet)';
+    openModal(isPhoto ? `Photo · ${c.name}` : `Logo · ${a.name}`, `
+      <div class="pm-now">${isPhoto ? personAvatar(c, null, 64) : logoTile(a, 64)}<div class="small muted">${esc(now)}</div></div>
+      <div class="pm-opts">
+        <button type="button" class="pm-opt" id="pm-paste"><b>Paste ${isPhoto ? 'photo' : 'logo'}</b><span>${isPhoto ? 'Copy their LinkedIn photo (or any image) first, then tap here' : 'Copy the image in Safari first, then tap here'}</span></button>
+        <div class="pm-box" id="pm-box" contenteditable="true" hidden aria-label="Paste here"></div>
+        <label class="pm-opt"><input type="file" accept="image/*" id="pm-file" hidden><b>Upload image</b><span>From Photos or Files. ${isPhoto ? 'It\'s cropped to a circle' : 'A screenshot works too'}</span></label>
+        ${isPhoto ? '' : `<a class="pm-opt" href="https://www.google.com/search?tbm=isch&q=${encodeURIComponent(`${a.name} logo`)}" target="_blank" rel="noopener"><b>Find logo on Google ↗</b><span>Opens “${esc(a.name)} logo” in Google Images. Copy one, come back, Paste</span></a>`}
+        ${dom ? `<button type="button" class="pm-opt" id="pm-web"><b>Use website icon</b><span>From ${esc(dom)}</span></button>` : ''}
+        <button type="button" class="pm-opt danger" id="pm-remove"><b>Remove ${isPhoto ? 'photo' : 'logo'}</b><span>Show initials</span></button>
+      </div>`, () => {}, 'Done');
+    const cancel = modalForm.querySelector('.modal-actions [data-close]:not(.modal-x)');
+    if (cancel) cancel.remove();
+    const done = (msg) => { touch(a); save(); modal.close(); rerender(); toast(msg); };
+    const take = async (blob) => {
+      try {
+        const data = await imageToTile(blob, isPhoto ? { size: 160, cover: true } : { size: 128 });
+        if (isPhoto) c.photo = data; else { a.logo = data; a.noWebLogo = false; }
+        done(isPhoto ? 'Photo saved' : 'Logo saved');
+      } catch (err) { toast(err.message); }
+    };
+    const box = $('#pm-box');
+    const onPaste = (e) => {
+      const f = [...((e.clipboardData && e.clipboardData.files) || [])].find((x) => /^image\//.test(x.type));
+      if (f) { e.preventDefault(); take(f); }
+      else if (e.target === box) { e.preventDefault(); toast('No image to paste. Copy an image first.'); }
+    };
+    modalForm.addEventListener('paste', onPaste);
+    $('#pm-paste').addEventListener('click', async () => {
+      try {
+        if (!navigator.clipboard || !navigator.clipboard.read) throw new Error('no read');
+        for (const item of await navigator.clipboard.read()) {
+          const type = item.types.find((x) => /^image\//.test(x));
+          if (type) return take(await item.getType(type));
+        }
+        toast('No image to paste. Copy an image first.');
+      } catch (err) {
+        box.hidden = false; box.focus();
+        box.textContent = '';
+        toast('Press and hold in the box, then choose Paste');
+      }
+    });
+    $('#pm-file').addEventListener('change', (e) => { const f = e.target.files && e.target.files[0]; if (f) take(f); });
+    if ($('#pm-web')) $('#pm-web').addEventListener('click', () => { a.logo = ''; a.noWebLogo = false; delete logoCache[dom]; saveLogoCache(); done('Using the website icon'); });
+    $('#pm-remove').addEventListener('click', () => {
+      if (isPhoto) c.photo = ''; else { a.logo = ''; a.noWebLogo = true; }
+      done(isPhoto ? 'Photo removed' : 'Logo removed');
+    });
+  }
+
+  // ----- the row actions: People · Log · Tasks · Links (accounts and partners); Reach · Log touch · Next step · Links (contacts) -----
+  const QA_SVG = {
+    people: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    log: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/></svg>',
+    tasks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path class="dots" d="M4 6h.01M4 12h.01M4 18h.01"/></svg>',
+    links: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>',
+    reach: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>',
+  };
+  const QA_ACCT = [['people', 'People'], ['log', 'Log'], ['tasks', 'Tasks'], ['links', 'Links']];
+  const QA_CONTACT = [['reach', 'Reach', 'reach'], ['clog', 'Log touch', 'log'], ['cnext', 'Next step', 'tasks'], ['clinks', 'Links', 'links']];
+  const QA_TITLES = { people: 'People', log: 'Log activity', tasks: 'Tasks and next steps', links: 'Links: Salesforce, ZoomInfo, LinkedIn', reach: 'Reach: call, text or email', clog: 'Log a touch', cnext: 'Next step', clinks: 'Links: LinkedIn, ZoomInfo, Salesforce' };
+  /** The four action buttons for an account row (labels shown on cards). */
+  const acctActions = (a, labels = false) => `<span class="qa-btns ${labels ? 'qa-labels' : ''}">${QA_ACCT.map(([k, l]) => `<button type="button" class="qa-btn" data-act="qa" data-kind="${k}" data-id="${a.id}" title="${esc(QA_TITLES[k])}" aria-label="${esc(QA_TITLES[k])}: ${esc(a.name)}" aria-expanded="false">${QA_SVG[k]}<span class="qa-lbl">${l}</span></button>`).join('')}</span>`;
+  const contactActions = (a, c) => `<span class="qa-btns ct-qa">${QA_CONTACT.map(([k, l, ic]) => `<button type="button" class="qa-btn" data-act="qa" data-kind="${k}" data-id="${a.id}" data-cid="${c.id}" title="${esc(QA_TITLES[k])}" aria-label="${esc(QA_TITLES[k])}: ${esc(c.name)}" aria-expanded="false">${QA_SVG[ic]}<span class="qa-lbl">${l}</span></button>`).join('')}</span>`;
+
+  /** Where Salesforce lives for you: the address of any Salesforce link you've saved. */
+  function sfOrigin() {
+    const urls = [...state.accounts.map((x) => x.salesforceUrl), ...(state.watchlist || []).map((x) => x.salesforce_url)].filter(Boolean);
+    for (const u of urls) { try { const o = new URL(extUrl(u)); if (/(salesforce|force)\.com$/i.test(o.hostname)) return o.origin; } catch (e) { /* skip */ } }
+    return '';
+  }
+  const sfSearch = (name) => { const o = sfOrigin(); return o ? `${o}/_ui/search/ui/UnifiedSearchResults?str=${encodeURIComponent(name)}` : ''; };
+  const QA_BADGE = { SF: ['#e6effa', '#0b5cab'], ZI: ['#fdecea', '#b42318'], in: ['#e8f0fa', '#0a66c2'], SN: ['#e8f0fa', '#0a66c2'], G: ['#eef2f8', '#1a5fd0'], web: ['', ''] };
+  const linkTile = ([badge, label, href, sub, copy, act]) => {
+    const b = badge === 'web' ? `<span class="ql-badge web">${SVG_WEB}</span>` : `<span class="ql-badge" style="background:${QA_BADGE[badge][0]};color:${QA_BADGE[badge][1]}">${esc(badge)}</span>`;
+    const inner = `${b}<span class="ql-txt"><b>${esc(label)}</b><span>${esc(sub)}</span></span>`;
+    return href ? `<a class="ql-tile" href="${esc(href)}" target="_blank" rel="noopener" ${copy ? `data-copy="${esc(copy)}"` : ''}>${inner}</a>`
+      : `<button type="button" class="ql-tile" ${act || ''}>${inner}</button>`;
+  };
+  function acctLinkItems(a) {
+    const id = liIdOf(a); const sf = a.salesforceUrl ? extUrl(a.salesforceUrl) : sfSearch(a.name);
+    return [
+      ['SF', 'Salesforce', sf, a.salesforceUrl ? 'Open the record' : sf ? 'Search by name · name copied' : 'Add the record link', a.salesforceUrl ? '' : a.name, `data-act="edit-account" data-id="${a.id}"`],
+      ['ZI', 'ZoomInfo', 'https://app.zoominfo.com/#/apps/search/v2', 'Search · name copied', a.name],
+      ['in', 'LinkedIn', a.linkedin ? extUrl(a.linkedin) : liCompanySearch(a.name), a.linkedin ? 'Company page' : 'Find the company', a.linkedin ? '' : a.name],
+      ['SN', 'Sales Navigator', id ? snCompanyUrl(id) : snCompanySearch(a.name), id ? 'The account' : 'Search accounts', id ? '' : a.name],
+      ...(id ? [['SN', 'People here', snPeopleAt(id, a.name), 'Leads now at the company', '']] : []),
+      ['ZI', 'ZoomInfo profile', `https://www.google.com/search?q=${encodeURIComponent(`site:zoominfo.com/c ${a.name}`)}`, 'Public company profile', ''],
+      ...(a.website ? [['web', 'Website', extUrl(a.website), domainOf(a.website), '']] : []),
+      ['G', 'Google', `https://www.google.com/search?q=${encodeURIComponent([a.name, a.location].filter(Boolean).join(' '))}`, 'Search the web', ''],
+    ];
+  }
+  function contactLinkItems(a, c) {
+    const q = `${c.name} ${a.name}`; const sf = sfSearch(c.name);
+    return [
+      ['in', 'LinkedIn', c.linkedin ? extUrl(c.linkedin) : liPeopleSearch(c.name, a.name), c.linkedin ? 'Profile' : 'Find them', c.linkedin ? '' : q],
+      ['SN', 'Sales Navigator', c.salesNav ? extUrl(c.salesNav) : snPeopleSearch(q), c.salesNav ? 'Lead' : 'Search leads', c.salesNav ? '' : q],
+      ['ZI', 'ZoomInfo', 'https://app.zoominfo.com/#/apps/search/v2', 'Search · name copied', q],
+      ['SF', 'Salesforce', sf || (a.salesforceUrl ? extUrl(a.salesforceUrl) : ''), sf ? 'Search by name · name copied' : a.salesforceUrl ? 'Their account' : 'Add the account\'s record link', sf ? c.name : '', `data-act="edit-account" data-id="${a.id}"`],
+      ['G', 'Google', `https://www.google.com/search?q=${encodeURIComponent(q)}`, 'Name + company', ''],
+    ];
+  }
+  const whenText = (d) => { const t = today(); return !d ? '' : d === t ? 'Today' : d < t ? `${plural(daysBetween(d, t), 'day')} overdue` : relDays(d); };
+  /** Everything planned for an account: follow-up, revisit, open tasks, cadence steps, key dates in the next 60 days. */
+  function nextStepsOf(a) {
+    const t = today(); const out = [];
+    const p = primaryContact(a);
+    if (a.nextFollowUp) out.push({ kind: 'Follow-up', what: p ? `Follow up with ${p.name}` : 'Follow up', date: a.nextFollowUp });
+    if (a.revisitDate) out.push({ kind: 'Revisit', what: a.revisitNote || 'Go back', date: a.revisitDate });
+    state.tasks.filter((x) => x.accountId === a.id && !x.done).forEach((x) => out.push({ kind: 'Task', what: `${x.title}${x.time ? ` · ${x.time}` : ''}`, date: x.date }));
+    liveEnrollments().filter((q) => q.acct.id === a.id && q.e.status === 'active').forEach((q) => out.push({ kind: 'Cadence', what: `${q.cad.name} · step ${q.e.step + 1}: ${q.step.title || stepType(q.step).label} (${q.contact.name})`, date: q.e.dueDate }));
+    a.keyDates.filter((k) => !k.done && k.date >= t && daysBetween(t, k.date) <= 60).forEach((k) => out.push({ kind: 'Key date', what: k.label, date: k.date }));
+    return out.sort((x, y) => (x.date || '9').localeCompare(y.date || '9'));
+  }
+  const stepRows = (list, empty) => (list.length ? list.map((s) => `<div class="qs-row"><span class="qs-kind">${esc(s.kind)}</span><span class="qs-what">${esc(s.what)}</span><span class="qs-when ${s.date && s.date < today() ? 'late' : ''}">${esc(whenText(s.date))}</span></div>`).join('')
+    : `<div class="qs-row"><span class="qs-what late">${esc(empty)}</span></div>`);
+  const reachLinks = (c, a) => {
+    const tiles = [
+      c.mobile ? ['Call mobile', `tel:${c.mobile}`, c.mobile] : null,
+      c.phone ? ['Call direct', `tel:${c.phone}`, c.phone] : null,
+      c.mobile || c.phone ? ['Text', `sms:${c.mobile || c.phone}`, c.mobile || c.phone] : null,
+      c.email ? ['Email', `mailto:${c.email}`, c.email] : null,
+      a && a.mainPhone && a.mainPhone !== c.phone ? ['Call main line', `tel:${a.mainPhone}`, a.mainPhone] : null,
+    ].filter(Boolean);
+    return tiles.length ? tiles.map(([l, href, sub]) => `<a class="ql-tile" href="${esc(href)}"><span class="ql-txt"><b>${esc(l)}</b><span>${esc(sub)}</span></span></a>`).join('')
+      : `<div class="small muted">No phone or email saved for ${esc(c.name)}. <button type="button" class="link-btn small" data-act="edit-contact" data-id="${a.id}" data-cid="${c.id}">Add them</button></div>`;
+  };
+  const LOG_KINDS = ['Call', 'Email', 'LinkedIn', 'Text', 'Meeting', 'Visit'];
+  const CLOG_KINDS = [['Call', 'Call'], ['Email', 'Email'], ['Text', 'Text'], ['LinkedIn', 'LinkedIn'], ['Meeting', 'Met in person']];
+
+  /** The panel for one action: { title, html, wire(el) }. */
+  function quickPanel(kind, a, c) {
+    if (kind === 'people') {
+      const people = [...a.contacts].sort((x, y) => (isActiveContact(y) ? 1 : 0) - (isActiveContact(x) ? 1 : 0) || (y.primary ? 1 : 0) - (x.primary ? 1 : 0));
+      return {
+        title: `People at ${a.name}`,
+        html: `${people.length ? people.map((p) => { const lc = lastContacted(a, p); return `<div class="qp-row ${isActiveContact(p) ? '' : 'inactive'}">
+            ${personAvatar(p, null, 34)}
+            <div class="grow"><button type="button" class="link-btn title" data-act="open-contact" data-id="${a.id}" data-cid="${p.id}">${esc(p.name)}</button> ${p.role ? rolePill(p.role) : ''}
+              <div class="small muted">${esc(p.title || '')}${p.title ? ' · ' : ''}${lc ? `last touch ${esc(relDays(lc))}` : 'never touched'}</div></div>
+            ${contactReach(p, a)}
+          </div>`; }).join('') : '<div class="small muted">No contacts yet.</div>'}
+          <div class="qa-foot"><button type="button" class="btn sm ghost" data-act="new-contact" data-id="${a.id}">+ Add contact</button><a class="btn sm ghost" href="#account/${a.id}">Open account</a></div>`,
+      };
+    }
+    if (kind === 'log' || kind === 'clog') {
+      const kinds = kind === 'clog' ? CLOG_KINDS : LOG_KINDS.map((k) => [k, k]);
+      const first = c ? channelKind(c, ['Call', 'Email', 'Text', 'LinkedIn']) : 'Call';
+      const people = a.contacts.filter(isActiveContact);
+      return {
+        title: kind === 'clog' ? `Log a touch · ${c.name}` : `Log activity · ${a.name}`,
+        html: `<div class="ql-kinds" role="group" aria-label="Type">${kinds.map(([k, l]) => `<button type="button" class="ql-chip ${k === first ? 'on' : ''}" data-k="${k}">${esc(l)}</button>`).join('')}</div>
+          ${kind === 'log' ? '<div class="ql-outs" role="group" aria-label="Outcome"></div>' : ''}
+          <div class="qa-foot">
+            ${kind === 'log' && people.length ? `<label class="small">With <select class="ql-who">${people.map((p) => opt(p.id, p.name, (primaryContact(a) || {}).id)).join('')}</select></label>` : ''}
+            <span class="small muted ql-next">${kind === 'clog' ? (() => { const s = stayInfo(a, c); return s ? `Restarts their ${esc(s.label.toLowerCase())} stay-in-touch clock` : 'Counts as a touch with them'; })() : ''}</span>
+            <span class="grow"></span>
+            ${kind === 'log' ? `<button type="button" class="btn sm ghost" data-act="log" data-id="${a.id}">More details…</button>` : ''}
+            <button type="button" class="btn sm ql-save">${kind === 'clog' ? 'Log touch' : 'Save'}</button>
+          </div>`,
+        wire(el) {
+          let k = first; let out = '';
+          const outs = el.querySelector('.ql-outs');
+          const next = el.querySelector('.ql-next');
+          const drawOuts = () => {
+            if (!outs) return;
+            const list = ACT_OUTCOMES[k] || [];
+            outs.innerHTML = list.map(([o]) => `<button type="button" class="ql-chip sq ${o === out ? 'on' : ''}" data-o="${esc(o)}">${esc(o)}</button>`).join('');
+            const days = (list.find(([o]) => o === out) || [])[1];
+            next.textContent = out ? (days ? `Next follow-up ${fmtDate(shiftDays(today(), days, true), { weekday: 'short', month: 'short', day: 'numeric' })}` : 'No follow-up after this') : (a.nextFollowUp ? `Follow-up stays ${whenText(a.nextFollowUp).toLowerCase()}` : '');
+          };
+          el.addEventListener('click', (e) => {
+            const chip = e.target.closest('.ql-chip');
+            if (chip && chip.dataset.k) {
+              if (chip.dataset.k === 'Visit') return visitLogForm(a);
+              k = chip.dataset.k; out = '';
+              el.querySelectorAll('.ql-kinds .ql-chip').forEach((x) => x.classList.toggle('on', x === chip));
+              return drawOuts();
+            }
+            if (chip && chip.dataset.o !== undefined) { out = out === chip.dataset.o ? '' : chip.dataset.o; return drawOuts(); }
+            if (e.target.closest('.ql-save')) {
+              const who = c ? c.id : (el.querySelector('.ql-who') || {}).value || '';
+              const label = (CLOG_KINDS.find(([x]) => x === k) || [k, k])[1];
+              const summary = c ? (stayInfo(a, c) ? `Stay in touch: ${c.name}` : `${label} with ${c.name}`) : out ? `${k}: ${out}` : k;
+              a.activities.push({ id: uid(), date: today(), kind: k, summary, notes: '', contactId: who, createdAt: new Date().toISOString() });
+              if (out) { const days = ((ACT_OUTCOMES[k] || []).find(([o]) => o === out) || [])[1]; a.nextFollowUp = days ? shiftDays(today(), days, true) : ''; }
+              touch(a); save(); if (modal.open) modal.close(); rerender();
+              toast(`${c ? `Touch with ${c.name}` : summary} logged`);
+            }
+            return undefined;
+          });
+          drawOuts();
+        },
+      };
+    }
+    if (kind === 'tasks') {
+      return {
+        title: `Next steps · ${a.name}`,
+        html: `${stepRows(nextStepsOf(a), 'Nothing planned yet')}
+          <div class="qa-foot"><a class="btn sm ghost" href="#account/${a.id}">Open account</a><button type="button" class="btn sm" data-act="new-task" data-id="${a.id}">+ Plan task</button></div>`,
+      };
+    }
+    if (kind === 'cnext') {
+      const s = stayInfo(a, c);
+      const list = [
+        ...enrollmentsFor(c.id).filter((q) => q.e.status === 'active').map((q) => ({ kind: 'Cadence', what: `${q.cad.name} · step ${q.e.step + 1}: ${q.step.title || stepType(q.step).label}`, date: q.e.dueDate })),
+        ...(s ? [{ kind: 'Stay in touch', what: `${s.label} touch`, date: s.next }] : []),
+        ...nextStepsOf(a).filter((x) => x.kind !== 'Cadence'),
+      ].sort((x, y) => (x.date || '9').localeCompare(y.date || '9'));
+      return {
+        title: `Next step · ${c.name}`,
+        html: `${stepRows(list, 'Nothing planned yet')}
+          <div class="qa-foot"><button type="button" class="btn sm ghost" data-act="enroll-contact" data-id="${a.id}" data-cid="${c.id}">Add to a cadence</button><button type="button" class="btn sm" data-act="new-task" data-id="${a.id}">+ Plan task</button></div>`,
+      };
+    }
+    if (kind === 'reach') return { title: `Reach ${c.name}`, html: `<div class="ql-grid">${reachLinks(c, a)}</div>` };
+    const items = kind === 'clinks' ? contactLinkItems(a, c) : acctLinkItems(a);
+    return {
+      title: `Open ${c ? c.name : a.name} in…`,
+      html: `<div class="ql-grid">${items.map(linkTile).join('')}</div><div class="small muted">Searches copy the name too, for a site that opens without it filled in.</div>`,
+    };
+  }
+
+  /** Open (or close) an action's panel: right under a table row, or as a sheet from a card or on a phone. */
+  function openQuick(btn) {
+    const a = getAccount(btn.dataset.id); if (!a) return;
+    const c = btn.dataset.cid ? a.contacts.find((x) => x.id === btn.dataset.cid) : null;
+    const kind = btn.dataset.kind;
+    const row = btn.closest('tr, .ct-row');
+    const openPanel = document.querySelector('.qa-open');
+    const wasThis = openPanel && openPanel.dataset.for === `${kind}:${a.id}:${c ? c.id : ''}`;
+    if (openPanel) openPanel.remove();
+    $$('.qa-btn.on').forEach((b) => { b.classList.remove('on'); b.setAttribute('aria-expanded', 'false'); });
+    if (wasThis) return;
+    const p = quickPanel(kind, a, c);
+    const inline = row && !btn.closest('.acard, .kcard') && window.innerWidth > 700;
+    if (!inline) {
+      openModal(p.title, `<div class="qa-panel sheet">${p.html}</div>`, () => {}, 'Done');
+      const cancel = modalForm.querySelector('.modal-actions [data-close]:not(.modal-x)');
+      if (cancel) cancel.remove();
+      if (p.wire) p.wire(modalForm.querySelector('.qa-panel'));
+      return;
+    }
+    const html = `<div class="qa-panel"><div class="qa-head"><b>${esc(p.title)}</b><button type="button" class="icon-btn qa-x" aria-label="Close">✕</button></div>${p.html}</div>`;
+    let host;
+    if (row.tagName === 'TR') { host = document.createElement('tr'); host.innerHTML = `<td colspan="${row.children.length}">${html}</td>`; } else { host = document.createElement('div'); host.innerHTML = html; }
+    host.className = 'qa-open'; host.dataset.for = `${kind}:${a.id}:${c ? c.id : ''}`;
+    row.after(host);
+    // in a table that scrolls sideways, keep the panel the width of what's on screen
+    const wrap = row.tagName === 'TR' && row.closest('.table-wrap, .rs-wrap');
+    if (wrap) host.querySelector('.qa-panel').style.maxWidth = `${Math.max(280, wrap.clientWidth - 24)}px`;
+    btn.classList.add('on'); btn.setAttribute('aria-expanded', 'true');
+    host.querySelector('.qa-x').addEventListener('click', () => { host.remove(); btn.classList.remove('on'); btn.setAttribute('aria-expanded', 'false'); btn.focus(); });
+    if (p.wire) p.wire(host.querySelector('.qa-panel'));
   }
 
   // Research links copy the search text so it's ready to paste; menus close when you click elsewhere.
@@ -9268,12 +9615,16 @@ Give me the CSV file.`;
 
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
-    if (!el || el.closest('#modal-form')) return;
+    if (!el || (el.closest('#modal-form') && !el.closest('.qa-panel.sheet'))) return;
+    if (el.closest('.qa-panel.sheet') && (el.dataset.act === 'open-contact')) modal.close();
     const { act, id, kid, hid, tid, cid } = el.dataset;
     const acct = id && getAccount(id);
 
     switch (act) {
       case 'new-account': return accountForm();
+      case 'qa': return openQuick(el);
+      case 'logo-menu': return acct ? pictureMenu(acct) : undefined;
+      case 'photo-menu': { const c = acct && acct.contacts.find((x) => x.id === cid); return c ? pictureMenu(acct, c) : undefined; }
       case 'edit-account': return accountForm(acct);
       case 'del-account':
         if (confirm(`Delete ${acct.name} and all its history? Planner tasks will be unlinked.`)) {
@@ -9715,6 +10066,11 @@ Give me the CSV file.`;
       </section>
       ${linkSettingsHtml()}
       <section class="set-sec">
+        <h3>Logos</h3>
+        <div class="set-row"><span class="small">Look up logos on company websites</span><div class="seg" role="group" aria-label="Logos from websites">${[['on', 'On'], ['off', 'Off']].map(([k, l]) => `<button type="button" class="${(webLogosOn() ? 'on' : 'off') === k ? 'active' : ''}" data-link-pick="logo" data-v="${k}" aria-pressed="${(webLogosOn() ? 'on' : 'off') === k}">${l}</button>`).join('')}</div></div>
+        <p class="small muted" style="margin:.35rem 0 0">For an account with a website and no logo of yours, its icon comes from the site, or from Google, which then sees the website address. Off: initials until you add a logo. Logos you paste or upload always show.</p>
+      </section>
+      <section class="set-sec">
         <h3>Cloud sync</h3>
         <div id="sync-live">${syncStatusHtml()}</div>
         <button type="button" class="btn ghost sm" id="set-sync">${cloudOn() ? 'Sync settings' : 'Set up sync'}</button>
@@ -9746,7 +10102,9 @@ Give me the CSV file.`;
       if (location.hash.startsWith('#map')) rerender(); // map tiles darken with the theme
     }));
     $$('[data-link-pick]', modalForm).forEach((b) => b.addEventListener('click', () => {
-      if (b.dataset.linkPick === 'li') ui.liMode = b.dataset.v; else ui.linkMode = b.dataset.v;
+      if (b.dataset.linkPick === 'li') ui.liMode = b.dataset.v;
+      else if (b.dataset.linkPick === 'logo') { ui.webLogos = b.dataset.v === 'on'; rerender(); }
+      else ui.linkMode = b.dataset.v;
       savePrefs();
       $$(`[data-link-pick="${b.dataset.linkPick}"]`, modalForm).forEach((x) => { x.classList.toggle('active', x === b); x.setAttribute('aria-pressed', String(x === b)); });
     }));
@@ -9776,11 +10134,12 @@ Give me the CSV file.`;
       // People first when the words match a person rather than an account's own name.
       const accountsHtml = (accts.length ? `<div class="gs-h">Accounts</div>${accts.map((a) => `
           <a class="gs-item" href="#account/${a.id}" data-close>
+            ${logoTile(a, 28)}
             <span class="grow"><strong>${esc(a.name)}</strong><span class="small muted"> · ${esc(a.stage)}${a.partnerType ? ' · ' + esc(a.partnerType) : ''}${a.vendors.length ? ' · ' + esc(a.vendors.join(', ')) : ''}</span></span>${typePill(a)}
           </a>`).join('')}` : '');
       const peopleHtml = (people.length ? `<div class="gs-h">Contacts</div>${people.map(({ a, c }) => `
           <a class="gs-item" href="#account/${a.id}" data-cid="${c.id}" data-close>
-            <span class="avatar sm">${esc(initials(c.name))}</span>
+            ${personAvatar(c, a, 28)}
             <span class="grow"><strong>${esc(c.name)}</strong><span class="small muted">${c.title ? ' · ' + esc(c.title) : ''} · ${esc(a.name)}</span></span>
           </a>`).join('')}` : '');
       const peopleFirst = people.length && !accts.some((a) => a.name.toLowerCase().includes(q));

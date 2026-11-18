@@ -237,6 +237,34 @@ No install, no build step: open `index.html` in a browser.
 - Accounts have a street address field; CSV import reads street address and ZIP columns
 - Map: Leaflet (bundled in `vendor/leaflet`, BSD-2 license), map tiles © OpenStreetMap contributors (Esri World Street Map as a backup); no API key needed
 
+**Logos, photos and the row actions**
+- **Logos** on every account and partner: in the Accounts table, cards and board, the Partners table,
+  the account page, the planner, the Overview and search. A logo is the one you **paste or upload**,
+  else the **company website's icon** (its large phone icon, then its small browser icon), else
+  **colored initials** that keep the same color. Which website icon worked is remembered per site
+- **Tap the logo on the account page** to change it: **Paste logo** (copy the image in Safari first),
+  **Upload image** (Photos or Files; a plain border is trimmed and it's shrunk to a small square that
+  syncs with the account), **Find logo on Google** (opens "<name> logo" in Google Images), **Use website
+  icon**, or **Remove logo**. **Settings → Logos** turns the website lookups off (the site, or Google,
+  sees the website address); logos you add always show
+- **Contact photos**: tap a contact's circle (Contacts table or the account page) to paste or upload a
+  photo, cropped square. Without one, the initials show, and in the Contacts table, search and the
+  People panel the company's logo sits in the corner as a small badge
+- **Four actions on every row** of the Accounts and Partners tables and on each account card:
+  **People** (contacts with call, email and LinkedIn, + Add contact), **Log** (type, outcome quick picks
+  that set the next follow-up, who it was with, Save, or More details… for the full form), **Tasks**
+  (follow-up, revisit, open tasks, cadence steps and key dates in the next 60 days, + Plan task) and
+  **Links** (Salesforce record, or a Salesforce search when the account has no link yet, ZoomInfo,
+  LinkedIn, Sales Navigator and People here, the ZoomInfo profile, website, Google; searches copy the
+  name too). In a table they open under the row, one at a time; on a card or a phone, as a sheet
+- **Contacts table**: **Reach** (call mobile, call direct, text, email, the main line), **Log touch**
+  (restarts their stay-in-touch clock), **Next step** (their cadence step, stay-in-touch date and the
+  account's plan, + Plan task) and **Links** (LinkedIn profile, Sales Navigator lead, ZoomInfo,
+  Salesforce, Google)
+- The Salesforce search uses the address of any Salesforce link you've saved (an account's or a
+  Watchlist item's), so it opens in your own Salesforce
+- The small website / LinkedIn / Sales Navigator icons now sit only on the account page; the rows use Links
+
 **Web links, LinkedIn & ZoomInfo**
 - Website and LinkedIn icons on accounts (record, table, cards, board) and contacts (cards,
   cadence people). A faded LinkedIn icon means no profile is saved yet. Tap it to search LinkedIn
