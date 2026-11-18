@@ -2242,3 +2242,19 @@ tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 .link-help span { font-weight: 600; font-size: .9rem; }
 @media (max-width: 700px) { .link-help { bottom: calc(5.5rem + env(safe-area-inset-bottom)); } }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; margin: .35rem 0; }
+
+/* ---------- long lists: the first 10, then "Show N more" ---------- */
+.more-bar {
+  display: flex; align-items: center; justify-content: center; gap: .35rem; width: 100%; min-height: 46px;
+  margin-top: .6rem; padding: .5rem 1rem; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-2); color: var(--accent); font: inherit; font-weight: 650; cursor: pointer;
+}
+.more-bar:hover, .more-bar:active { background: var(--accent-soft); }
+.more-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.more-chev { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+/* the card's last thing: a flush footer along its bottom edge */
+.card > .more-bar:last-child {
+  width: calc(100% + 2 * var(--card-px, 1rem)); margin: .75rem calc(-1 * var(--card-px, 1rem)) calc(-1 * var(--card-py, 1rem));
+  border: 0; border-top: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius);
+}
+.ov-grid > .card, .ov-col > .card { --card-px: 1.25rem; --card-py: 1.15rem; }
