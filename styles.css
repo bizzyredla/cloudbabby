@@ -2506,3 +2506,81 @@ tr.qa-open .qa-panel { position: sticky; left: .75rem; max-width: calc(100vw - 3
   .tb-maplink { margin-left: 0; }
   .pipe-bar { display: none; }
 }
+
+/* ---------- partners: Partner actions, Referrals, referral forms ---------- */
+.pt-view { margin-left: .25rem; }
+.pa-card { display: flex; flex-direction: column; gap: .2rem; margin-bottom: .9rem; }
+.pa-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .3rem .8rem; margin-bottom: .3rem; }
+.pa-head h2 { font-size: 1.1rem; }
+@media (max-width: 560px) { .pa-head > .small { display: none; } }
+.pa-row { display: flex; align-items: center; gap: .7rem; padding: .6rem 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.pa-row .grow { flex: 1 1 320px; min-width: 0; }
+.pa-n { flex: 0 0 1.4rem; text-align: center; font-weight: 800; color: var(--muted); font-size: .85rem; }
+.pa-top { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
+.pa-top a { color: var(--text); }
+.pa-why { margin-top: .15rem; }
+.pa-tag { border-radius: 6px; padding: 0 .45rem; font-size: .68rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; background: var(--surface-2); color: var(--muted); }
+.pa-tag.pa-win, .pa-tag.pa-news { background: var(--partner-soft); color: var(--partner); }
+.pa-tag.pa-chase, .pa-tag.pa-mine { background: var(--warn-soft); color: var(--warn); }
+.pa-tag.pa-update { background: var(--accent-soft); color: var(--accent); }
+.pa-tag.pa-renew { background: var(--prospect-soft); color: var(--prospect); }
+.pa-tag.pa-balance { background: var(--danger-soft); color: var(--danger); }
+.pa-btns { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; }
+.pa-more { align-self: flex-start; margin-top: .3rem; font-weight: 600; }
+.rf-card { display: flex; flex-direction: column; gap: .6rem; }
+.rf-filters { display: flex; flex-wrap: wrap; gap: .35rem; }
+.rf-filters .chip-tog span { opacity: .7; margin-left: .15rem; }
+.rf-ctl { gap: .6rem; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.rf-list { display: flex; flex-direction: column; }
+.rf-row { display: grid; grid-template-columns: minmax(180px, 1.5fr) minmax(130px, 1.1fr) minmax(120px, 1fr) minmax(150px, 1.3fr) 90px 110px 80px 34px; gap: .6rem; align-items: center; padding: .55rem .2rem; border-bottom: 1px solid var(--border); }
+.rf-headrow { font-size: .75rem; font-weight: 600; color: var(--muted); padding-top: .2rem; }
+.rf-lbl { display: none; }
+.rf-co { display: flex; align-items: center; gap: .55rem; min-width: 0; }
+.rf-txt { min-width: 0; }
+.rf-txt a, .rf-by a { color: var(--text); }
+.rf-pill { display: inline-block; border-radius: 6px; padding: .05rem .5rem; font-size: .76rem; font-weight: 700; white-space: nowrap; }
+.rf-intro { background: var(--warn-soft); color: var(--warn); }
+.rf-pipe { background: var(--accent-soft); color: var(--accent); }
+.rf-won { background: var(--partner-soft); color: var(--partner); }
+.rf-lost { background: var(--surface-2); color: var(--muted); }
+.who { display: inline-block; border-radius: 999px; padding: 0 .45rem; font-size: .66rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; vertical-align: 1px; }
+.who-me { background: var(--partner-soft); color: var(--partner); }
+.who-partner { background: var(--prospect-soft); color: var(--prospect); }
+.who-prospect { background: var(--accent-soft); color: var(--accent); }
+.rf-due, .rf-upd, .rf-comp { font-size: .85rem; }
+.rf-due.late, .rf-upd.late { color: var(--danger); font-weight: 700; }
+.rf-group { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; padding: .7rem .4rem .4rem; background: var(--surface-2); border-bottom: 1px solid var(--border); margin-top: .4rem; border-radius: 8px 8px 0 0; }
+.ru-wrap { display: flex; gap: .9rem; align-items: flex-start; }
+.ru-side { flex: 0 0 210px; display: flex; flex-direction: column; gap: .45rem; }
+.ru-text { flex: 1; min-width: 0; font: inherit; line-height: 1.5; min-height: 240px; }
+.rf-matchbox { border: 1px solid #f0c48a; background: #fff8ee; border-radius: 10px; padding: .55rem .65rem; display: flex; flex-direction: column; gap: .35rem; margin-bottom: .6rem; }
+.rf-matchbox > b { color: #8a4b00; }
+.rf-opt { display: flex; align-items: center; gap: .55rem; border: 1px solid transparent; border-radius: 8px; padding: .4rem .5rem; cursor: pointer; }
+.rf-opt.on { background: var(--surface); border-color: var(--partner); }
+.rf-help { margin-top: .4rem; background: var(--surface-2); border-radius: 8px; padding: .4rem .6rem; color: var(--text); }
+.form-seg { display: flex; width: 100%; }
+.form-seg button { flex: 1; }
+.rf-next-grid { align-items: end; }
+.rf-wait { border: 1px solid var(--border); border-radius: 10px; padding: .45rem .7rem .6rem; margin: .2rem 0 .6rem; display: flex; flex-wrap: wrap; gap: .35rem 1.1rem; }
+.rf-wait legend { padding: 0 .3rem; color: var(--muted); font-weight: 600; }
+.rf-contact { margin-top: .4rem; }
+.rf-contact > summary { cursor: pointer; padding: .2rem 0; }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .rf-matchbox { background: #3a2a12; border-color: #7a5320; } :root:where(:not([data-theme="light"])) .rf-matchbox > b { color: #f0b04a; } }
+:root[data-theme="dark"] .rf-matchbox { background: #3a2a12; border-color: #7a5320; }
+:root[data-theme="dark"] .rf-matchbox > b { color: #f0b04a; }
+@media (max-width: 900px) {
+  .rf-row { grid-template-columns: 1fr 1fr; gap: .35rem .8rem; padding: .7rem .2rem; }
+  .rf-headrow { display: none; }
+  .rf-lbl { display: block; font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  .rf-co { grid-column: 1; grid-row: 1; }
+  .rf-next { grid-column: 1 / -1; }
+  .rf-act { grid-column: 2; grid-row: 1; justify-self: end; }
+  .ru-wrap { flex-direction: column; }
+  .ru-side { flex-basis: auto; width: 100%; }
+  .pa-n { display: none; }
+  .pa-row { align-items: flex-start; }
+  .pa-row .grow { flex: 1 1 0; }
+  .pa-btns { width: 100%; }
+  .pa-btns .btn { min-height: 42px; }
+  .pa-btns .btn:first-child { flex: 1; }
+}

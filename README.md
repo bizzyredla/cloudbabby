@@ -510,12 +510,24 @@ value first, then spends your time by tier
     aiming for a first referral
   - **C · Cold**: signed or imported, not met yet. Worked through the Activate cadence, never
     re-engage tasks
-- **Partners page** (sidebar; on iPhone, Accounts | Contacts | Partners):
+- **Partners page** (sidebar; on iPhone, Accounts | Contacts | Partners), with two views,
+  **Partners** and **Referrals**:
+  - **Partner actions** on top: the five things most worth doing with a partner now, best first
+    (show all for the rest). In order: news to share (a referred deal signed, or moved and the
+    partner hasn't heard), a promised intro to chase (7+ days, or past its date), your move on a
+    referral (due or overdue), an update due (14+ days since you told the partner anything), a
+    client of theirs renewing in 90 days, give-back (2+ referrals this year and nothing logged in
+    return), an agreement ending in 60 days, and a Tier A or B partner past its touch target. Each
+    row has one button that does the job (Copy referral update, Copy a nudge, Open, Copy call
+    agenda, + Give something, Log a touch), plus **✓ Done** and **Snooze** (a week). Done on news
+    or an update marks the partner as updated; other Done items stay away for 30 days. Referral
+    next moves and "update the partner" tasks show in the Planner too
   - Tier tiles as touch targets with a gap: "Tier A: 2 of 3 touched in 30 days", "Tier B: 1 of 2
     in 90 days", "Tier C: 3 of 4 in Activate cadence · N steps this week", and referred pipeline
     with est. comp. Click a tile to filter
   - **Partner table**: tier, type, referrals (12 mo), referred pipeline, est. comp won / open,
-    given / got, last touch and next step (a task, or the cadence step they're on). Click any
+    given / got (with the last thing you gave them, or "Last give: none"), last touch and next step
+    (a task, or the cadence step they're on). Click any
     column to sort (default: tier, then referrals). Quick filters: tier, past touch target,
     agreement ending. Red = past the tier's touch target, getting without giving, or nothing
     planned for an A/B partner. Export to CSV
@@ -550,8 +562,31 @@ value first, then spends your time by tier
   or "Jan 1") are picked up; ✎ edits any client. Clients already in your CRM are flagged.
   Mark each as client (broker of record), co-sell target or former referral; "+ Prospect" creates
   a co-sell prospect linked to the partner
-- **+ Log referral**: company, contact and stage in one step; links the deal and the partner
-  contact who sent it, and updates the partner's last referral
+- **+ Log referral**: who sent it (partner and contact) and the company. As you type, companies
+  already in your book show up so you can **link the referral** to one instead of making a
+  duplicate (a likely duplicate, like a "(demo)" copy, is flagged); a linked account keeps its
+  stage if it's already in the pipeline. **Where it is**: Intro promised or Intro made (stage
+  **Referred**, outside S1–S5, so open pipeline and the S1–S5 stages stay matched to Salesforce),
+  or Meeting booked (starts at S1). **Next move is on** Me, the Partner or the Prospect, with what
+  and by when (filled in for you from the status); that date is the account's follow-up, so it
+  shows in the Planner as "Make the intro · Barranca…" with whose move it is. **Waiting on**
+  (optional): census, current PEO or payroll invoice, benefits summary (SBC), payroll register.
+  Their contact at the company is optional. The board's Referred column comes first
+- **Referrals view** (Partners → Referrals): every referral across partners: company, who
+  referred it, where it is (intro status or stage, what it's waiting on), the next move and whose
+  it is, due date (red when overdue), when the partner last heard from you (red when an update is
+  due: it moved, or 14+ days) and est. comp. Filters: Awaiting intro, In pipeline (S1–S5),
+  Waiting on docs, Partner update due, Won, Lost; next move on Me / Partner / Prospect; search;
+  **By partner** groups it with a **Copy referral update** button per partner. ✎ edits a
+  referral (status, Meeting booked → S1, next move, waiting on); the account page shows the
+  referral at a glance with **Edit referral**
+- **Copy referral update** (Partner actions, the Referrals view, a partner's Accounts tab): a
+  ready-to-send message to the partner contact covering their open referrals and wins and losses
+  from the last 90 days ("• Alton Parkway Orthodontics: signed Nov 14. Thank you!"), with what
+  happens next and an ask (a client of theirs renewing soon, or "anyone else renewing?"). Text or
+  email wording; choose what to include; edit it; **Copy**, **Text** or **Email** the contact.
+  Logging it (on by default) marks those referrals updated, closes the "update the partner" tasks
+  and counts as a touch
 - **Comp calculator**: enrolled employees, annual admin fees and setup fee, compared across every
   plan side by side (including the $10 vs $25 per-employee difference). Opens prefilled from a
   referred deal and can save the numbers back. Every figure is labelled an estimate
