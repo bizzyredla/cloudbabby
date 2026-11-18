@@ -9,7 +9,7 @@
   const MAPBOX_TOKEN = 'pk.eyJ1IjoiYml6enlyZWRsYSIsImEiOiJjbXdlM3Z0cHUwMmVjMnhvbW01dXBjYjFrIn0.aaxd3Ax1nSRl_34_zARgJQ';
 
   const STAGES = {
-    prospect: ['S1 – Discovery Scheduled', 'S2 – Qualified Opportunity', 'S3 – Solution & Quote Development', 'S4 – Proposal Presented', 'S5 – Decision / Negotiation', 'Closed Won', 'Closed Lost', 'Nurture', 'Revisit'],
+    prospect: ['S1 – Discovery Scheduled', 'S2 – Qualified Opportunity', 'S3 – Solution & Quote Development', 'S4 – Proposal Presented', 'S5 – Decision / Negotiation', 'Closed Won', 'Closed Lost', 'Nurture', 'Revisit', 'Referred'],
     partner: ['Target', 'Engaged', 'Met', 'Committed', 'Producing', 'Dormant', 'Closed'],
   };
   // What each stage means (shown under the stage picker and as tooltips).
@@ -23,6 +23,7 @@
     'Closed Lost': 'Chose someone else or not moving forward',
     Nurture: 'Not ready now; stay in touch',
     Revisit: 'Come back at a set date (use Next revisit)',
+    Referred: 'A partner referred them; intro promised or made, no meeting yet',
     Target: 'Fits, no two-way conversation yet',
     Engaged: 'Replied or talked with us',
     Met: 'Meeting held, partnership discussed',
@@ -1413,11 +1414,419 @@
     else state.tasks.push({ id: uid(), date: today(), time: '', title, accountId: p.id, dealId: deal.id, priority: 'med', done: false, rule: 'update', notes: '', categoryId: 'cat-partner' });
   }
 
+  // ----- referrals: where each stands, whose move it is, and what the partner last heard -----
+  const REF_STATUS = { promised: 'Intro promised', made: 'Intro made', booked: 'Meeting booked' };
+  const WHO = { me: 'Me', partner: 'Partner', prospect: 'Prospect' };
+  const WAIT_DOCS = { census: 'Census', invoice: 'Current PEO or payroll invoice', sbc: 'Benefits summary (SBC)', register: 'Payroll register' };
+  const WAIT_SHORT = { census: 'census', invoice: 'current invoice', sbc: 'benefits summary', register: 'payroll register' };
+  const REF_UPDATE_DAYS = 14; // a partner hears about each open referral at least this often
+  const isReferral = (a) => !!(a && a.type !== 'partner' && a.channelPartnerId && getAccount(a.channelPartnerId));
+  /** When a deal last changed stage, from its history ("Stage changed: … → …"). */
+  const lastMove = (a) => a.activities.reduce((m, h) => (h.kind === 'Note' && /^Stage changed: /.test(h.summary || '') && h.date > m ? h.date : m), '');
+  const dShort = (v) => fmtDate(v, { month: 'short', day: 'numeric' });
+  /** One referral: where it stands, whose move is next, and whether the partner is owed an update. */
+  function refInfo(a, t = today()) {
+    const p = getAccount(a.channelPartnerId);
+    const pc = p ? (p.contacts.find((c) => c.id === a.channelContactId) || partnerContact(p) || null) : null;
+    const intro = a.stage === 'Referred';
+    const open = intro || isOpenDeal(a);
+    const won = a.stage === 'Closed Won'; const lost = a.stage === 'Closed Lost';
+    const moved = lastMove(a);
+    const upd = a.refUpdatedAt || '';
+    const base = upd || a.referredAt || '';
+    const news = !!moved && moved > base && (open || daysBetween(moved, t) <= 90);
+    const stale = open && !!base && daysBetween(base, t) >= REF_UPDATE_DAYS;
+    const who = open ? (WHO[a.nextWho] ? a.nextWho : intro && a.refStatus !== 'made' ? 'partner' : 'me') : '';
+    const due = open ? a.nextFollowUp || '' : '';
+    return { a, p, pc, intro, open, won, lost, moved, upd, news, stale, updDue: news || stale, who, due, late: !!due && due < t,
+      where: intro ? REF_STATUS[a.refStatus === 'made' ? 'made' : 'promised'] : stageShort(a.stage),
+      comp: open || won ? dealComp(a) : 0 };
+  }
+  /** "• Alton Parkway Orthodontics: signed Nov 14. Thank you!" for a referral update. */
+  function refLine(x, withNext) {
+    const a = x.a;
+    const said = { 'S1 – Discovery Scheduled': 'discovery meeting set', 'S2 – Qualified Opportunity': 'qualified, building the quote', 'S3 – Solution & Quote Development': 'quote in progress',
+      'S4 – Proposal Presented': 'proposal is with them', 'S5 – Decision / Negotiation': 'in final decision' };
+    let line = x.won ? `signed${x.moved ? ' ' + dShort(x.moved) : ''}. Thank you!`
+      : x.lost ? 'went another way.'
+        : x.intro ? (a.refStatus === 'made' ? 'thanks for the intro; I\'m setting up a meeting.' : 'ready whenever you can make the intro.')
+          : `${said[a.stage] || stageShort(a.stage)}${a.stage === 'S1 – Discovery Scheduled' && a.nextFollowUp ? ` for ${dShort(a.nextFollowUp)}` : ''}.`;
+    const waits = (a.waitingOn || []).map((k) => WAIT_SHORT[k]).filter(Boolean);
+    if (x.open && waits.length) line += ` Waiting on their ${waits.join(' and ')}.`;
+    if (withNext && x.open && !x.intro && a.nextWhat) line += ` Next: ${a.nextWhat}${a.nextFollowUp ? ` by ${dShort(a.nextFollowUp)}` : ''}.`;
+    return `• ${a.name}: ${line}`;
+  }
+  const firstName = (c) => (c && c.name ? c.name.trim().split(/\s+/)[0] : '');
+  /** Mark a partner's referrals as updated today, close the "update the partner" tasks, and log the touch. */
+  function logRefUpdate(p, refs, kind, text) {
+    const t = today(); const ids = refs.map((x) => x.a.id);
+    for (const x of refs) { x.a.refUpdatedAt = t; touch(x.a); }
+    for (const k of state.tasks) if (k.rule === 'update' && !k.done && ids.includes(k.dealId)) k.done = true;
+    const pc = partnerContact(p);
+    p.activities.push({ id: uid(), date: t, kind, summary: `Referral update: ${refs.map((x) => x.a.name).join(', ') || 'nothing open'}`, notes: text || '', contactId: pc ? pc.id : '', createdAt: new Date().toISOString() });
+    touch(p); save();
+  }
+  /** A ready-to-send update on everything a partner sent you: open referrals, plus wins and losses from the last 90 days. */
+  function refUpdateForm(pid) {
+    const p = getAccount(pid);
+    if (!p) return;
+    const t = today();
+    const rows = referredBy(p).filter((a) => a.type !== 'partner').map((a) => refInfo(a, t))
+      .filter((x) => x.open || ((x.won || x.lost) && x.moved && daysBetween(x.moved, t) <= 90));
+    const pc = partnerContact(p);
+    const nm = firstName(pc);
+    const cm = clientMap(p).worth.find((y) => y.soon && !(y.acct && isOpenDeal(y.acct)));
+    const st = { mode: 'text', won: true, lost: true, next: true, ask: true };
+    const lastUpd = rows.reduce((m, x) => (x.upd > m ? x.upd : m), '');
+    let cur = { text: '', inc: [] };
+    const build = () => {
+      const inc = rows.filter((x) => (x.won ? st.won : x.lost ? st.lost : true));
+      const hi = st.mode === 'text' ? `Hi${nm ? ' ' + nm : ''}, quick update on your referrals:` : `Hi${nm ? ' ' + nm : ''},\n\nHere's where things stand on the companies you sent me:`;
+      const ask = !st.ask ? '' : cm ? `\n\n${cm.c.name} renews ${dShort(cm.renewal)}${cm.incumbent ? ` (${cm.incumbent})` : ''}. Want me to put a benchmark together before you talk to them?`
+        : '\n\nAnyone else on your list renewing soon? Happy to run a benchmark first.';
+      const text = `${hi}\n\n${inc.map((x) => refLine(x, st.next)).join('\n') || '• Nothing open with me right now.'}${ask}${st.mode === 'email' ? '\n\nThanks again!' : ''}`;
+      cur = { text, inc };
+      $('#ru-text').value = text;
+      const sms = $('#ru-sms'); const em = $('#ru-email');
+      const phone = pc && (pc.mobile || pc.phone);
+      sms.hidden = !phone; em.hidden = !(pc && pc.email);
+      if (phone) sms.href = `sms:${phone.replace(/[^\d+]/g, '')}${isIOS ? '&' : '?'}body=${encodeURIComponent(text)}`;
+      if (pc && pc.email) em.href = `mailto:${pc.email}?subject=${encodeURIComponent('Update on your referrals')}&body=${encodeURIComponent(text)}`;
+    };
+    openModal(`Referral update · ${p.name}`, `
+      <p class="small muted" style="margin:0">${pc ? `To ${esc(pc.name)}` : 'No contact on file for this partner'} · ${plural(rows.length, 'referral')} · last update from you: ${lastUpd ? esc(relDays(lastUpd)) : 'never'}</p>
+      <div class="ru-wrap">
+        <div class="ru-side">
+          <div class="seg" id="ru-mode" role="group" aria-label="Send as"><button type="button" class="active" data-v="text" aria-pressed="true">Text</button><button type="button" data-v="email" aria-pressed="false">Email</button></div>
+          ${[['won', 'Won deals'], ['lost', 'Lost deals'], ['next', 'What happens next'], ['ask', 'An ask for their next client']].map(([k, l]) => `<label class="row small" style="gap:.4rem"><input type="checkbox" data-o="${k}" checked style="width:auto"> ${l}</label>`).join('')}
+        </div>
+        <textarea id="ru-text" class="ru-text" rows="11" aria-label="Message"></textarea>
+      </div>
+      <label class="row small" style="gap:.4rem"><input type="checkbox" id="ru-log" checked style="width:auto"> Log it as a partner update (clears "update due" and counts as a touch)</label>
+      <div class="row" style="gap:.4rem"><a class="btn ghost" id="ru-sms" hidden>Text ${esc(nm || 'them')}</a><a class="btn ghost" id="ru-email" hidden>Email ${esc(nm || 'them')}</a></div>`, () => {
+      const text = $('#ru-text').value;
+      copyText(text, 'Referral update copied');
+      if ($('#ru-log').checked) logRefUpdate(p, cur.inc, st.mode === 'email' ? 'Email' : 'Text', text);
+      rerender();
+    }, 'Copy', { wide: true });
+    $$('#ru-mode [data-v]').forEach((b) => b.addEventListener('click', () => {
+      st.mode = b.dataset.v;
+      $$('#ru-mode [data-v]').forEach((x) => { x.classList.toggle('active', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+      build();
+    }));
+    $$('[data-o]', modalForm).forEach((c) => c.addEventListener('change', () => { st[c.dataset.o] = c.checked; build(); }));
+    for (const [id, kind] of [['#ru-sms', 'Text'], ['#ru-email', 'Email']]) $(id).addEventListener('click', () => {
+      if ($('#ru-log').checked) logRefUpdate(p, cur.inc, kind, $('#ru-text').value);
+      setTimeout(() => { modal.close(); rerender(); }, 50);
+    });
+    build();
+  }
+
+  /** Partner actions: what to do with which partner, best first. Each has one button that does the job. */
+  const PA_RANK = { win: 100, news: 90, chase: 80, mine: 75, update: 60, renew: 50, balance: 40, agreement: 35, touch: 20 };
+  const PA_TAG = { win: 'News to share', news: 'News to share', chase: 'Promise to chase', mine: 'Your move', update: 'Update due', renew: 'Client renewing', balance: 'Give back', agreement: 'Agreement', touch: 'Touch target' };
+  function partnerActions() {
+    const t = today(); const out = [];
+    const refsBy = new Map();
+    for (const a of state.accounts) {
+      if (!isReferral(a)) continue;
+      if (!refsBy.has(a.channelPartnerId)) refsBy.set(a.channelPartnerId, []);
+      refsBy.get(a.channelPartnerId).push(refInfo(a, t));
+    }
+    for (const p of partners()) {
+      if (p.stage === 'Closed') continue;
+      const rs = refsBy.get(p.id) || []; const who = firstName(partnerContact(p)) || p.name;
+      const snoozed = (key) => !!(p.paSnooze && p.paSnooze[key] && p.paSnooze[key] > t);
+      const add = (kind, key, why, btn, age = 0) => { if (!snoozed(key)) out.push({ kind, key, p, why, btn, tag: PA_TAG[kind], score: PA_RANK[kind] + Math.min(9, Math.max(0, age) / 7) }); };
+      const upd = { label: 'Copy referral update', act: 'ref-update', attrs: `data-id="${p.id}"` };
+      const news = rs.filter((x) => x.news).sort((x, y) => y.moved.localeCompare(x.moved));
+      if (news.length) {
+        const w = news.find((x) => x.won);
+        add(w ? 'win' : 'news', 'news', w ? `${w.a.name} signed ${relDays(w.moved)}. ${who} hasn't heard from you since.`
+          : `${news.map((x) => `${x.a.name} moved to ${x.where}`).join('; ')}. ${who} hasn't heard yet.`, upd, daysBetween(news[0].moved, t));
+      } else {
+        const stale = rs.filter((x) => x.stale);
+        if (stale.length) {
+          const last = stale.reduce((m, x) => (x.upd > m ? x.upd : m), '');
+          add('update', 'update', `${plural(stale.length, 'open referral')}; ${who}'s last update from you: ${last ? relDays(last) : 'never'}.`, upd, last ? daysBetween(last, t) : 30);
+        }
+      }
+      for (const x of rs) {
+        if (x.intro && x.who === 'partner' && x.a.refStatus !== 'made') {
+          const age = x.a.referredAt ? daysBetween(x.a.referredAt, t) : 0;
+          if (age >= 7 || (x.due && x.due <= t)) add('chase', `chase:${x.a.id}`, `Promised an intro to ${x.a.name} ${age ? `${plural(age, 'day')} ago` : 'today'}. No intro yet.`, { label: 'Copy a nudge', act: 'ref-nudge', attrs: `data-id="${x.a.id}"` }, age);
+        } else if (x.open && x.who === 'me' && x.due && x.due <= t) {
+          add('mine', `mine:${x.a.id}`, `${x.a.name}: ${x.a.nextWhat || (x.intro ? 'book the meeting' : 'next step')}, ${x.due < t ? `${plural(daysBetween(x.due, t), 'day')} overdue` : 'due today'}.`, { label: 'Open', href: `#account/${x.a.id}` }, daysBetween(x.due, t));
+        }
+      }
+      const cm = clientMap(p).worth.find((y) => y.soon && !(y.acct && isOpenDeal(y.acct)));
+      if (cm) add('renew', `renew:${cm.c.id}`, `Their client ${cm.c.name} renews ${dShort(cm.renewal)}${cm.incumbent ? ` on ${cm.incumbent}` : ''}.`, { label: 'Copy call agenda', act: 'pt-agenda', attrs: `data-id="${p.id}"` });
+      const got = referrals12(p).length;
+      if (got >= 2 && !gives12(p).length) add('balance', 'balance', `Sent you ${got} referrals this year; you haven't logged anything back.`, { label: '+ Give something', act: 'pt-give', attrs: `data-id="${p.id}" data-kind="Benchmark report"` });
+      const left = agreementLeft(p);
+      if (left !== null && left >= 0 && left <= 60 && p.agreementStatus !== 'Expired') add('agreement', `agr:${p.agreementEnd}`, `Partner agreement ends ${dShort(p.agreementEnd)} (${plural(left, 'day')}).`, { label: 'Open', href: `#account/${p.id}` });
+      const tier = partnerTier(p);
+      if (!isReserve(p) && (tier === 'A' || tier === 'B') && touchGap(p, tier).late) {
+        const lt = lastTouchDate(p);
+        add('touch', 'touch', `Tier ${tier}, last touch ${lt ? relDays(lt) : 'never'} (${TIERS[tier].every} target).`, { label: 'Log a touch', act: 'log', attrs: `data-id="${p.id}"` }, lt ? daysBetween(lt, t) : 60);
+      }
+    }
+    return out.sort((x, y) => y.score - x.score || x.p.name.localeCompare(y.p.name));
+  }
+  const paBtn = (b) => (b.href ? `<a class="btn sm" href="${esc(b.href)}">${esc(b.label)}</a>` : `<button type="button" class="btn sm" data-act="${b.act}" ${b.attrs || ''}>${esc(b.label)}</button>`);
+  function partnerActionsHtml() {
+    const pa = partnerActions();
+    const shown = ui.paAll ? pa : pa.slice(0, 5);
+    return `<section class="card pa-card" aria-label="Partner actions">
+      <div class="pa-head"><h2 style="margin:0">Partner actions <span class="muted small">${pa.length ? `${shown.length} of ${pa.length}` : 'all clear'}</span></h2>
+        <span class="small muted">News to share first, then promises to chase, your moves, updates due, client renewals, give-back, and touch targets last. Referral next moves and update tasks are in the Planner too.</span></div>
+      ${shown.map((x, i) => { const pc = partnerContact(x.p); return `<div class="pa-row">
+        <span class="pa-n">${i + 1}</span>${logoTile(x.p, 34)}
+        <div class="grow"><div class="pa-top"><a href="#account/${x.p.id}"><b>${esc(x.p.name)}</b></a>${pc ? `<span class="small muted">${esc(pc.name)}</span>` : ''}<span class="pa-tag pa-${x.kind}">${esc(x.tag)}</span></div>
+          <div class="pa-why">${esc(x.why)}</div></div>
+        <div class="pa-btns">${paBtn(x.btn)}<button type="button" class="btn sm ghost" data-act="pa-done" data-id="${x.p.id}" data-key="${esc(x.key)}" aria-label="Done: ${esc(x.p.name)}">✓ Done</button><button type="button" class="btn sm ghost" data-act="pa-snooze" data-id="${x.p.id}" data-key="${esc(x.key)}" aria-label="Snooze a week: ${esc(x.p.name)}">Snooze</button></div>
+      </div>`; }).join('') || '<div class="empty">Nothing waiting on you. Partners with news, promises or client renewals show up here as they happen.</div>'}
+      ${pa.length > 5 ? `<button type="button" class="link-btn pa-more" data-act="pa-all">${ui.paAll ? 'Show the top 5' : `Show all ${pa.length}`}</button>` : ''}
+    </section>`;
+  }
+
+  /** The Referrals view: every referral across partners, whose move it is and what the partner last heard. */
+  const RF_FILTERS = { all: 'All', intro: 'Awaiting intro', pipe: 'In pipeline (S1–S5)', docs: 'Waiting on docs', update: 'Partner update due', won: 'Won', lost: 'Lost' };
+  const RF_TEST = { all: () => true, intro: (x) => x.intro, pipe: (x) => x.open && !x.intro, docs: (x) => x.open && (x.a.waitingOn || []).length > 0, update: (x) => x.updDue, won: (x) => x.won, lost: (x) => x.lost };
+  const ptViewSwitch = (v, n) => `<div class="seg pt-view" role="group" aria-label="View"><button type="button" class="${v === 'partners' ? 'active' : ''}" aria-pressed="${v === 'partners'}" data-act="pt-view" data-v="partners">Partners</button><button type="button" class="${v === 'referrals' ? 'active' : ''}" aria-pressed="${v === 'referrals'}" data-act="pt-view" data-v="referrals">Referrals${n ? ` <span class="count-pill">${n}</span>` : ''}</button></div>`;
+  function renderReferrals() {
+    const t = today();
+    const rows = state.accounts.filter(isReferral).map((a) => refInfo(a, t));
+    const f = RF_TEST[ui.rfFilter] ? ui.rfFilter : 'all';
+    const who = WHO[ui.rfWho] ? ui.rfWho : '';
+    const q = (ui.rfSearch || '').trim().toLowerCase();
+    const list = rows.filter(RF_TEST[f]).filter((x) => !who || x.who === who).filter((x) => !q || `${x.a.name} ${x.p.name} ${(x.pc || {}).name || ''}`.toLowerCase().includes(q))
+      .sort((x, y) => (x.open ? 0 : 1) - (y.open ? 0 : 1) || (x.due || '9999').localeCompare(y.due || '9999') || (y.a.referredAt || '').localeCompare(x.a.referredAt || ''));
+    const open = rows.filter((x) => x.open);
+    const byPartner = ui.rfBy === 'partner';
+    const sub = (x) => {
+      const a = x.a;
+      if (x.won) return x.moved ? `signed ${dShort(x.moved)}` : '';
+      if (x.lost) return x.moved ? `lost ${dShort(x.moved)}` : '';
+      const w = (a.waitingOn || []).map((k) => WAIT_SHORT[k]).filter(Boolean);
+      if (w.length) return `waiting on ${w.join(', ')}`;
+      return x.intro ? `since ${a.referredAt ? dShort(a.referredAt) : '—'}` : a.referredAt ? `referred ${dShort(a.referredAt)}` : '';
+    };
+    const pillCls = (x) => (x.intro ? 'rf-intro' : x.won ? 'rf-won' : x.lost ? 'rf-lost' : 'rf-pipe');
+    const row = (x) => `<div class="rf-row">
+      <div class="rf-co">${logoTile(x.a, 30)}<div class="rf-txt"><a href="#account/${x.a.id}"><b>${esc(x.a.name)}</b></a><div class="small muted">${x.a.employees ? `${esc(x.a.employees)} employees` : '&nbsp;'}</div></div></div>
+      <div class="rf-by"><span class="rf-lbl">Referred by</span><a href="#account/${x.p.id}">${esc(x.p.name)}</a><div class="small muted">${esc((x.pc || {}).name || '')}</div></div>
+      <div class="rf-where"><span class="rf-lbl">Where it is</span><span class="rf-pill ${pillCls(x)}">${esc(x.where)}</span><div class="small muted">${esc(sub(x))}</div></div>
+      <div class="rf-next"><span class="rf-lbl">Next move</span>${x.open ? `<span class="who who-${x.who}">${WHO[x.who]}</span> ${esc(x.a.nextWhat || '—')}` : '<span class="muted">—</span>'}</div>
+      <div class="rf-due ${x.late ? 'late' : ''}"><span class="rf-lbl">Due</span>${x.due ? (x.late ? `${plural(daysBetween(x.due, t), 'day')} overdue` : x.due === t ? 'Today' : esc(dShort(x.due))) : '—'}</div>
+      <div class="rf-upd ${x.updDue ? 'late' : ''}"><span class="rf-lbl">Partner last updated</span>${x.upd ? esc(relDays(x.upd)) : 'never'}${x.news ? ' · news' : ''}</div>
+      <div class="rf-comp"><span class="rf-lbl">Est. comp</span>${x.comp ? est(x.comp) : '—'}</div>
+      <div class="rf-act"><button type="button" class="icon-btn" data-act="ref-edit" data-id="${x.a.id}" title="Edit referral" aria-label="Edit referral: ${esc(x.a.name)}">✎</button></div>
+    </div>`;
+    const groups = byPartner ? [...new Set(list.map((x) => x.p))].map((pp) => ({ p: pp, rows: list.filter((x) => x.p === pp) })) : [{ p: null, rows: list }];
+    $('#view').innerHTML = `
+      <div class="page-head">
+        <div><div class="row" style="gap:.85rem"><h1>Partners</h1>${ptViewSwitch('referrals', open.length)}</div>
+          <div class="muted small">Every referral across your partners: where it is, whose move is next, and when the partner last heard from you.</div></div>
+        <div class="row"><button class="btn" data-act="log-referral">+ Log referral</button></div>
+      </div>
+      <div class="kpi-grid4">
+        <div class="card kpi-card"><span class="kpi-label">Open referrals</span><div class="kpi-value">${open.length}</div><div class="kpi-sub">from ${plural(new Set(open.map((x) => x.p.id)).size, 'partner')}</div></div>
+        <div class="card kpi-card"><span class="kpi-label">Waiting on you</span><div class="kpi-value">${open.filter((x) => x.who === 'me').length}</div><div class="kpi-sub">${open.filter((x) => x.who === 'me' && x.late).length} overdue</div></div>
+        <div class="card kpi-card"><span class="kpi-label">Partner updates due</span><div class="kpi-value">${rows.filter((x) => x.updDue).length}</div><div class="kpi-sub">moved, or ${REF_UPDATE_DAYS}+ days since you told them</div></div>
+        <div class="card kpi-card"><span class="kpi-label">Est. comp, open</span><div class="kpi-value">${est(open.reduce((n, x) => n + x.comp, 0))}</div><div class="kpi-sub">${rows.filter((x) => x.won && x.moved >= yearAgo()).length} won in 12 mo</div></div>
+      </div>
+      <div class="card rf-card">
+        <div class="rf-filters" role="group" aria-label="Show">${Object.entries(RF_FILTERS).map(([k, l]) => `<button type="button" class="chip-tog ${f === k ? 'on' : ''}" aria-pressed="${f === k}" data-act="rf-filter" data-v="${k}">${l} <span>${rows.filter(RF_TEST[k]).length}</span></button>`).join('')}</div>
+        <div class="row rf-ctl">
+          <div class="row" style="gap:.35rem;flex-wrap:wrap"><span class="small muted">Next move is on</span><div class="seg" role="group" aria-label="Next move is on">${[['', 'Anyone'], ...Object.entries(WHO)].map(([k, l]) => `<button type="button" class="${who === k ? 'active' : ''}" aria-pressed="${who === k}" data-act="rf-who" data-v="${k}">${l}</button>`).join('')}</div></div>
+          <input type="search" id="rf-search" placeholder="Search company, partner, contact…" value="${esc(ui.rfSearch || '')}" style="max-width:260px">
+          <div class="seg" role="group" aria-label="Layout"><button type="button" class="${byPartner ? '' : 'active'}" aria-pressed="${!byPartner}" data-act="rf-by" data-v="list">List</button><button type="button" class="${byPartner ? 'active' : ''}" aria-pressed="${byPartner}" data-act="rf-by" data-v="partner">By partner</button></div>
+        </div>
+        <div class="rf-list">
+          <div class="rf-row rf-headrow" aria-hidden="true"><div>Company</div><div>Referred by</div><div>Where it is</div><div>Next move</div><div>Due</div><div>Partner last updated</div><div>Est. comp</div><div></div></div>
+          ${groups.map((g) => `${g.p ? `<div class="rf-group"><span><b>${esc(g.p.name)}</b> <span class="small muted">· ${esc((partnerContact(g.p) || {}).name || 'no contact')} · ${plural(g.rows.length, 'referral')}</span></span><button type="button" class="btn sm ghost" data-act="ref-update" data-id="${g.p.id}">Copy referral update</button></div>` : ''}${g.rows.map(row).join('')}`).join('')
+            || `<div class="empty">${rows.length ? 'No referrals match.' : 'No referrals yet. + Log referral when a partner sends you a company or promises an intro.'}</div>`}
+        </div>
+        <p class="small muted" style="margin:.5rem 0 0">Partner update due = a referral moved, or ${REF_UPDATE_DAYS}+ days since you told the partner anything. Due dates come from each referral's next move, which also shows in your Planner.</p>
+      </div>`;
+    const sIn = $('#rf-search');
+    sIn.addEventListener('input', (e) => { ui.rfSearch = e.target.value; clearTimeout(sIn.t); sIn.t = setTimeout(() => { const pos = sIn.selectionStart; renderReferrals(); const n = $('#rf-search'); n.focus(); n.setSelectionRange(pos, pos); }, 200); });
+  }
+
+  /** Segmented picker for a form: a hidden input carries the value. */
+  const formSeg = (name, opts, cur, label) => `<div class="seg form-seg" role="group" aria-label="${esc(label)}" data-seg="${name}">${Object.entries(opts).map(([k, l]) => `<button type="button" data-v="${k}" class="${cur === k ? 'active' : ''}" aria-pressed="${cur === k}">${esc(l)}</button>`).join('')}</div><input type="hidden" name="${name}" value="${esc(cur)}">`;
+  function wireFormSeg(name, onPick) {
+    $$(`[data-seg="${name}"] [data-v]`, modalForm).forEach((b) => b.addEventListener('click', () => {
+      $$(`[data-seg="${name}"] [data-v]`, modalForm).forEach((x) => { x.classList.toggle('active', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+      modalForm.querySelector(`input[name="${name}"]`).value = b.dataset.v;
+      if (onPick) onPick(b.dataset.v);
+    }));
+  }
+  const REF_DEFAULTS = { promised: { who: 'partner', what: 'Make the intro', days: 7 }, made: { who: 'me', what: 'Book the discovery meeting', days: 2 }, booked: { who: 'me', what: 'Discovery meeting', days: 3 } };
+  const REF_HELP = {
+    promised: 'Not in your pipeline yet (stage Referred), so open pipeline and S1–S5 stay matched to Salesforce. The partner owns the next move: make the intro.',
+    made: 'Not in your pipeline yet (stage Referred). Your move: book the meeting. It shows in Partner actions and your Planner until you do.',
+    booked: 'Starts the deal at S1 · Discovery Scheduled, with the partner credited. Set the date below to the meeting date.',
+  };
+  /** Accounts a typed company could be: the import's matcher first, then accounts with all the typed words. */
+  function referralMatches(q) {
+    const k = companyKey(q);
+    if (k.length < 3) return [];
+    const words = k.split(' ').filter((w) => w.length >= 2);
+    const out = new Map();
+    const m = matchExisting(q);
+    if (m && m.a.type !== 'partner') out.set(m.a.id, m.a);
+    for (const a of state.accounts) {
+      if (out.size >= 5) break;
+      if (a.type === 'partner' || out.has(a.id)) continue;
+      const ak = companyKey(a.name).split(' ');
+      if (words.every((w) => ak.some((x) => x.startsWith(w)))) out.set(a.id, a);
+    }
+    const list = [...out.values()];
+    const base = (a) => companyKey(a.name.replace(/\([^)]*\)/g, ' '));
+    return list.map((a, i) => ({ a, dup: list.some((b, j) => j < i && base(b) === base(a)) }));
+  }
+  /** Log a referral: who sent it, the company (matched to one you already have), where it is and the next move. */
+  function referralForm(partnerId) {
+    const ps = partners().sort((x, y) => x.name.localeCompare(y.name));
+    if (!ps.length) { toast('Add a partner first'); return; }
+    const p0 = getAccount(partnerId) || ps[0];
+    const d0 = REF_DEFAULTS.promised;
+    let picked = 'new'; let touched = false;
+    openModal('Log a referral', `
+      <div class="grid-2">
+        ${field('Referred by', `<select name="partnerId" id="rf-partner">${ps.map((x) => opt(x.id, x.name, p0.id)).join('')}</select>`)}
+        ${field('Their contact', '<select name="channelContactId" id="rf-pcontact"></select>')}
+        ${field('Company *', '<input name="name" id="rf-name" required autocomplete="off">', 'span-2')}
+      </div>
+      <div id="rf-match"></div>
+      <div class="field"><span>Where it is</span>${formSeg('refStatus', REF_STATUS, 'promised', 'Where it is')}<div class="small rf-help" id="rf-help">${esc(REF_HELP.promised)}</div></div>
+      <div class="grid-3 rf-next-grid">
+        <div class="field"><span>Next move is on</span>${formSeg('nextWho', WHO, d0.who, 'Next move is on')}</div>
+        ${field('What', `<input name="nextWhat" id="rf-what" value="${esc(d0.what)}">`)}
+        ${field('By', `<input name="nextFollowUp" id="rf-due" type="date" value="${addDays(today(), d0.days)}">`)}
+      </div>
+      <fieldset class="rf-wait"><legend class="small">Waiting on (optional)</legend>${Object.entries(WAIT_DOCS).map(([k, l]) => `<label class="row small" style="gap:.35rem"><input type="checkbox" name="waitingOn" value="${k}" style="width:auto"> ${esc(l)}</label>`).join('')}</fieldset>
+      <div class="grid-2">
+        ${field('Employees', '<input name="employees" type="number" min="0">')}
+        ${field('Notes', '<input name="notes" placeholder="What they said: timing, current vendor, why now">')}
+      </div>
+      <details class="rf-contact"><summary class="small"><b>Their contact at the company</b> (optional)</summary>
+        <div class="grid-2">
+          ${field('Contact name', '<input name="c_name">')}
+          ${field('Title', '<input name="c_title">')}
+          ${field('Email', '<input name="c_email" type="email" autocapitalize="off">')}
+          ${field('Phone', '<input name="c_phone" type="tel">')}
+        </div>
+      </details>`, (data, fd) => {
+      if (!data.name.trim()) return false;
+      const p = getAccount(data.partnerId);
+      const now = new Date().toISOString(); const t = today();
+      const status = REF_STATUS[data.refStatus] ? data.refStatus : 'promised';
+      const ref = { refStatus: status === 'booked' ? '' : status, nextWho: WHO[data.nextWho] ? data.nextWho : 'me', nextWhat: data.nextWhat.trim(), nextFollowUp: data.nextFollowUp || '', waitingOn: fd.getAll('waitingOn'), refUpdatedAt: '' };
+      const contact = data.c_name || data.c_email || data.c_phone
+        ? { id: uid(), name: data.c_name || data.c_email || data.c_phone, title: data.c_title, email: data.c_email, phone: data.c_phone, role: '', notes: '', status: 'Active', primary: true } : null;
+      let acct = picked !== 'new' ? getAccount(picked) : null;
+      if (acct) {
+        const was = acct.channelPartnerId && acct.channelPartnerId !== p.id ? getAccount(acct.channelPartnerId) : null;
+        Object.assign(acct, ref, { channelPartnerId: p.id, channelContactId: data.channelContactId || '', referredAt: t, leadSource: acct.leadSource || 'Partner / broker' });
+        if (!isOpenDeal(acct) && acct.stage !== 'Closed Won') {
+          const to = status === 'booked' ? STAGES.prospect[0] : 'Referred';
+          if (acct.stage !== to) { const from = acct.stage; acct.stage = to; acct.activities.push({ id: uid(), date: t, kind: 'Note', summary: `Stage set by referral: ${from} → ${to}`, notes: '', createdAt: now }); }
+        }
+        if (data.employees && !acct.employees) acct.employees = data.employees;
+        if (contact && !acct.contacts.some((c) => c.name.toLowerCase() === contact.name.toLowerCase())) acct.contacts.push({ ...contact, primary: !acct.contacts.length });
+        acct.activities.push({ id: uid(), date: t, kind: 'Note', summary: `Referred by ${p.name}${was ? ` (was credited to ${was.name})` : ''}`, notes: data.notes, createdAt: now });
+        touch(acct);
+      } else {
+        acct = migrateAccount({ id: uid(), name: data.name.trim(), type: 'prospect', stage: status === 'booked' ? STAGES.prospect[0] : 'Referred', employees: data.employees, notes: data.notes, tags: '', vendors: [],
+          leadSource: 'Partner / broker', channelPartnerId: p.id, channelContactId: data.channelContactId || '', referredAt: t, book: 'active', ...ref,
+          contacts: contact ? [contact] : [], activities: [{ id: uid(), date: t, kind: 'Note', summary: `Referred by ${p.name}`, notes: data.notes, createdAt: now }], keyDates: [], createdAt: now, updatedAt: now });
+        state.accounts.push(acct);
+      }
+      p.activities.push({ id: uid(), date: t, kind: 'Note', summary: `Referral: ${acct.name}`, notes: '', contactId: data.channelContactId || '', createdAt: now });
+      touch(p);
+      partnerCadenceExits();
+      toast(picked !== 'new' ? `Referral linked to ${acct.name}: ${REF_STATUS[status]}` : `Referral logged: ${acct.name} · ${REF_STATUS[status]}`);
+    }, 'Log referral', { wide: true });
+    const fill = () => {
+      const p = getAccount($('#rf-partner').value);
+      $('#rf-pcontact').innerHTML = `<option value="">—</option>${p ? p.contacts.map((c) => opt(c.id, c.name, (p.contacts.find((x) => x.primary) || {}).id)).join('') : ''}`;
+    };
+    $('#rf-partner').addEventListener('change', fill); fill();
+    const submit = modalForm.querySelector('.modal-actions [type=submit]');
+    const drawMatch = () => {
+      const q = $('#rf-name').value;
+      const ms = referralMatches(q);
+      if (!ms.some((m) => m.a.id === picked)) picked = ms.length && matchExisting(q) ? ms[0].a.id : 'new';
+      const pid = $('#rf-partner').value;
+      $('#rf-match').innerHTML = ms.length ? `<div class="rf-matchbox"><b class="small">Already in your book: link the referral instead of making a duplicate</b>
+        ${ms.map(({ a, dup }) => { const other = a.channelPartnerId && a.channelPartnerId !== pid ? getAccount(a.channelPartnerId) : null; return `<label class="rf-opt ${picked === a.id ? 'on' : ''}"><input type="radio" name="rf-pick" value="${a.id}" ${picked === a.id ? 'checked' : ''} style="width:auto">
+          <span class="grow"><b>${esc(a.name)}</b> <span class="small muted">· ${esc(a.type === 'prospect' ? stageShort(a.stage) : a.type)}${a.location ? ` · ${esc(a.location.split(',')[0])}` : ''}${a.createdAt ? ` · added ${esc(dShort(a.createdAt.slice(0, 10)))}` : ''}</span>${other ? `<div class="small warn-text">Credited to ${esc(other.name)} now; logging moves the credit.</div>` : ''}</span>
+          ${dup ? '<span class="pill med">Looks like a duplicate</span>' : ''}</label>`; }).join('')}
+        <label class="rf-opt ${picked === 'new' ? 'on' : ''}"><input type="radio" name="rf-pick" value="new" ${picked === 'new' ? 'checked' : ''} style="width:auto"> <span>It's a different company: <b>create a new account</b></span></label></div>` : '';
+      $$('[name=rf-pick]', modalForm).forEach((r) => r.addEventListener('change', () => { picked = r.value; drawMatch(); }));
+      submit.textContent = picked === 'new' ? 'Log referral' : 'Link referral';
+    };
+    let mt;
+    $('#rf-name').addEventListener('input', () => { clearTimeout(mt); mt = setTimeout(drawMatch, 150); });
+    $('#rf-partner').addEventListener('change', drawMatch);
+    $('#rf-what').addEventListener('input', () => { touched = true; });
+    wireFormSeg('refStatus', (v) => {
+      $('#rf-help').textContent = REF_HELP[v];
+      const dd = REF_DEFAULTS[v];
+      $$('[data-seg="nextWho"] [data-v]', modalForm).forEach((x) => { const on = x.dataset.v === dd.who; x.classList.toggle('active', on); x.setAttribute('aria-pressed', String(on)); });
+      modalForm.querySelector('input[name="nextWho"]').value = dd.who;
+      if (!touched) $('#rf-what').value = dd.what;
+      $('#rf-due').value = addDays(today(), dd.days);
+    });
+    wireFormSeg('nextWho');
+  }
+  /** Change a referral: its intro status (or meeting booked), the next move and what it's waiting on. */
+  function referralEditForm(a) {
+    if (!isReferral(a)) return;
+    const x = refInfo(a);
+    const cur = x.intro ? (a.refStatus === 'made' ? 'made' : 'promised') : '';
+    openModal(`Referral · ${a.name}`, `
+      <p class="small muted" style="margin:0">Referred by ${esc(x.p.name)}${x.pc ? ` (${esc(x.pc.name)})` : ''}${a.referredAt ? ` · ${esc(fmtDate(a.referredAt))}` : ''} · partner last updated ${x.upd ? esc(relDays(x.upd)) : 'never'}</p>
+      ${x.intro ? `<div class="field"><span>Where it is</span>${formSeg('refStatus', REF_STATUS, cur, 'Where it is')}<div class="small rf-help" id="rf-help">${esc(REF_HELP[cur])}</div></div>`
+        : `<p class="small" style="margin:0">Where it is: <b>${esc(x.where)}</b>. Change the stage on the account.</p>`}
+      <div class="grid-3 rf-next-grid">
+        <div class="field"><span>Next move is on</span>${formSeg('nextWho', WHO, x.who || 'me', 'Next move is on')}</div>
+        ${field('What', `<input name="nextWhat" id="rf-what" value="${esc(a.nextWhat || '')}">`)}
+        ${field('By', `<input name="nextFollowUp" id="rf-due" type="date" value="${esc(a.nextFollowUp || '')}">`)}
+      </div>
+      <fieldset class="rf-wait"><legend class="small">Waiting on</legend>${Object.entries(WAIT_DOCS).map(([k, l]) => `<label class="row small" style="gap:.35rem"><input type="checkbox" name="waitingOn" value="${k}" ${(a.waitingOn || []).includes(k) ? 'checked' : ''} style="width:auto"> ${esc(l)}</label>`).join('')}</fieldset>`, (data, fd) => {
+      const t = today();
+      Object.assign(a, { nextWho: WHO[data.nextWho] ? data.nextWho : 'me', nextWhat: data.nextWhat.trim(), nextFollowUp: data.nextFollowUp || '', waitingOn: fd.getAll('waitingOn') });
+      if (x.intro && REF_STATUS[data.refStatus]) {
+        if (data.refStatus === 'booked') { logStageChange(a, a.stage, STAGES.prospect[0]); a.stage = STAGES.prospect[0]; a.refStatus = ''; }
+        else a.refStatus = data.refStatus;
+      }
+      touch(a);
+      toast(`Referral saved: ${a.name}`);
+    }, 'Save', { wide: true });
+    if (x.intro) wireFormSeg('refStatus', (v) => {
+      $('#rf-help').textContent = REF_HELP[v];
+      const dd = REF_DEFAULTS[v];
+      $$('[data-seg="nextWho"] [data-v]', modalForm).forEach((b) => { const on = b.dataset.v === dd.who; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
+      modalForm.querySelector('input[name="nextWho"]').value = dd.who;
+      $('#rf-what').value = dd.what;
+      $("#rf-due").value = addDays(today(), dd.days);
+    });
+    wireFormSeg('nextWho');
+  }
+
+  /** "Last give: benchmark report · Oct 2" for the partner table. */
+  const lastGive = (p) => { const h = p.activities.filter((x) => x.give).sort((x, y) => y.date.localeCompare(x.date))[0]; return h ? `Last give: ${h.give.toLowerCase()} · ${dShort(h.date)}` : 'Last give: none'; };
+
   // ----- the Partners page -----
   const PT_QUICK = { all: 'All', A: 'Tier A', B: 'Tier B', C: 'Tier C', untouched: 'Past touch target', expiring: 'Agreement ending' };
   const PT_COLS = [['name', 'Partner'], ['tier', 'Tier'], ['type', 'Type'], ['refs', 'Referrals 12 mo'], ['pipe', 'Referred pipeline'], ['comp', 'Est. comp won / open'], ['give', 'Given / got'], ['touch', 'Last touch'], ['next', 'Next step']];
   function renderPartners() {
     if (runPartnerRules()) save();
+    if (ui.ptView === 'referrals') return renderReferrals();
     const q = (ui.ptSearch || '').trim().toLowerCase();
     const all = partners().filter((p) => (q ? bookFilter() !== 'reserve' || isReserve(p) : inBook(p)));
     const t = today();
@@ -1471,7 +1880,7 @@
     $('#view').innerHTML = `
       <div class="page-head">
         <div>
-          <div class="row" style="gap:.85rem"><h1>Partners <span class="muted small">(${all.length})</span></h1>${peopleSwitch('partners')}</div>
+          <div class="row" style="gap:.85rem"><h1>Partners <span class="muted small">(${all.length})</span></h1>${peopleSwitch('partners')}${ptViewSwitch('partners', state.accounts.filter((x) => isReferral(x) && (x.stage === 'Referred' || isOpenDeal(x))).length)}</div>
           <div class="muted small">Tiered by what they produce. Touch targets by tier: A monthly, B quarterly, C by cadence.</div>
         </div>
         <div class="row">
@@ -1481,13 +1890,14 @@
           <button class="btn" data-act="new-partner">+ New partner</button>
         </div>
       </div>
-      ${bookBar()}
+      ${partnerActionsHtml()}
       <div class="kpi-grid4 pt-kpis">
         ${tile('A', `<span class="kpi-label">${tierPill('A')} Tier A · Producing</span><div class="kpi-value">${okA} <span class="kpi-of">of ${A.length}</span></div><div class="kpi-sub">touched in the last 30 days</div>${bar(okA, A.length)}`)}
         ${tile('B', `<span class="kpi-label">${tierPill('B')} Tier B · Warm</span><div class="kpi-value">${okB} <span class="kpi-of">of ${B.length}</span></div><div class="kpi-sub">touched in the last 90 days${B.length - inB ? ` · <button type="button" class="link-btn small" data-act="pt-enroll" data-tier="B">${B.length - inB} not in value-share cadence</button>` : ''}</div>${bar(okB, B.length)}`)}
         ${tile('C', `<span class="kpi-label">${tierPill('C')} Tier C · Cold</span><div class="kpi-value">${inC} <span class="kpi-of">of ${C.length}</span></div><div class="kpi-sub">in Activate cadence · ${plural(weekSteps(cadC), 'step')} this week</div>${C.length - inC ? `<button type="button" class="btn sm" data-act="pt-enroll" data-tier="C">Enroll ${C.length - inC} in Activate</button>` : bar(inC, C.length)}`)}
         <div class="card kpi-card"><span class="kpi-label">Referred pipeline</span><div class="kpi-value">${money(openValue)}</div><div class="kpi-sub">${plural(open.length, 'open deal')} · ${est(openComp)} est. comp · ${won12} won in 12 mo</div></div>
       </div>
+      ${bookBar()}
 
       <div class="card pt2-card">
         <div class="section-head" style="margin-bottom:.2rem">
@@ -1515,7 +1925,7 @@
               <td>${r.refs12}${r.refsAll > r.refs12 ? ` <span class="small muted">(${r.refsAll} all)</span>` : ''}</td>
               <td>${r.pipe ? money(r.pipe) : '<span class="muted">—</span>'}</td>
               <td>${r.compWon || r.compOpen ? `${est(r.compWon)} / ${est(r.compOpen)}` : '<span class="muted">—</span>'}</td>
-              <td class="${r.got && !r.given ? 'pt-late' : ''}" title="Given to them / referrals from them, last 12 months">${r.given} / ${r.got}</td>
+              <td class="${r.got && !r.given ? 'pt-late' : ''}" title="Given to them / referrals from them, last 12 months">${r.given} / ${r.got}<div class="small ${r.got && !r.given ? '' : 'muted'}">${esc(lastGive(p))}</div></td>
               <td class="${r.gap.late ? 'pt-late' : ''}">${r.gap.days === null ? 'never' : esc(relDays(lastTouchDate(p)))}</td>
               <td class="small ptt-next">${ns}</td>
             </tr>`;
@@ -1656,11 +2066,11 @@
     const inCrm = clients.filter((c) => clientAccount(c));
     const row = (x) => `<li>
         <div class="grow"><a class="title" href="#account/${x.id}">${esc(x.name)}</a>
-          <div class="small muted">${esc(x.stage)}${x.value ? ' · ' + money(x.value) : ''}${x.referredAt ? ' · referred ' + esc(relDays(x.referredAt)) : ''}${x.location ? ' · ' + esc(x.location) : ''}</div></div>
+          <div class="small muted">${esc(x.stage === 'Referred' ? refInfo(x).where : x.stage)}${x.value ? ' · ' + money(x.value) : ''}${x.referredAt ? ' · referred ' + esc(relDays(x.referredAt)) : ''}${x.location ? ' · ' + esc(x.location) : ''}</div></div>
         ${isOpenDeal(x) ? `<span class="small muted">Est. comp</span> <b>${est(dealComp(x))}</b>` : ''}
       </li>`;
     return `
-      <div class="row spread"><h3 style="margin:0">Referred by ${esc(a.name)} <span class="muted small">(${current.length})</span></h3><button class="btn sm" data-act="log-referral" data-id="${a.id}">+ Log referral</button></div>
+      <div class="row spread"><h3 style="margin:0">Referred by ${esc(a.name)} <span class="muted small">(${current.length})</span></h3><span class="row" style="gap:.35rem"><button class="btn sm ghost" data-act="ref-update" data-id="${a.id}">Copy referral update</button><button class="btn sm" data-act="log-referral" data-id="${a.id}">+ Log referral</button></span></div>
       ${current.length ? `<ul class="list">${firstTen('pt-referred', current).map(row).join('')}</ul>${moreBar('pt-referred', current.length)}` : '<div class="empty">No referrals yet. Log one when they send you a lead.</div>'}
 
       <div class="row spread"><h3 style="margin:0">Former referrals to resell <span class="muted small">(${former.length + clients.filter((c) => c.kind === 'former').length})</span></h3></div>
@@ -1786,45 +2196,6 @@
 
   // ----- forms -----
   /** Quick capture: a partner sends a lead. Creates the prospect, linked to the partner and the person who sent it. */
-  function referralForm(partnerId) {
-    const ps = partners().sort((x, y) => x.name.localeCompare(y.name));
-    if (!ps.length) { toast('Add a partner first'); return; }
-    const p0 = getAccount(partnerId) || ps[0];
-    openModal('Log a referral', `
-      <div class="grid-2">
-        ${field('Referred by', `<select name="partnerId" id="rf-partner">${ps.map((x) => opt(x.id, x.name, p0.id)).join('')}</select>`)}
-        ${field('Their contact', '<select name="channelContactId" id="rf-pcontact"></select>')}
-        ${field('Company *', '<input name="name" required>')}
-        ${field('Employees', '<input name="employees" type="number" min="0">')}
-        ${field('Contact name', '<input name="c_name">')}
-        ${field('Title', '<input name="c_title">')}
-        ${field('Email', '<input name="c_email" type="email" autocapitalize="off">')}
-        ${field('Phone', '<input name="c_phone" type="tel">')}
-        ${field('Stage', `<select name="stage">${STAGES.prospect.map((s) => opt(s, s, STAGES.prospect[0])).join('')}</select>`)}
-        ${field('Next follow-up', `<input name="nextFollowUp" type="date" value="${nextWorkday(addDays(today(), 1))}">`)}
-        ${field('Notes', '<textarea name="notes" rows="2" placeholder="What they said about the company, timing, current vendor…"></textarea>', 'span-2')}
-      </div>`, (data) => {
-      if (!data.name.trim()) return false;
-      const p = getAccount(data.partnerId);
-      const now = new Date().toISOString();
-      const contacts = data.c_name || data.c_email || data.c_phone
-        ? [{ id: uid(), name: data.c_name || data.c_email || data.c_phone, title: data.c_title, email: data.c_email, phone: data.c_phone, role: '', notes: '', status: 'Active', primary: true }] : [];
-      const acct = migrateAccount({ id: uid(), name: data.name.trim(), type: 'prospect', stage: data.stage, employees: data.employees, notes: data.notes, tags: '', vendors: [],
-        leadSource: 'Partner / broker', channelPartnerId: p.id, channelContactId: data.channelContactId || '', referredAt: today(), nextFollowUp: data.nextFollowUp,
-        contacts, activities: [{ id: uid(), date: today(), kind: 'Note', summary: `Referred by ${p.name}`, notes: data.notes, createdAt: now }], keyDates: [], createdAt: now, updatedAt: now });
-      state.accounts.push(acct);
-      p.activities.push({ id: uid(), date: today(), kind: 'Note', summary: `Referral: ${acct.name}`, notes: '', contactId: data.channelContactId || '', createdAt: now });
-      touch(p);
-      partnerCadenceExits();
-      toast(`Referral logged: ${acct.name}`);
-    }, 'Log referral', { wide: true });
-    const fill = () => {
-      const p = getAccount($('#rf-partner').value);
-      $('#rf-pcontact').innerHTML = `<option value="">—</option>${p ? p.contacts.map((c) => opt(c.id, c.name, (p.contacts.find((x) => x.primary) || {}).id)).join('') : ''}`;
-    };
-    $('#rf-partner').addEventListener('change', fill); fill();
-  }
-
   /** Paste a book of business: one client per line (tab or comma separated: name, location, employees, EIN in any order after the name). */
   function addClientsForm(p) {
     openModal(`Add clients · ${p.name}`, `
@@ -2211,8 +2582,9 @@
     for (const a of state.accounts) {
       if (a.nextFollowUp && inRange(a.nextFollowUp) && !isClosedStage(a.stage)) {
         const pc = primaryContact(a); const lt = lastTouchDate(a);
-        items.push({ key: 'fu:' + a.id, type: kindToType(pc ? channelKind(pc) : 'Call'), title: `Follow up · ${accountLabel(a)}`, sub: pc ? `${pc.name}${pc.title ? ', ' + pc.title : ''}` : '',
-          acct: a, due: a.nextFollowUp, src: 'followup', why: `Follow-up ${dueWords(a.nextFollowUp)}; last touch ${lt ? relDays(lt) : 'never'}`,
+        const rf = a.nextWhat && isReferral(a) ? refInfo(a) : null;
+        items.push({ key: 'fu:' + a.id, type: kindToType(pc ? channelKind(pc) : 'Call'), title: rf ? `${a.nextWhat} · ${accountLabel(a)}` : `Follow up · ${accountLabel(a)}`, sub: pc ? `${pc.name}${pc.title ? ', ' + pc.title : ''}` : '',
+          acct: a, due: a.nextFollowUp, src: 'followup', why: `${rf ? `${rf.who === 'me' ? 'Your move' : rf.who === 'partner' ? `${rf.p.name}'s move` : 'Their move'} on a referral from ${rf.p.name} · ` : ''}Follow-up ${dueWords(a.nextFollowUp)}; last touch ${lt ? relDays(lt) : 'never'}`,
           btn: { act: 'log', label: 'Log', attrs: `data-id="${a.id}"` } });
       }
       if (a.revisitDate && inRange(a.revisitDate)) {
@@ -3538,6 +3910,7 @@ Give me the CSV file.`;
    *  in a cadence or touched in the last 90 days are Active; closed and quiet accounts are Reserve. */
   function defaultBook(a) {
     if (a.stage === 'Closed Won' || a.stage === 'Closed Lost' || (a.type === 'partner' && a.stage === 'Closed')) return 'reserve';
+    if (a.stage === 'Referred') return 'active';
     if (a.type === 'partner' ? LIVE_PARTNER.includes(a.stage) : /^S[1-5]/.test(a.stage || '')) return 'active';
     if (a.nextFollowUp || a.revisitDate || inCadence(a)) return 'active';
     const lt = lastTouchDate(a);
@@ -3635,7 +4008,7 @@ Give me the CSV file.`;
         <button type="button" class="${type === 'partner' ? 'active' : ''}" data-act="board-type" data-type="partner">Partner pipeline (${list.filter((a) => a.type === 'partner').length})</button>
       </div>`}
       <div class="board">
-        ${STAGES[type].map((stage) => {
+        ${(type === 'prospect' ? ['Referred', ...STAGES.prospect.filter((x) => x !== 'Referred')] : STAGES[type]).map((stage) => {
           const col = sortAccounts(items.filter((a) => a.stage === stage));
           const total = col.reduce((n, a) => n + (Number(a.value) || 0), 0);
           return `
@@ -4245,6 +4618,7 @@ Give me the CSV file.`;
           <div class="span-all"><span>Address</span>${geoQuery(a) ? `${esc(geoQuery(a))}${hasGeo(a) ? ` · <a href="${esc(navUrl(ll(a)))}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}${noDrop(a) ? ` <span class="pill med">${esc(noDrop(a))}: not a drop stop</span>` : ''}</div>
           ${a.salesforceUrl ? `<div><span>Salesforce</span><a href="${esc(extUrl(a.salesforceUrl))}" target="_blank" rel="noopener">Open record ↗</a></div>` : ''}
           <div><span>Book</span>${esc(bookLabel(a))} <button type="button" class="link-btn small" data-act="book-toggle" data-id="${a.id}">${isReserve(a) ? 'Move to Active' : 'Move to Reserve'}</button></div>
+          ${isReferral(a) ? (() => { const x = refInfo(a); const w = (a.waitingOn || []).map((k) => WAIT_SHORT[k]).filter(Boolean); return `<div class="span-all"><span>Referral</span>Referred by <a href="#account/${x.p.id}">${esc(x.p.name)}</a>${x.pc ? ` (${esc(x.pc.name)})` : ''}${a.referredAt ? ` · ${esc(dShort(a.referredAt))}` : ''} · <b>${esc(x.where)}</b>${x.open ? ` · next move: ${WHO[x.who]}${a.nextWhat ? `, ${esc(a.nextWhat)}` : ''}${a.nextFollowUp ? ` by ${esc(dShort(a.nextFollowUp))}` : ''}` : ''}${x.open && w.length ? ` · waiting on ${esc(w.join(', '))}` : ''} · partner last updated ${x.upd ? esc(relDays(x.upd)) : 'never'}${x.updDue ? ' <span class="pill med">update due</span>' : ''} <button type="button" class="link-btn small" data-act="ref-edit" data-id="${a.id}">Edit referral</button></div>`; })() : ''}
           ${geoQuery(a) ? `<div><span>Field territory</span><span data-terr="${a.id}">${socalData ? esc(terrName(a) || (hasGeo(a) ? 'Outside the territories' : 'Not on the map yet')) : '…'}</span></div>` : ''}
           <div><span>Sales Navigator</span>${liIdOf(a) ? `<a href="${esc(snCompanyUrl(liIdOf(a)))}" target="_blank" rel="noopener">Account</a> · <a href="${esc(snPeopleAt(liIdOf(a), a.name))}" target="_blank" rel="noopener">People here</a> <span class="small muted">ID ${esc(liIdOf(a))}</span> ` : ''}<button type="button" class="link-btn small" data-act="li-id" data-id="${a.id}">${liIdOf(a) ? 'Change' : 'Add LinkedIn ID'}</button>
               ${liTwins(a).length ? `<div class="small warn-text">Same LinkedIn page as ${liTwins(a).map((x) => `<a href="#account/${x.id}">${esc(x.name)}</a>`).join(', ')}. One business or separate accounts? Check the legal name and EIN.</div>` : ''}</div>
@@ -10285,6 +10659,36 @@ Give me the CSV file.`;
       case 'pt-open-tab': ui.recordId = id; ui.partnerTab = el.dataset.tab; return go(`account/${id}`);
       case 'new-partner': return accountForm(null, { type: 'partner', stage: STAGES.partner[0] });
       case 'log-referral': return referralForm(id);
+      case 'pt-view': ui.ptView = el.dataset.v; return rerender();
+      case 'pa-all': ui.paAll = !ui.paAll; return rerender();
+      case 'pa-done': case 'pa-snooze': {
+        const p = getAccount(id); const key = el.dataset.key;
+        if (!p) return undefined;
+        if (act === 'pa-done' && (key === 'news' || key === 'update')) {
+          const refs = referredBy(p).filter((a) => a.type !== 'partner').map((a) => refInfo(a)).filter((x) => x.open || x.news);
+          logRefUpdate(p, refs, 'Other', 'Marked done from Partner actions');
+        } else {
+          p.paSnooze = { ...(p.paSnooze || {}), [key]: addDays(today(), act === 'pa-done' ? 30 : 7) };
+          touch(p); save();
+        }
+        toast(act === 'pa-done' ? `Done: ${p.name}` : `Snoozed a week: ${p.name}`);
+        return rerender();
+      }
+      case 'ref-update': return refUpdateForm(id);
+      case 'ref-edit': return acct ? referralEditForm(acct) : undefined;
+      case 'ref-nudge': {
+        const x = acct && isReferral(acct) ? refInfo(acct) : null;
+        if (!x) return undefined;
+        const nm = firstName(x.pc);
+        const who = acct.contacts.find((c) => c.primary) || acct.contacts[0];
+        copyText(`Hi${nm ? ' ' + nm : ''}, any luck connecting me with ${who ? `${who.name} at ` : ''}${acct.name}? Happy to work around their schedule.`, 'Nudge copied; it comes back in 3 days');
+        x.p.paSnooze = { ...(x.p.paSnooze || {}), [`chase:${acct.id}`]: addDays(today(), 3) };
+        touch(x.p); save();
+        return rerender();
+      }
+      case 'rf-filter': ui.rfFilter = el.dataset.v; return rerender();
+      case 'rf-who': ui.rfWho = el.dataset.v; return rerender();
+      case 'rf-by': ui.rfBy = el.dataset.v; return rerender();
       case 'comp-calc': return compCalc({ dealId: el.dataset.deal, partnerId: el.dataset.pid });
       case 'comp-rates': return compRatesForm();
       case 'add-clients': return addClientsForm(acct);
