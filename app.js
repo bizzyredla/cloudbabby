@@ -224,6 +224,20 @@
     toast.t = setTimeout(() => { el.hidden = true; }, 2200);
   }
 
+  // ---------- long lists: the first 10, then a bar that opens the rest ----------
+  // Everywhere except the Accounts, Contacts and Partners pages (they have their own paging). Whether a
+  // list is open is remembered for that list on this device.
+  const MORE_N = 10;
+  const CHEV_DOWN = '<svg class="more-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  const CHEV_UP = '<svg class="more-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
+  const isMoreOpen = (key) => !!(ui.moreOpen && ui.moreOpen[key]);
+  /** The rows to draw: all of them once the list is opened, else the first 10. */
+  const firstTen = (key, list, n = MORE_N) => (isMoreOpen(key) ? list : list.slice(0, n));
+  /** "Show 7 more ▾" / "Show fewer ▴". `attrs` say what a tap does. */
+  const moreBarHtml = (open, hidden, attrs) => `<button type="button" class="more-bar" ${attrs} aria-expanded="${open}"><span>${open ? 'Show fewer' : `Show ${hidden} more`}</span>${open ? CHEV_UP : CHEV_DOWN}</button>`;
+  /** The bar under a list longer than 10 (nothing for 10 or fewer). */
+  const moreBar = (key, total, n = MORE_N) => (total > n ? moreBarHtml(isMoreOpen(key), total - n, `data-act="more-toggle" data-key="${esc(key)}"`) : '');
+
   // ---------- state ----------
   let state = emptyState(); // filled in by bootStorage() at startup
   let sb = null; let cloudUser = null; let cloudCfg = null; // Supabase client, signed-in user, saved connection
@@ -238,7 +252,7 @@
   ui.routeDate = today();
   ui.mapFilter = { type: 'all', vendor: 'all', list: '' };
   const savePrefs = () => {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, mapSocal: ui.mapSocal, theme: ui.theme, linkMode: ui.linkMode, liMode: ui.liMode })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify({ accountView: ui.accountView, boardType: ui.boardType, home: ui.home, partnerRules: ui.partnerRules, calMode: ui.calMode, extraOpen: ui.extraOpen, dailyGoal: ui.dailyGoal, cadView: ui.cadView, cadCalMode: ui.cadCalMode, cadHidden: ui.cadHidden, stepCap: ui.stepCap, enrollPerDay: ui.enrollPerDay, acctCols: ui.acctCols, viewSeen: ui.viewSeen, mapColor: ui.mapColor, mapSocal: ui.mapSocal, theme: ui.theme, linkMode: ui.linkMode, liMode: ui.liMode, moreOpen: ui.moreOpen })); } catch (e) { /* ignore */ }
   };
 
   // ----- appearance: follow the device, or always light / always dark (per device) -----
@@ -1615,7 +1629,7 @@
     return `
       <div class="row spread"><div class="small muted">${plural(active.length, 'stakeholder')} · ${overdue.length ? `<span class="pill overdue">${overdue.length} overdue on cadence</span>` : 'nobody overdue'}${roles.has('Decision maker') ? '' : ' · <span class="pt-late">no decision maker mapped</span>'}</div>
         <button class="btn sm ghost" data-act="new-contact" data-id="${a.id}">+ Add person</button></div>
-      ${people.length ? `<div class="pt-people">${people.map((c) => {
+      ${people.length ? `<div class="pt-people">${firstTen('pt-people', people).map((c) => {
         const s = stayInfo(a, c);
         const last = lastContacted(a, c);
         return `<div class="pt-person ${c.status && c.status !== 'Active' ? 'inactive' : ''}" data-contact="${c.id}">
@@ -1629,7 +1643,7 @@
           <div class="small pt-last">${last ? `Last ${esc(relDays(last))}` : '<span class="muted">Never contacted</span>'}${s && s.next < t ? ` · <span class="pill overdue">${esc(stayWhen(s.next))}</span>` : s ? ` · <span class="muted">next ${esc(shortDate(s.next))}</span>` : ''}</div>
           ${s ? `<div class="row sit-acts">${stayActions(a, c)}</div>` : '<span></span>'}
         </div>`;
-      }).join('')}</div>` : '<div class="empty">No people yet. Map the owner, producers and account managers so you stay in touch with everyone.</div>'}
+      }).join('')}</div>${moreBar('pt-people', people.length)}` : '<div class="empty">No people yet. Map the owner, producers and account managers so you stay in touch with everyone.</div>'}
       <p class="small muted" style="margin:0">Cadence uses Stay in touch: pick how often to reach each person; they show up on the Overview and planner when due.</p>`;
   }
 
@@ -1646,16 +1660,16 @@
       </li>`;
     return `
       <div class="row spread"><h3 style="margin:0">Referred by ${esc(a.name)} <span class="muted small">(${current.length})</span></h3><button class="btn sm" data-act="log-referral" data-id="${a.id}">+ Log referral</button></div>
-      ${current.length ? `<ul class="list">${current.map(row).join('')}</ul>` : '<div class="empty">No referrals yet. Log one when they send you a lead.</div>'}
+      ${current.length ? `<ul class="list">${firstTen('pt-referred', current).map(row).join('')}</ul>${moreBar('pt-referred', current.length)}` : '<div class="empty">No referrals yet. Log one when they send you a lead.</div>'}
 
       <div class="row spread"><h3 style="margin:0">Former referrals to resell <span class="muted small">(${former.length + clients.filter((c) => c.kind === 'former').length})</span></h3></div>
-      ${former.length || clients.some((c) => c.kind === 'former') ? `<ul class="list">${former.map((x) => `<li>
+      ${former.length || clients.some((c) => c.kind === 'former') ? `<ul class="list">${firstTen('pt-former', [...former.map((x) => `<li>
           <div class="grow"><a class="title" href="#account/${x.id}">${esc(x.name)}</a><div class="small muted">${esc(x.stage)}${x.value ? ' · ' + money(x.value) : ''}${x.vendors.length ? ' · on ' + esc(x.vendors.join(', ')) : ''}${x.vendorRenewal ? ' · renews ' + esc(fmtDate(x.vendorRenewal)) : ''}</div></div>
           <button class="btn sm ghost" data-act="resell-task" data-id="${x.id}" data-pid="${a.id}">Plan resell</button>
-        </li>`).join('')}${clients.filter((c) => c.kind === 'former').map((c) => clientRow(a, c)).join('')}</ul>` : '<div class="empty">Deals they referred that went Closed Lost, Nurture or Revisit show here, ready to resell.</div>'}
+        </li>`), ...clients.filter((c) => c.kind === 'former').map((c) => clientRow(a, c))]).join('')}</ul>${moreBar('pt-former', former.length + clients.filter((c) => c.kind === 'former').length)}` : '<div class="empty">Deals they referred that went Closed Lost, Nurture or Revisit show here, ready to resell.</div>'}
 
       <div class="row spread"><h3 style="margin:0">Their clients <span class="muted small">(${clients.filter((c) => c.kind !== 'former').length}${inCrm.length ? ` · ${inCrm.length} already in your CRM` : ''})</span></h3><button class="btn sm ghost" data-act="add-clients" data-id="${a.id}">+ Add clients</button></div>
-      ${clients.some((c) => c.kind !== 'former') ? `<ul class="list">${clients.filter((c) => c.kind !== 'former').sort((x, y) => (x.kind === 'target' ? 0 : 1) - (y.kind === 'target' ? 0 : 1) || (Number(y.employees) || 0) - (Number(x.employees) || 0)).map((c) => clientRow(a, c)).join('')}</ul>`
+      ${clients.some((c) => c.kind !== 'former') ? `<ul class="list">${clients.filter((c) => c.kind !== 'former').sort((x, y) => (x.kind === 'target' ? 0 : 1) - (y.kind === 'target' ? 0 : 1) || (Number(y.employees) || 0) - (Number(x.employees) || 0)).filter((c, k, arr) => k < MORE_N || isMoreOpen('pt-clients')).map((c) => clientRow(a, c)).join('')}</ul>${moreBar('pt-clients', clients.filter((c) => c.kind !== 'former').length)}`
         : '<div class="empty">Paste their book of business (from Mployer or a spreadsheet) to see which clients overlap with your accounts and pick co-sell targets.</div>'}`;
   }
 
@@ -1683,14 +1697,14 @@
     const comp = (x) => compEstimate(plan, dealInputs(x));
     const openTotal = open.reduce((n, x) => n + comp(x).total, 0);
     const wonTotal = won.reduce((n, x) => n + comp(x).total, 0);
-    const table = (list) => `<div class="pt-table">
+    const table = (list, key) => `<div class="pt-table">
       <div class="pt-tr pt-th"><span>Deal</span><span>Stage</span><span>Close</span><span>Enrolled</span><span>Admin fees</span><span>Est. year one</span><span></span></div>
-      ${list.map((x) => { const c = comp(x); const inp = dealInputs(x); return `<div class="pt-tr">
+      ${firstTen(key, list).map((x) => { const c = comp(x); const inp = dealInputs(x); return `<div class="pt-tr">
         <span><a href="#account/${x.id}">${esc(x.name)}</a></span><span class="small">${esc(stageShort(x.stage))}</span><span>${dueChip(x.closeDate)}</span>
         <span>${inp.enrolled || '<span class="muted">—</span>'}</span><span>${inp.adminFees ? money(inp.adminFees) : '<span class="muted">—</span>'}</span>
         <span><b>${est(c.total)}</b>${c.bonus ? ' <span class="pill">+bonus</span>' : ''}</span>
         <span><button class="btn sm ghost" data-act="comp-calc" data-deal="${x.id}">Calculator</button></span>
-      </div>`; }).join('')}</div>`;
+      </div>`; }).join('')}</div>${moreBar(key, list.length)}`;
     return `
       <div class="row spread">
         <label class="row small">Comp plan <select data-comp-plan data-id="${a.id}">${compPlans().map((x) => opt(x.id, x.name, plan && plan.id)).join('')}</select></label>
@@ -1706,8 +1720,8 @@
         <div class="${sc.got && !sc.given ? 'bad' : ''}"><b>${sc.given} / ${sc.got}</b><span>Given / got, 12 mo</span></div>
       </div>`; })()}
       <h3 style="margin:.25rem 0 0">Open (S1–S5)</h3>
-      ${open.length ? table(open) : '<div class="empty">No open referred deals.</div>'}
-      ${won.length ? `<h3 style="margin:.25rem 0 0">Closed Won</h3>${table(won)}` : ''}
+      ${open.length ? table(open, 'pt-open') : '<div class="empty">No open referred deals.</div>'}
+      ${won.length ? `<h3 style="margin:.25rem 0 0">Closed Won</h3>${table(won, 'pt-won')}` : ''}
       <p class="small muted" style="margin:0">Estimates from your comp rates using each deal's enrolled employees (or headcount), annual admin fees and setup fee. Not a payout statement.</p>`;
   }
 
@@ -2308,7 +2322,7 @@
       : (it) => (it.due === t ? 'Today' : it.due === addDays(t, -1) ? 'Yesterday' : fmtDate(it.due, { weekday: 'long', month: 'short', day: 'numeric' }));
     const groups = [];
     for (const it of shown) { const g = bucket(it); let grp = groups.find((x) => x.g === g); if (!grp) groups.push(grp = { g, list: [] }); grp.list.push(it); }
-    const SHOW = 8;
+    const SHOW = MORE_N;
     const row = (it) => `
       <div class="q-row ${mode === 'done' ? 'q-done' : ''}">
         <span class="q-check-sp" aria-hidden="true">${mode === 'done' ? '✓' : ''}</span>
@@ -2330,7 +2344,7 @@
           return `<div class="q-group">
             <div class="q-ghead"><span>${esc(g)} <span class="muted">(${list.length})</span></span></div>
             ${list.slice(0, open ? list.length : SHOW).map(row).join('')}
-            ${list.length > SHOW ? `<button type="button" class="link-btn q-more" data-act="q-more" data-group="${esc(g)}">${open ? 'Show fewer' : `Show ${list.length - SHOW} more ▾`}</button>` : ''}
+            ${list.length > SHOW ? moreBarHtml(!!open, list.length - SHOW, `data-act="q-more" data-group="${esc(g)}"`) : ''}
           </div>`;
         }).join('') : `<div class="empty-soft">${mode === 'future' ? 'Nothing scheduled in the next 30 days.' : 'Nothing logged in the last 14 days.'}</div>`}
       </div>`;
@@ -2355,7 +2369,7 @@
         <div class="q-due ${it.late ? 'late' : ''}">${it.late ? esc(plural(it.late, 'day') + ' overdue') : it.due === t ? 'Today' : esc(fmtDate(it.due, { weekday: 'short', month: 'short', day: 'numeric' }))}</div>
         <button class="btn sm ${it.btn.primary ? '' : 'ghost'}" data-act="${it.btn.act}" ${it.btn.attrs}>${esc(it.btn.label)}</button>
       </div>`;
-    const SHOW = 6;
+    const SHOW = MORE_N;
     const groups = Object.keys(QGROUPS).map((g) => ({ g, list: shown.filter((it) => it.group === g) })).filter((x) => x.list.length);
     return `
       <div class="card q-card">
@@ -2379,7 +2393,7 @@
                 ${cad ? `<button type="button" class="btn sm ghost" data-act="q-bulk" data-op="skip" data-group="${g}">Skip ${plural(cad, 'cadence step')}</button>` : ''}
               </span>` : ''}</div>
             ${list.slice(0, open ? list.length : SHOW).map(row).join('')}
-            ${list.length > SHOW ? `<button type="button" class="link-btn q-more" data-act="q-more" data-group="${g}">${open ? 'Show fewer' : `Show ${list.length - SHOW} more ▾`}</button>` : ''}
+            ${list.length > SHOW ? moreBarHtml(!!open, list.length - SHOW, `data-act="q-more" data-group="${g}"`) : ''}
           </div>`;
         }).join('') : `<div class="empty-soft">${all.length ? 'Nothing in this tab.' : 'Nothing due. Nice work: add a task, or log extra activity below.'}</div>`}
       </div>`;
@@ -2447,14 +2461,14 @@
   function staleCard(d) {
     const inQueue = new Set(workQueue(d).map((it) => it.acct && it.acct.id).filter(Boolean));
     const list = staleAccounts().filter(({ a }) => !inQueue.has(a.id));
-    const SHOW = 8;
+    const SHOW = MORE_N;
     return `<div class="card">
       <div class="row spread"><h3 style="margin:0">Stale accounts</h3><span class="small muted">${list.length}</span></div>
       <div class="small muted" style="margin:.15rem 0 .4rem">No touch in 30+ days and nothing scheduled. One line each.</div>
       ${list.length ? `<ul class="list stale-list">${list.slice(0, ui.staleAll ? list.length : SHOW).map(({ a, lt }) => `<li>
         <div class="grow"><a class="title" href="#account/${a.id}">${esc(a.name)}</a> <span class="small muted">· ${esc(a.type === 'partner' ? (a.partnerType || 'Partner') : stageShort(a.stage))} · ${lt ? esc(relDays(lt)) : 'never'}</span></div>
         <button class="btn sm ghost" data-act="log" data-id="${a.id}">Log</button>
-      </li>`).join('')}</ul>${list.length > SHOW ? `<button type="button" class="link-btn small" data-act="stale-all">${ui.staleAll ? 'Show fewer' : `Show ${list.length - SHOW} more`}</button>` : ''}`
+      </li>`).join('')}</ul>${list.length > SHOW ? moreBarHtml(!!ui.staleAll, list.length - SHOW, 'data-act="stale-all"') : ''}`
         : '<div class="empty">Every open account has a recent touch or a next step.</div>'}
     </div>`;
   }
@@ -2552,8 +2566,8 @@
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
     const recent = state.accounts.flatMap((a) => a.activities.map((h) => ({ ...h, account: a })))
-      .sort((x, y) => y.date.localeCompare(x.date) || (y.createdAt || '').localeCompare(x.createdAt || '')).slice(0, 6);
-    const sitSoon = stayList().filter((x) => daysBetween(t, x.next) <= 7).slice(0, 5);
+      .sort((x, y) => y.date.localeCompare(x.date) || (y.createdAt || '').localeCompare(x.createdAt || '')).slice(0, 50);
+    const sitSoon = stayList().filter((x) => daysBetween(t, x.next) <= 7);
     const kpi = (href, label, value, sub) => `<a class="card kpi-card" href="${href}"><span class="kpi-label">${label}</span><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></a>`;
     const dueBits = [bySrc('cadence') && plural(bySrc('cadence'), 'cadence step'), bySrc('followup') && plural(bySrc('followup'), 'follow-up'),
       (bySrc('revisit') + bySrc('route')) && plural(bySrc('revisit') + bySrc('route'), 'visit'), (bySrc('task') + bySrc('keydate') + bySrc('stay')) && plural(bySrc('task') + bySrc('keydate') + bySrc('stay'), 'other item')].filter(Boolean);
@@ -2570,7 +2584,8 @@
     };
     const prio = state.accounts.filter((a) => isOpenDeal(a) || (a.type === 'partner' && ['Engaged', 'Met', 'Committed', 'Producing', 'Dormant'].includes(a.stage)))
       .map((a) => { const lt = lastTouchDate(a); const age = lt ? daysBetween(lt, t) : 90; return { a, lt, score: ((Number(a.value) || 0) / maxV) * 0.55 + (Math.min(age, 60) / 60) * 0.45, open: items.filter((it) => it.acct && it.acct.id === a.id).length }; })
-      .sort((x, y) => y.score - x.score).slice(0, 8);
+      .sort((x, y) => y.score - x.score);
+    const folded = foldQueue(items);
 
     $('#view').innerHTML = `
       <div class="ov-head">
@@ -2599,7 +2614,7 @@
               <div class="small"><b>${now.length}</b> due${overdue ? ` · <span class="q-late">${overdue} overdue</span>` : ''}</div></div>
             ${items.length ? `<div class="pt2">
               <div class="pt2-row pt2-th"><span></span><span>Action</span><span>Why it's here</span><span>Type</span><span></span></div>
-              ${foldQueue(items).slice(0, 8).map((it) => it.fold ? `<div class="pt2-row late fold">
+              ${firstTen('ov-tasks', folded).map((it) => it.fold ? `<div class="pt2-row late fold">
                 ${stepIcon({ type: it.type })}
                 <div class="pt2-act"><div class="q-title">${esc(it.title)}</div><div class="small muted">${esc(it.sub)}</div></div>
                 <div class="pt2-why ${it.late ? 'q-late' : ''}">${esc(it.why)}</div>
@@ -2612,14 +2627,14 @@
                 <div>${qPill(it)}</div>
                 <button class="btn sm ${it.btn.primary ? '' : 'ghost'}" data-act="${it.btn.act}" ${it.btn.attrs}>${esc(it.btn.label)}</button>
               </div>`).join('')}
-            </div><a class="small link-arrow" href="#planner/${t}">Open today's queue →</a>`
+            </div>${moreBar('ov-tasks', folded.length)}<a class="small link-arrow" href="#planner/${t}">Open today's queue →</a>`
               : '<div class="empty-soft">Nothing due. Your queue fills itself from cadences, follow-ups, revisits and reminders.</div>'}
           </div>
           <div class="card">
             <div class="section-head"><div><h2 style="margin:0">Priority accounts</h2><div class="small muted">Open deals and active partners, ranked by value and time since the last touch.</div></div><a class="btn sm ghost" href="#accounts">View all accounts</a></div>
             ${prio.length ? `<div class="pa-table">
               <div class="pa-row pa-th"><span>Account</span><span>Stage</span><span>Value</span><span>Last touch</span><span>Next step</span><span>Open</span></div>
-              ${prio.map(({ a, lt, open }) => { const ns = nextStepOf(a); const old = !lt || daysBetween(lt, t) > 14; return `<div class="pa-row">
+              ${firstTen('ov-prio', prio).map(({ a, lt, open }) => { const ns = nextStepOf(a); const old = !lt || daysBetween(lt, t) > 14; return `<div class="pa-row">
                 <a class="title" href="#account/${a.id}">${esc(a.name)}</a>
                 <span class="small">${esc(a.type === 'partner' ? `${a.stage} partner` : stageShort(a.stage))}</span>
                 <span>${a.value ? money(a.value) : '<span class="muted">—</span>'}</span>
@@ -2627,7 +2642,7 @@
                 <span class="small ${!ns || /overdue/.test(ns) ? 'q-late' : ''}">${ns ? esc(ns) : 'No next step'}</span>
                 <a class="btn sm ghost" href="#account/${a.id}" title="${plural(open, 'open action')}">▶ ${open}</a>
               </div>`; }).join('')}
-            </div>` : '<div class="empty">No open deals or active partners yet.</div>'}
+            </div>${moreBar('ov-prio', prio.length)}` : '<div class="empty">No open deals or active partners yet.</div>'}
           </div>
         </div>
         <div class="stack">
@@ -2649,14 +2664,14 @@
           </div>
           ${sitSoon.length ? `<div class="card">
             <div class="section-head"><h2 style="margin:0">Stay in touch</h2><a class="small link-arrow" href="#contacts/stay">All →</a></div>
-            ${stayRowsHtml(sitSoon)}
+            ${stayRowsHtml(firstTen('ov-stay', sitSoon))}${moreBar('ov-stay', sitSoon.length)}
           </div>` : ''}
           <div class="card">
             <h2 style="margin:0 0 .5rem">Recent activity</h2>
-            ${recent.length ? `<ul class="feed">${recent.map((r) => `<li>
+            ${recent.length ? `<ul class="feed">${firstTen('ov-recent', recent).map((r) => `<li>
               <div class="grow"><div class="title">${esc(r.summary)}</div><div class="small muted"><a href="#account/${r.account.id}">${esc(r.account.name)}</a> · ${esc(r.kind)}</div></div>
               <span class="small muted nowrap">${esc(relDays(r.date))}</span>
-            </li>`).join('')}</ul>` : '<div class="empty">No activity logged yet.</div>'}
+            </li>`).join('')}</ul>${moreBar('ov-recent', recent.length)}` : '<div class="empty">No activity logged yet.</div>'}
           </div>
         </div>
       </div>
@@ -2878,7 +2893,7 @@
         <select id="seg-obj" aria-label="Object">${opt('all', 'Accounts and contacts', obj)}${opt('accounts', 'Account views', obj)}${opt('contacts', 'Contact views', obj)}</select>
         <select id="seg-sort" aria-label="Sort">${opt('updated', 'Sort: Recently updated', ui.segSort || 'updated')}${opt('name', 'Sort: Name', ui.segSort)}${opt('size', 'Sort: Size', ui.segSort)}</select>
       </div>
-      <div class="seg-list">${rows.map((r) => `
+      <div class="seg-list">${firstTen('segments', rows).map((r) => `
         <div class="card seg-card">
           <div class="row spread" style="gap:.5rem;flex-wrap:wrap">
             <button type="button" class="link-btn seg-name" data-act="seg-open" data-obj="${r.obj}" data-vid="${r.id}"><strong>${esc(r.name)}</strong></button>
@@ -2890,7 +2905,7 @@
           </div>
           <div class="small seg-meta"><b>${r.active}</b> ${r.obj === 'accounts' ? (r.active === 1 ? 'active account' : 'active accounts') : `${r.active === 1 ? 'person' : 'people'} at active accounts`}${r.reserve ? ` <span class="muted">· +${r.reserve} in Reserve</span>` : ''}${r.updated ? ` <span class="muted">· updated ${esc(fmtDate(r.updated.slice(0, 10), { month: 'short', day: 'numeric', year: 'numeric' }))}</span>` : ''}</div>
           <div class="small muted">${esc(r.summary)}</div>
-        </div>`).join('') || `<div class="card"><div class="empty">${all.length ? 'No views match.' : 'No saved views yet. Save one from Accounts or Contacts ("+ Save view"), or start one here.'}</div></div>`}</div>`;
+        </div>`).join('') || `<div class="card"><div class="empty">${all.length ? 'No views match.' : 'No saved views yet. Save one from Accounts or Contacts ("+ Save view"), or start one here.'}</div></div>`}</div>${moreBar('segments', rows.length)}`;
     $('#seg-q').addEventListener('input', (e) => { ui.segQ = e.target.value; clearTimeout(renderSegments.t); renderSegments.t = setTimeout(() => { rerender(); const i = $('#seg-q'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 200); });
     $('#seg-obj').addEventListener('change', (e) => { ui.segObj = e.target.value; rerender(); });
     $('#seg-sort').addEventListener('change', (e) => { ui.segSort = e.target.value; rerender(); });
@@ -2930,13 +2945,13 @@
         <button type="button" class="icon-btn" data-act="wl-edit" data-wid="${it.id}" title="Edit ${esc(it.name)}" aria-label="Edit ${esc(it.name)}">✎</button>
       </div>`;
     };
-    const group = (cid, its) => {
+    const group = (cid, its, status) => {
       const c = colleagueById(cid) || { name: 'No colleague', status: 'Active' };
       its.sort((x, y) => (x.type === 'Partner' ? 0 : 1) - (y.type === 'Partner' ? 0 : 1) || x.name.localeCompare(y.name));
       return `<div class="wl-group">
         <div class="wlc-head"><b>${esc(c.name)}</b> ${c.status === 'Departed' ? `<span class="pill late">Departed${c.departed_at ? ` ${esc(fmtDate(c.departed_at, { month: 'short', day: 'numeric' }))}` : ''}</span>` : '<span class="pill">Active</span>'}
           ${c.id ? `<button type="button" class="link-btn small" data-act="wl-col-status" data-col="${c.id}">${c.status === 'Departed' ? 'Mark active again' : 'Mark departed'}</button>` : ''}</div>
-        ${its.map(row).join('')}
+        ${firstTen(`wl:${status}:${cid}`, its).map(row).join('')}${moreBar(`wl:${status}:${cid}`, its.length)}
       </div>`;
     };
     const section = (status, title, note) => {
@@ -2949,7 +2964,7 @@
         : (x, y) => ((colleagueById(x) || {}).name || '~').localeCompare((colleagueById(y) || {}).name || '~'));
       return `<section class="card wl-section ${status === 'Window Open' ? 'open' : ''}">
         <div class="row spread"><h2>${title} <span class="muted small">(${its.length})</span></h2><span class="small muted">${note}</span></div>
-        ${order.map((cid) => group(cid, by.get(cid))).join('')}
+        ${order.map((cid) => group(cid, by.get(cid), status)).join('')}
       </section>`;
     };
     const closed = state.watchlist.filter((x) => !['Watching', 'Window Open'].includes(x.status));
@@ -2977,7 +2992,7 @@
       ${section('Window Open', 'Window open', 'Their owner left: the window to start working them is now')}
       ${section('Watching', 'Watching', 'Owned by a colleague: hands off for now')}
       ${closed.length ? `<details class="card wl-section"><summary><b>Claimed, reassigned or dropped</b> <span class="muted small">(${closed.length})</span></summary>
-        ${closed.slice().sort((x, y) => (y.created_at || '').localeCompare(x.created_at || '')).map(row).join('')}</details>` : ''}
+        ${firstTen('wl-closed', closed.slice().sort((x, y) => (y.created_at || '').localeCompare(x.created_at || ''))).map(row).join('')}${moreBar('wl-closed', closed.length)}</details>` : ''}
       ${cols.length ? `<details class="card wl-section"><summary><b>Colleagues</b> <span class="muted small">(${cols.length})</span></summary>
         ${cols.map((c) => { const n = state.watchlist.filter((x) => x.colleague_id === c.id).length; return `<div class="wl-item">
           <div class="grow"><strong>${esc(c.name)}</strong> ${c.status === 'Departed' ? '<span class="pill late">Departed</span>' : '<span class="pill">Active</span>'} <span class="small muted">${plural(n, 'item')}</span></div>
@@ -3252,13 +3267,13 @@ Give me the CSV file.`;
         <h2>Lists <span class="muted small">(${lists.length})</span></h2>
         ${lists.length ? `<div class="table-wrap"><table class="table st-lists">
           <thead><tr><th>File</th><th>Source</th><th>Staged</th><th class="num">Rows</th><th>Status</th><th>Matches</th></tr></thead>
-          <tbody>${lists.map((l) => {
+          <tbody>${firstTen('st-lists', lists).map((l) => {
             const its = itemsOf(l.id); const n = (k, v) => its.filter((x) => x[k] === v).length;
             return `<tr><td><a href="#imports/${l.id}"><strong>${esc(l.file_name)}</strong></a>${l.notes ? `<div class="small muted">${esc(l.notes)}</div>` : ''}</td>
               <td>${esc(l.source)}</td><td class="small">${esc(fmtDate((l.created_at || '').slice(0, 10), { month: 'short', day: 'numeric', year: 'numeric' }))}</td><td class="num">${its.length}</td>
               <td class="small">${['New', 'Reviewed', 'Approved', 'Promoted', 'Rejected'].map((s) => n('status', s) ? `${n('status', s)} ${s.toLowerCase()}` : '').filter(Boolean).join(' · ')}</td>
               <td class="small">${n('match_confidence', 'exact')} exact · ${n('match_confidence', 'fuzzy')} fuzzy · ${n('match_confidence', 'none')} new</td></tr>`;
-          }).join('')}</tbody></table></div>` : '<div class="empty">No lists yet. Format a file with the template above and stage it here.</div>'}
+          }).join('')}</tbody></table></div>${moreBar('st-lists', lists.length)}` : '<div class="empty">No lists yet. Format a file with the template above and stage it here.</div>'}
       </section>`;
     $('#st-source').addEventListener('change', (e) => { ui.stSource = e.target.value; });
     $('#st-file').addEventListener('change', async (e) => {
@@ -4320,7 +4335,7 @@ Give me the CSV file.`;
 
         <div>
           <div class="section-head"><h2 style="margin:0">Key dates</h2><button class="btn sm ghost" data-act="new-keydate" data-id="${a.id}">+ Add date</button></div>
-          ${keyDates.length ? `<ul class="list">${keyDates.map((k) => `
+          ${keyDates.length ? `<ul class="list">${firstTen('acct-dates', keyDates).map((k) => `
             <li>
               <div class="date-chip ${k.done ? '' : dueClass(k.date)}"><b>${fromISO(k.date).getDate()}</b>${fmtDate(k.date, { month: 'short', year: '2-digit' })}</div>
               <div class="grow">
@@ -4330,7 +4345,7 @@ Give me the CSV file.`;
               <button class="icon-btn" data-act="keydate-toggle" data-id="${a.id}" data-kid="${k.id}" title="${k.done ? 'Reopen' : 'Mark done'}">${k.done ? '↺' : '✓'}</button>
               <button class="icon-btn" data-act="edit-keydate" data-id="${a.id}" data-kid="${k.id}" title="Edit">✎</button>
               <button class="icon-btn" data-act="del-keydate" data-id="${a.id}" data-kid="${k.id}" title="Delete">✕</button>
-            </li>`).join('')}</ul>` : '<div class="empty">Track renewals, contract dates, QBRs, decision dates…</div>'}
+            </li>`).join('')}</ul>${moreBar('acct-dates', keyDates.length)}` : '<div class="empty">Track renewals, contract dates, QBRs, decision dates…</div>'}
         </div>
 
         ${filesSection(a)}
@@ -4351,7 +4366,7 @@ Give me the CSV file.`;
 
         <div>
           <div class="section-head"><h2 style="margin:0">History <span class="muted small">(${history.length})</span></h2></div>
-          ${history.length ? `<ul class="timeline">${history.map((h) => `
+          ${history.length ? `<ul class="timeline">${firstTen('acct-history', history).map((h) => `
             <li class="${h.date > t ? 'future' : ''}">
               <div class="row spread">
                 <div><strong>${esc(h.kind)}</strong> — ${esc(h.summary)}</div>
@@ -4362,7 +4377,7 @@ Give me the CSV file.`;
               </div>
               <div class="when">${fmtDate(h.date)} · ${relDays(h.date)}${(() => { const c = h.contactId && a.contacts.find((x) => x.id === h.contactId); return c ? ' · with ' + esc(c.name) : ''; })()}</div>
               ${h.notes ? `<div class="body">${esc(h.notes)}</div>` : ''}
-            </li>`).join('')}</ul>` : '<div class="empty">No history yet — log your first call, email or meeting.</div>'}
+            </li>`).join('')}</ul>${moreBar('acct-history', history.length)}` : '<div class="empty">No history yet — log your first call, email or meeting.</div>'}
         </div>
 
         <div class="row" style="justify-content:flex-end">
@@ -4949,7 +4964,7 @@ Give me the CSV file.`;
       <div class="cad-grid">
         <div class="card">
           <div class="section-head"><h3 style="margin:0">Due now <span class="muted small">(${due.length})</span></h3></div>
-          ${due.length ? `<div class="queue">${due.map((p) => `
+          ${due.length ? `<div class="queue">${firstTen('cad-due', due).map((p) => `
             <div class="queue-row">
               ${stepIcon(p.step)}
               <div class="grow">
@@ -4959,7 +4974,7 @@ Give me the CSV file.`;
               ${dueChip(p.e.dueDate)}
               <button class="btn sm" data-act="enr-log" data-eid="${p.e.id}">Do it</button>
               <button class="icon-btn" data-act="enr-skip" data-eid="${p.e.id}" title="Skip this step">⤼</button>
-            </div>`).join('')}</div>` : '<div class="empty">You\'re all caught up on this cadence.</div>'}
+            </div>`).join('')}</div>${moreBar('cad-due', due.length)}` : '<div class="empty">You\'re all caught up on this cadence.</div>'}
         </div>
 
         <div class="card">
@@ -4967,7 +4982,7 @@ Give me the CSV file.`;
             <h3 style="margin:0">People <span class="muted small">(${people.length})</span></h3>
             <div class="seg">${Object.entries(filters).map(([k, l]) => `<button type="button" class="${ui.cadFilter === k ? 'active' : ''}" data-act="cad-filter" data-f="${k}">${l}</button>`).join('')}</div>
           </div>
-          ${shown.length ? `<div class="people">${shown.map(personRow).join('')}</div>`
+          ${shown.length ? `<div class="people">${firstTen('cad-people', shown).map(personRow).join('')}</div>${moreBar('cad-people', shown.length)}`
             : `<div class="empty">${people.length ? 'Nobody here.' : 'No one enrolled yet. Click "+ Add people" to start.'}</div>`}
         </div>
       </div>`;
@@ -7687,7 +7702,7 @@ Give me the CSV file.`;
     const approx = mapped.filter((a) => (a.geo.approx || a.geo.check) && !a.geo.manual);
     const terrs = state.territories || [];
     const dr = mapState.drawing;
-    const near = mapState.me ? mapped.map((a) => ({ a, d: miles(mapState.me, ll(a)) })).sort((x, y) => x.d - y.d).slice(0, 12) : null;
+    const near = mapState.me ? mapped.map((a) => ({ a, d: miles(mapState.me, ll(a)) })).sort((x, y) => x.d - y.d).slice(0, 50) : null;
     const f = ui.mapFilter;
     $('#view').innerHTML = `
       ${mapHead('accounts')}
@@ -7727,15 +7742,15 @@ Give me the CSV file.`;
               <button type="button" class="link-btn" data-act="map-geo-retry">Retry</button></div>` : ''}</div>
           ${near ? `
             <h3 style="margin:.5rem 0 .25rem">Closest to you</h3>
-            <div class="side-list">${near.map(({ a, d }) => `
+            <div class="side-list">${firstTen('map-near', near).map(({ a, d }) => `
               <div class="side-item">
                 <button type="button" class="link-btn" data-act="map-focus" data-id="${a.id}"><strong>${esc(a.name)}</strong></button>
                 <span class="small muted">${fmtMiles(d)} · ${esc(a.stage)}</span>
                 <button type="button" class="btn sm ghost" data-act="route-add" data-id="${a.id}">+ Route</button>
-              </div>`).join('') || '<div class="empty">No mapped accounts yet.</div>'}</div>` : ''}
+              </div>`).join('') || '<div class="empty">No mapped accounts yet.</div>'}</div>${moreBar('map-near', near.length)}` : ''}
           ${missing.length ? `
             <h3 style="margin:.75rem 0 .25rem">Not on the map <span class="muted small">(${missing.length})</span></h3>
-            <div class="side-list">${missing.map((a) => `
+            <div class="side-list">${firstTen('map-missing', missing).map((a) => `
               <div class="side-item">
                 <a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a>
                 <span class="small muted">${!geoQuery(a) ? 'No address yet' : geoMissed(a) ? 'Address not found' : Date.now() < (mapState.geoPausedUntil || 0) ? 'Lookup unavailable' : 'Finding…'}</span>
@@ -7743,10 +7758,10 @@ Give me the CSV file.`;
                   <button type="button" class="btn sm ghost" data-act="edit-account" data-id="${a.id}">Address</button>
                   <button type="button" class="btn sm ghost" data-act="map-place" data-id="${a.id}">Drop pin</button>
                 </span>
-              </div>`).join('')}</div>` : ''}
+              </div>`).join('')}</div>${moreBar('map-missing', missing.length)}` : ''}
           ${approx.length ? `
             <details class="approx-box" ${ui.mapFix ? 'open' : ''}><summary class="small"><b>Pins to check (${approx.length})</b> <span class="muted">· pinned to a city, or found in a different city</span></summary>
-            <div class="side-list">${approx.map((a) => `
+            <div class="side-list">${firstTen('map-check', approx).map((a) => `
               <div class="side-item">
                 <a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a>
                 <span class="small muted">${esc(geoQuery(a))}${a.geo.check ? ` · <b>found in ${esc(a.geo.check)}</b>` : ' · city only'}</span>
@@ -7754,7 +7769,7 @@ Give me the CSV file.`;
                   <button type="button" class="btn sm ghost" data-act="edit-account" data-id="${a.id}">Address</button>
                   <button type="button" class="btn sm ghost" data-act="map-place" data-id="${a.id}">Drop pin</button>
                 </span>
-              </div>`).join('')}</div></details>` : ''}
+              </div>`).join('')}</div>${moreBar('map-check', approx.length)}</details>` : ''}
           ${mapState.placing ? `<div class="place-hint">Tap the map where <strong>${esc((getAccount(mapState.placing) || {}).name || '')}</strong> is located.</div>` : ''}
         </aside>
         <div class="card map-card"><div id="map" class="map ${mapState.placing ? 'placing' : ''}"></div></div>
@@ -7860,7 +7875,7 @@ Give me the CSV file.`;
 
   /** Near me now: accounts within half a mile (or 1, 2, 5) of where you're standing, closest first. */
   function nearMeForm(radius = 0.5) {
-    let wired = false;
+    let wired = false; let all = false;
     const show = (pt) => {
       mapState.me = pt;
       const d = today();
@@ -7873,7 +7888,7 @@ Give me the CSV file.`;
           <div class="seg" role="group" aria-label="Distance" id="nm-r">${[0.5, 1, 2, 5].map((r) => `<button type="button" data-r="${r}" class="${r === radius ? 'active' : ''}">${label(r)} mi</button>`).join('')}</div>
           <span class="small muted">${plural(list.length, 'account')} within ${label(radius)} mi</span>
         </div>
-        <div class="drop-list">${list.map(({ a, m, why }) => `
+        <div class="drop-list">${(all ? list : list.slice(0, MORE_N)).map(({ a, m, why }) => `
           <div class="drop-row ${noDrop(a) ? 'nodrop' : ''}">
             <div class="grow"><a href="#account/${a.id}"><strong>${esc(a.name)}</strong></a> ${a.type === 'partner' ? '<span class="pill partner">Partner</span>' : ''}
               <div class="small muted">${esc(fmtMiles(m))} · ${esc(a.address || a.location || '')}</div>
@@ -7883,12 +7898,14 @@ Give me the CSV file.`;
               ${onRoute.has(a.id) ? '<span class="pill">On today\'s route</span>' : `<button type="button" class="btn sm ghost" data-nm-add="${a.id}">+ Today</button>`}
               <button type="button" class="btn sm" data-nm-log="${a.id}">Log drop</button>
             </div>
-          </div>`).join('') || `<div class="empty">Nobody within ${label(radius)} ${radius <= 1 ? 'mile' : 'miles'}.${radius < 5 ? ' Try a wider circle.' : ''}</div>`}</div>`,
+          </div>`).join('') || `<div class="empty">Nobody within ${label(radius)} ${radius <= 1 ? 'mile' : 'miles'}.${radius < 5 ? ' Try a wider circle.' : ''}</div>`}</div>
+        ${list.length > MORE_N ? moreBarHtml(all, list.length - MORE_N, 'id="nm-more"') : ''}`,
       () => {}, 'Done', { wide: true });
       const cancel = modalForm.querySelector('.modal-actions [data-close]');
       if (cancel) cancel.remove();
       if (document.activeElement) document.activeElement.blur();
-      $$('#nm-r [data-r]').forEach((b) => b.addEventListener('click', () => { radius = Number(b.dataset.r); show(pt); }));
+      $$('#nm-r [data-r]').forEach((b) => b.addEventListener('click', () => { radius = Number(b.dataset.r); all = false; show(pt); }));
+      if ($('#nm-more')) $('#nm-more').addEventListener('click', () => { all = !all; show(pt); });
       $$('[data-nm-add]').forEach((b) => b.addEventListener('click', () => { addRouteStop(d, b.dataset.nmAdd); b.replaceWith(Object.assign(document.createElement('span'), { className: 'pill', textContent: 'On today\'s route' })); }));
       $$('[data-nm-log]').forEach((b) => b.addEventListener('click', () => visitLogForm(getAccount(b.dataset.nmLog))));
       if (!wired) { wired = true; modal.addEventListener('close', () => { if (location.hash.startsWith('#map')) rerender(); }, { once: true }); }
@@ -8362,7 +8379,7 @@ Give me the CSV file.`;
 
     const byAccount = new Map();
     for (const h of touches) byAccount.set(h.account.id, { a: h.account, n: (byAccount.get(h.account.id)?.n || 0) + 1 });
-    const topAccounts = [...byAccount.values()].sort((x, y) => y.n - x.n).slice(0, 6);
+    const topAccounts = [...byAccount.values()].sort((x, y) => y.n - x.n);
 
     return {
       ws, we, days, perDay, acts, touches, plan, outreachDaysHit, workdays, cadences, moves, newAccounts, won, topAccounts,
@@ -8462,7 +8479,7 @@ Give me the CSV file.`;
       `Cadences: ${plural(k.cadenceSteps, 'step')} done${st.cadences.filter((c) => c.steps || c.meetings || c.replies).map((c) => `\n  - ${c.cad.name}: ${plural(c.steps, 'step')}, ${plural(c.replies, 'reply', 'replies')}, ${plural(c.meetings, 'meeting')} booked`).join('')}`,
       `Pipeline: ${plural(k.advances, 'stage advance')}, ${k.won} won, ${plural(k.newAccounts, 'new account')}`,
       ...st.moves.slice(0, 8).map((m) => `  - ${m.a.name}: ${m.from} → ${m.to}`),
-      st.topAccounts.length ? `Most touched: ${st.topAccounts.map((t) => `${t.a.name} (${t.n})`).join(', ')}` : '',
+      st.topAccounts.length ? `Most touched: ${st.topAccounts.slice(0, 6).map((t) => `${t.a.name} (${t.n})`).join(', ')}` : '',
     ];
     return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   }
@@ -8539,10 +8556,10 @@ Give me the CSV file.`;
 
         <div class="card">
           <h2>Most-touched accounts</h2>
-          ${st.topAccounts.length ? `<ul class="list">${st.topAccounts.map((t) => `<li>
+          ${st.topAccounts.length ? `<ul class="list">${firstTen('rep-top', st.topAccounts).map((t) => `<li>
             <div class="grow"><a class="title" href="#account/${t.a.id}">${esc(t.a.name)}</a><div class="small muted">${esc(t.a.stage)}${t.a.vendors.length ? ' · ' + esc(t.a.vendors.join(', ')) : ''}</div></div>
             <b>${t.n}</b><span class="small muted">touch${t.n === 1 ? '' : 'es'}</span>
-          </li>`).join('')}</ul>` : '<div class="empty">No account touches this week.</div>'}
+          </li>`).join('')}</ul>${moreBar('rep-top', st.topAccounts.length)}` : '<div class="empty">No account touches this week.</div>'}
         </div>
 
         <div class="card">
@@ -9607,6 +9624,13 @@ Give me the CSV file.`;
       case 'q-check': e.preventDefault(); return queueCheck(el.dataset.key);
       case 'q-tab': ui.qTab = el.dataset.tab; if (el.dataset.go) { e.preventDefault(); ui.calMode = 'day'; return go(`planner/${today()}`); } return rerender();
       case 'q-mode': ui.qMode = el.dataset.mode; ui.qOpen = {}; return rerender();
+      case 'more-toggle': {
+        const key = el.dataset.key; const closing = isMoreOpen(key);
+        ui.moreOpen = { ...(ui.moreOpen || {}), [key]: !closing }; savePrefs(); rerender();
+        // after "Show fewer", bring the list's end back into view
+        if (closing) { const b = [...document.querySelectorAll('.more-bar')].find((x) => x.dataset.key === key); if (b) b.scrollIntoView({ block: 'center' }); }
+        return undefined;
+      }
       case 'q-more': ui.qOpen = { ...(ui.qOpen || {}), [el.dataset.group]: !(ui.qOpen || {})[el.dataset.group] }; return rerender();
       case 'q-bulk': return queueBulk(el.dataset.op, el.dataset.group);
       case 'q-visit': return markVisited(today(), acct);

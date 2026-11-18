@@ -411,6 +411,14 @@ No install, no build step: open `index.html` in a browser.
 - Search accounts and contacts from any screen (🔍, or press `/` or Ctrl/⌘-K on a computer)
 - Settings (sliders icon): cloud sync, export/import backup, load sample data, erase all data
 - On phones, a bottom tab bar like a native app. Updates install themselves on the next launch
+- **Long lists show the first 10**, then a full-width **Show N more ▾** bar opens the rest
+  (**Show fewer ▴** closes it). Open or closed is remembered for each list on the device. It's on
+  the Overview (priority tasks, priority accounts, stay in touch, recent activity), the planner's
+  queue groups and stale accounts, an account's history and key dates, a partner's people,
+  referrals, clients and deals, a cadence's due list and people, each Watchlist group, the Imports
+  list of lists, Segments, the map's side lists and Near me, and the weekly report's most-touched
+  accounts. The Accounts, Contacts and Partners pages keep their own paging (200 rows, then Show
+  all), as do the import review table and the Territories board
 - A red banner appears if sync ever stops (for example an expired sign-in), so you never
   unknowingly work unsynced
 - Stage changes are logged to history whether they're made on the board, in Edit, or while
