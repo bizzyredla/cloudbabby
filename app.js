@@ -1944,7 +1944,7 @@
               <td class="pt-c" data-label="Refs 12 mo">${r.refs12}${r.refsAll > r.refs12 ? ` <span class="small muted">(${r.refsAll} all)</span>` : ''}</td>
               <td class="pt-c" data-label="Pipeline">${r.pipe ? money(r.pipe) : '<span class="muted">—</span>'}</td>
               <td class="pt-c" data-label="Est. comp">${r.compWon || r.compOpen ? `${est(r.compWon)} / ${est(r.compOpen)}` : '<span class="muted">—</span>'}</td>
-              <td class="pt-c ${r.got && !r.given ? 'pt-late' : ''}" data-label="Given / got" title="Given to them / referrals from them, last 12 months · ${esc(lastGive(p))}">${r.given} / ${r.got}<div class="small pt-lastgive ${r.got && !r.given ? '' : 'muted'}">${esc(lastGive(p))}</div></td>
+              <td class="pt-c ${r.got && !r.given ? 'pt-late' : ''}" data-label="Given / got" title="Given to them / referrals from them, last 12 months · ${esc(lastGive(p))}">${r.given} / ${r.got}<div class="small pt-lastgive ${r.got && !r.given ? '' : `muted${lastGive(p) === 'Last give: none' ? ' pt-lastgive-none' : ''}`}">${esc(lastGive(p))}</div></td>
               <td class="pt-c ${r.gap.late ? 'pt-late' : ''}" data-label="Last touch">${r.gap.days === null ? 'never' : esc(relDays(lastTouchDate(p)))}</td>
               <td class="small ptt-next" data-label="Next step">${ns}</td>
             </tr>`;

@@ -1971,7 +1971,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 @media (max-width: 1100px) {
   .ptt-table, .ptt-table tbody { display: block; width: 100%; }
   .ptt-table thead { display: none; }
-  .ptt-table tr.ptt-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(95px, 1fr)); gap: .45rem .7rem; padding: .75rem .15rem; border-bottom: 1px solid var(--border); }
+  .ptt-table tr.ptt-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(95px, 1fr)); gap: .35rem .7rem; padding: .6rem .15rem; border-bottom: 1px solid var(--border); }
   .rs-table.ptt-table tr.ptt-row td { display: block; padding: 0; border: 0; white-space: normal; min-width: 0; max-width: none; }
   .ptt-table td.pt-c-name { grid-row: 1; grid-column: 1 / -2; }
   .ptt-table td .nm-cell { min-width: 0; }
@@ -1981,6 +1981,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   .ptt-table td[data-label]::before { content: attr(data-label); display: block; font-size: .64rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: .05rem; }
   .ptt-table td.pt-c { font-size: .85rem; overflow: hidden; text-overflow: ellipsis; }
   .pt-lastgive { max-width: none; }
+  /* "Last give: none" adds nothing next to 0 / 0, unless they're sending referrals and getting nothing back. */
+  .pt-lastgive-none { display: none; }
   .ptt-row:hover td { background: none; }
 }
 .th-sort { font: inherit; font-size: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; font-weight: 600; text-align: left; white-space: nowrap; }

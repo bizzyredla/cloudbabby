@@ -536,8 +536,9 @@ value first, then spends your time by tier
     (a task, or the cadence step they're on). Rows stay one line tall: the next step and last
     give are one line each (hover for the full text) and the next step leaves out the partner's
     own name ("Re-engage · today"); headers are short (hover a header for what it counts). On a
-    phone each partner is a compact card (name and tier, the row actions, then labelled figures
-    and the next step), so there's no sideways scrolling. Click any
+    small laptop, Type shows under the partner's name and Est. comp is left out, so Next step
+    stays in view. On a tablet or phone each partner is a compact card (name and tier, the row
+    actions, then labelled figures and the next step), so there's no sideways scrolling. Click any
     column to sort (default: tier, then referrals). Quick filters: tier, past touch target,
     agreement ending. Red = past the tier's touch target, getting without giving, or nothing
     planned for an A/B partner. Export to CSV
