@@ -4295,7 +4295,7 @@ Give me the CSV file.`;
           ${a.contacts.length ? `<div class="contact-grid">${[...a.contacts].sort((x, y) => (y.primary ? 1 : 0) - (x.primary ? 1 : 0)).map((c) => `
             <div class="contact-card" data-contact="${c.id}">
               <div class="row spread">
-                <div class="row" style="gap:.55rem;flex-wrap:nowrap;min-width:0"><button type="button" class="photo-btn" data-act="photo-menu" data-id="${a.id}" data-cid="${c.id}" title="${c.photo ? 'Change the photo' : 'Add a photo'}" aria-label="Photo for ${esc(c.name)}">${personAvatar(c, null, 36)}</button><div><strong>${esc(c.name)}</strong> ${c.primary ? '<span class="pill primary">Primary</span>' : ''}</div></div>
+                <div class="cc-who"><button type="button" class="photo-btn" data-act="photo-menu" data-id="${a.id}" data-cid="${c.id}" title="${c.photo ? 'Change the photo' : 'Add a photo'}" aria-label="Photo for ${esc(c.name)}">${personAvatar(c, null, 32)}</button><div><strong>${esc(c.name)}</strong> ${c.primary ? '<span class="pill primary">Primary</span>' : ''}</div></div>
                 <div class="row" style="gap:0">
                   ${researchMenu(a, c)}
                   <button class="icon-btn" data-act="enroll-contact" data-id="${a.id}" data-cid="${c.id}" title="Add to cadence">⇉</button>

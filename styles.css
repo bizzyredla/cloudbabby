@@ -2361,3 +2361,5 @@ div.qa-open { padding: 0 1rem .8rem; }
 tr.qa-open .qa-panel { position: sticky; left: .75rem; max-width: calc(100vw - 3rem); }
 .acct-table td.sticky-col { min-width: 230px; }
 .ptt-table td .nm-cell { min-width: 200px; }
+.contact-card .cc-who { display: flex; align-items: center; gap: .5rem; min-width: 0; flex: 1 1 auto; }
+.contact-card .cc-who > div { min-width: 0; overflow-wrap: anywhere; }
