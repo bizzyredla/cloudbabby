@@ -1834,7 +1834,15 @@
 
   // ----- the Partners page -----
   const PT_QUICK = { all: 'All', A: 'Tier A', B: 'Tier B', C: 'Tier C', untouched: 'Past touch target', expiring: 'Agreement ending' };
-  const PT_COLS = [['name', 'Partner'], ['tier', 'Tier'], ['type', 'Type'], ['refs', 'Referrals 12 mo'], ['pipe', 'Referred pipeline'], ['comp', 'Est. comp won / open'], ['give', 'Given / got'], ['touch', 'Last touch'], ['next', 'Next step']];
+  const PT_COLS = [['name', 'Partner'], ['tier', 'Tier'], ['type', 'Type'], ['refs', 'Refs 12 mo', 'Referrals in the last 12 months'], ['pipe', 'Pipeline', 'Referred pipeline: open deals they sent'],
+    ['comp', 'Est. comp', 'Estimated comp won / open'], ['give', 'Given / got', 'What you gave them / referrals from them, last 12 months'], ['touch', 'Last touch'], ['next', 'Next step']];
+  /** A next-step title without the partner's own name (it's already in the row): "Re-engage BRNC Insurance" → "Re-engage". */
+  const withoutName = (title, name) => {
+    const i = title.toLowerCase().indexOf(name.toLowerCase());
+    if (i < 0) return title;
+    const out = `${title.slice(0, i)} ${title.slice(i + name.length)}`.replace(/\s+with\s+(?=\(|$|:)/i, ' ').replace(/\s+:/g, ':').replace(/\s{2,}/g, ' ').replace(/[\s:,·-]+$/, '').replace(/^[\s:,·-]+/, '').trim();
+    return out.length >= 3 ? out[0].toUpperCase() + out.slice(1) : title;
+  };
   function renderPartners() {
     if (runPartnerRules()) save();
     if (ui.ptView === 'referrals') return renderReferrals();
@@ -1922,23 +1930,23 @@
           <select id="pt-owner" aria-label="Owner"><option value="all">Any owner</option>${owners.map((x) => `<option ${ui.ptOwner === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
         </div>
         ${shown.length ? `<div class="rs-wrap"><table class="rs-table ptt-table">
-          <thead><tr>${PT_COLS.map(([k, l]) => `<th><button type="button" class="th-sort ${ui.ptSort === k ? 'on' : ''}" data-act="pt-sort" data-k="${k}">${esc(l)}${ui.ptSort === k ? (dir === 1 ? ' ▴' : ' ▾') : ''}</button></th>`).join('').replace('</th>', '</th><th class="qa-col">Actions</th>')}</tr></thead>
+          <thead><tr>${PT_COLS.map(([k, l, tip]) => `<th class="pt-h-${k}"><button type="button" class="th-sort ${ui.ptSort === k ? 'on' : ''}" data-act="pt-sort" data-k="${k}"${tip ? ` title="${esc(tip)}"` : ''}>${esc(l)}${ui.ptSort === k ? (dir === 1 ? ' ▴' : ' ▾') : ''}</button></th>`).join('').replace('</th>', '</th><th class="qa-col">Actions</th>')}</tr></thead>
           <tbody>${shown.slice(0, limit).map((r) => {
             const { p } = r;
-            const ns = r.ns ? `<span class="${r.ns.date < t ? 'pt-late' : ''}">${esc(r.ns.title)} · ${esc(relDays(r.ns.date))}</span>`
+            const ns = r.ns ? `<span class="${r.ns.date < t ? 'pt-late' : ''}" title="${esc(r.ns.title)} · ${esc(fmtDate(r.ns.date, { month: 'short', day: 'numeric' }))}">${esc(withoutName(r.ns.title, p.name))} · ${esc(relDays(r.ns.date))}</span>`
               : r.enr ? `<span class="muted">${esc(r.enr.cad.name)} · step ${r.enr.e.step + 1} of ${r.enr.cad.steps.length}</span>`
               : `<span class="${r.tier === 'A' || r.tier === 'B' ? 'pt-late' : 'muted'}">Nothing planned</span>`;
             return `<tr class="ptt-row" data-act="open-account" data-id="${p.id}">
-              <td><div class="nm-cell">${logoTile(p, 30)}<div class="nm-txt"><strong>${esc(p.name)}</strong>${p.owner && p.owner !== 'Me' ? `<div class="small muted">${esc(p.owner)}</div>` : ''}</div></div></td>
+              <td class="pt-c-name"><div class="nm-cell">${logoTile(p, 30)}<div class="nm-txt"><strong>${esc(p.name)}</strong>${p.owner && p.owner !== 'Me' ? `<div class="small muted">${esc(p.owner)}</div>` : ''}${p.partnerType ? `<div class="small muted pt-type-sub">${esc(p.partnerType)}</div>` : ''}</div></div></td>
               <td class="qa-col">${acctActions(p)}</td>
-              <td title="${esc(r.tier ? `${TIERS[r.tier].name}: ${p.tier ? 'set by hand' : TIERS[r.tier].why}` : 'Closed')}">${tierPill(r.tier)}</td>
-              <td class="small">${esc(p.partnerType || '—')}</td>
-              <td>${r.refs12}${r.refsAll > r.refs12 ? ` <span class="small muted">(${r.refsAll} all)</span>` : ''}</td>
-              <td>${r.pipe ? money(r.pipe) : '<span class="muted">—</span>'}</td>
-              <td>${r.compWon || r.compOpen ? `${est(r.compWon)} / ${est(r.compOpen)}` : '<span class="muted">—</span>'}</td>
-              <td class="${r.got && !r.given ? 'pt-late' : ''}" title="Given to them / referrals from them, last 12 months">${r.given} / ${r.got}<div class="small ${r.got && !r.given ? '' : 'muted'}">${esc(lastGive(p))}</div></td>
-              <td class="${r.gap.late ? 'pt-late' : ''}">${r.gap.days === null ? 'never' : esc(relDays(lastTouchDate(p)))}</td>
-              <td class="small ptt-next">${ns}</td>
+              <td class="pt-c-tier" title="${esc(r.tier ? `${TIERS[r.tier].name}: ${p.tier ? 'set by hand' : TIERS[r.tier].why}` : 'Closed')}">${tierPill(r.tier)}</td>
+              <td class="small pt-c" data-label="Type">${esc(p.partnerType || '—')}</td>
+              <td class="pt-c" data-label="Refs 12 mo">${r.refs12}${r.refsAll > r.refs12 ? ` <span class="small muted">(${r.refsAll} all)</span>` : ''}</td>
+              <td class="pt-c" data-label="Pipeline">${r.pipe ? money(r.pipe) : '<span class="muted">—</span>'}</td>
+              <td class="pt-c" data-label="Est. comp">${r.compWon || r.compOpen ? `${est(r.compWon)} / ${est(r.compOpen)}` : '<span class="muted">—</span>'}</td>
+              <td class="pt-c ${r.got && !r.given ? 'pt-late' : ''}" data-label="Given / got" title="Given to them / referrals from them, last 12 months · ${esc(lastGive(p))}">${r.given} / ${r.got}<div class="small pt-lastgive ${r.got && !r.given ? '' : 'muted'}">${esc(lastGive(p))}</div></td>
+              <td class="pt-c ${r.gap.late ? 'pt-late' : ''}" data-label="Last touch">${r.gap.days === null ? 'never' : esc(relDays(lastTouchDate(p)))}</td>
+              <td class="small ptt-next" data-label="Next step">${ns}</td>
             </tr>`;
           }).join('')}</tbody>
         </table></div>
