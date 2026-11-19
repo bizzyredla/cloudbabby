@@ -274,7 +274,7 @@
   }
   applyTheme();
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], colleagues: [], watchlist: [], importLists: [], listItems: [], contactViews: [], deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], colleagues: [], watchlist: [], importLists: [], listItems: [], contactViews: [], cadTemplates: [], deleted: {} }; }
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
@@ -304,6 +304,7 @@
     if (!Array.isArray(st.importLists)) st.importLists = [];
     if (!Array.isArray(st.listItems)) st.listItems = [];
     if (!Array.isArray(st.contactViews)) st.contactViews = [];
+    if (!Array.isArray(st.cadTemplates)) st.cadTemplates = [];
     if (!st.compPlans.length) st.compPlans = defaultCompPlans().filter((x) => !(st.deleted || {})['cp:' + x.id]);
     // Planner rows used to store only the account name; link each to its account where the name is unique.
     const byName = new Map();
@@ -334,7 +335,7 @@
   let booted = false;
   // Device-only sync bookkeeping: records waiting to upload, and how far we have read the cloud.
   const local = { dirty: new Set(), cursor: 0, user: '', seen: {} };
-  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:'], ['colleagues', 'col:'], ['watchlist', 'wl:'], ['importLists', 'imp:'], ['listItems', 'imr:'], ['contactViews', 'cv:']];
+  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:'], ['colleagues', 'col:'], ['watchlist', 'wl:'], ['importLists', 'imp:'], ['listItems', 'imr:'], ['contactViews', 'cv:'], ['cadTemplates', 'ctpl:']];
 
   function loadLegacy() {
     try {
@@ -1870,6 +1871,7 @@
       return tierOrder(x) - tierOrder(y) || y.refs12 - x.refs12 || y.pipe - x.pipe || x.p.name.localeCompare(y.p.name);
     });
     const limit = ui.ptLimit || 25;
+    const psel = ui.ptSel || (ui.ptSel = new Set());
     const owners = [...new Set([...PARTNER_OWNERS, ...all.map((p) => p.owner).filter(Boolean)])];
     const by = (tier) => data.filter((r) => r.tier === tier);
     const A = by('A'); const B = by('B'); const C = by('C');
@@ -1929,15 +1931,24 @@
           <select id="pt-type" aria-label="Partner type"><option value="all">All partner types</option>${PARTNER_TYPES.map((x) => `<option ${ui.ptType === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
           <select id="pt-owner" aria-label="Owner"><option value="all">Any owner</option>${owners.map((x) => `<option ${ui.ptOwner === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
         </div>
-        ${shown.length ? `<div class="rs-wrap"><table class="rs-table ptt-table">
-          <thead><tr>${PT_COLS.map(([k, l, tip]) => `<th class="pt-h-${k}"><button type="button" class="th-sort ${ui.ptSort === k ? 'on' : ''}" data-act="pt-sort" data-k="${k}"${tip ? ` title="${esc(tip)}"` : ''}>${esc(l)}${ui.ptSort === k ? (dir === 1 ? ' ▴' : ' ▾') : ''}</button></th>`).join('').replace('</th>', '</th><th class="qa-col">Actions</th>')}</tr></thead>
+        ${shown.length ? `<div class="pt-selrow"><label class="pick-hit pt-all-m"><input type="checkbox" id="pt-all-m"> Select all ${shown.length}</label></div>
+        <div class="bulk-bar sel-bar" id="pt-bulk" hidden>
+          <b id="pt-bulk-n"></b>
+          <button type="button" class="btn sm" data-pb="touch">Log a touch</button>
+          <button type="button" class="btn sm ghost" data-pb="enroll">Enroll in a cadence</button>
+          <button type="button" class="btn sm ghost" data-pb="tier">Set tier</button>
+          <select id="pt-bulk-more" aria-label="More actions for the selected partners"><option value="">More…</option>${Object.entries(PT_BULK_MORE).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select>
+          <button type="button" class="link-btn small" data-pb="clear">Clear</button>
+        </div>
+        <div class="rs-wrap"><table class="rs-table ptt-table">
+          <thead><tr>${PT_COLS.map(([k, l, tip]) => `<th class="pt-h-${k}">${k === 'name' ? `<label class="pick-hit" title="Select all ${shown.length} shown"><input type="checkbox" id="pt-all" aria-label="Select all ${shown.length} partners shown"></label>` : ''}<button type="button" class="th-sort ${ui.ptSort === k ? 'on' : ''}" data-act="pt-sort" data-k="${k}"${tip ? ` title="${esc(tip)}"` : ''}>${esc(l)}${ui.ptSort === k ? (dir === 1 ? ' ▴' : ' ▾') : ''}</button></th>`).join('').replace('</th>', '</th><th class="qa-col">Actions</th>')}</tr></thead>
           <tbody>${shown.slice(0, limit).map((r) => {
             const { p } = r;
             const ns = r.ns ? `<span class="${r.ns.date < t ? 'pt-late' : ''}" title="${esc(r.ns.title)} · ${esc(fmtDate(r.ns.date, { month: 'short', day: 'numeric' }))}">${esc(withoutName(r.ns.title, p.name))} · ${esc(relDays(r.ns.date))}</span>`
               : r.enr ? `<span class="muted">${esc(r.enr.cad.name)} · step ${r.enr.e.step + 1} of ${r.enr.cad.steps.length}</span>`
               : `<span class="${r.tier === 'A' || r.tier === 'B' ? 'pt-late' : 'muted'}">Nothing planned</span>`;
-            return `<tr class="ptt-row" data-act="open-account" data-id="${p.id}">
-              <td class="pt-c-name"><div class="nm-cell">${logoTile(p, 30)}<div class="nm-txt"><strong>${esc(p.name)}</strong>${p.owner && p.owner !== 'Me' ? `<div class="small muted">${esc(p.owner)}</div>` : ''}${p.partnerType ? `<div class="small muted pt-type-sub">${esc(p.partnerType)}</div>` : ''}</div></div></td>
+            return `<tr class="ptt-row ${psel.has(p.id) ? 'picked' : ''}" data-act="open-account" data-id="${p.id}">
+              <td class="pt-c-name"><div class="nm-cell"><label class="pick-hit"><input type="checkbox" class="pt-pick" data-id="${p.id}" ${psel.has(p.id) ? 'checked' : ''} aria-label="Select ${esc(p.name)}"></label>${logoTile(p, 30)}<div class="nm-txt"><strong>${esc(p.name)}</strong>${p.owner && p.owner !== 'Me' ? `<div class="small muted">${esc(p.owner)}</div>` : ''}${p.partnerType ? `<div class="small muted pt-type-sub">${esc(p.partnerType)}</div>` : ''}</div></div></td>
               <td class="qa-col">${acctActions(p)}</td>
               <td class="pt-c-tier" title="${esc(r.tier ? `${TIERS[r.tier].name}: ${p.tier ? 'set by hand' : TIERS[r.tier].why}` : 'Closed')}">${tierPill(r.tier)}</td>
               <td class="small pt-c" data-label="Type">${esc(p.partnerType || '—')}</td>
@@ -2001,6 +2012,7 @@
       </div>`;
     const bind = (sel, k) => { const el = $(sel); if (el) el.addEventListener('change', (e) => { ui[k] = e.target.value; ui.ptLimit = 0; renderPartners(); }); };
     bind('#pt-type', 'ptType'); bind('#pt-owner', 'ptOwner'); bind('#cm-partner', 'cmPartner');
+    bindPartnerPicks(shown.map((r) => r.p));
     $('#pt-search').addEventListener('input', (e) => {
       ui.ptSearch = e.target.value; clearTimeout(ui.searchTimer);
       ui.searchTimer = setTimeout(() => { if (!$('#pt-search')) return; const pos = $('#pt-search').selectionStart; renderPartners(); const el = $('#pt-search'); el.focus(); el.setSelectionRange(pos, pos); }, 160);
@@ -2011,10 +2023,74 @@
     }));
   }
 
-  function partnersCsv() {
+  // ----- ticking partners: bulk actions on the ones you pick -----
+  const PT_BULK_MORE = { route: 'Add to a route', book: 'Move to Active / Reserve', tag: 'Add a tag', list: 'Add to a hand-picked list', stage: 'Set channel stage', csv: 'Export partners (CSV)', contacts: 'Export their contacts' };
+  /** Tick boxes on the partner table (rows or phone cards). The ticks stay while you filter or sort; actions use the ticked ones shown. */
+  function bindPartnerPicks(shownPartners) {
+    const bar = $('#pt-bulk');
+    if (!bar) return;
+    const psel = ui.ptSel || (ui.ptSel = new Set());
+    const picked = () => shownPartners.filter((p) => psel.has(p.id));
+    const sync = () => {
+      const n = picked().length;
+      bar.hidden = !n;
+      $('#pt-bulk-n').textContent = `${n} selected`;
+      for (const b of [$('#pt-all'), $('#pt-all-m')]) if (b) { b.checked = n > 0 && n === shownPartners.length; b.indeterminate = n > 0 && n < shownPartners.length; }
+      $$('.pt-pick').forEach((cb) => { cb.checked = psel.has(cb.dataset.id); const tr = cb.closest('tr'); if (tr) tr.classList.toggle('picked', cb.checked); });
+    };
+    $$('.pt-pick').forEach((cb) => cb.addEventListener('change', () => { if (cb.checked) psel.add(cb.dataset.id); else psel.delete(cb.dataset.id); sync(); }));
+    for (const b of [$('#pt-all'), $('#pt-all-m')]) if (b) b.addEventListener('change', () => { shownPartners.forEach((p) => (b.checked ? psel.add(p.id) : psel.delete(p.id))); sync(); });
+    bar.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-pb]');
+      if (!b) return;
+      if (b.dataset.pb === 'clear') { psel.clear(); sync(); return; }
+      partnerBulk(b.dataset.pb, picked());
+    });
+    $('#pt-bulk-more').addEventListener('change', (e) => { const k = e.target.value; e.target.value = ''; if (k) partnerBulk(k, picked()); });
+    sync();
+  }
+  function partnerBulk(kind, list) {
+    if (!list.length) return;
+    if (kind === 'touch') return bulkTouchForm(list);
+    if (kind === 'tier') return bulkTierForm(list);
+    if (kind === 'csv') return partnersCsv(list);
+    return runAction(kind, list, 'partner');
+  }
+  /** One touch (an event, a lunch, a round of calls) logged on every ticked partner. */
+  function bulkTouchForm(list) {
+    const names = list.slice(0, 4).map((p) => p.name).join(', ') + (list.length > 4 ? ` +${list.length - 4} more` : '');
+    openModal(`Log a touch · ${plural(list.length, 'partner')}`, `
+      <div class="grid-2">
+        ${field('Type', `<select name="kind">${ACTIVITY_KINDS.filter((k) => k !== 'Note').map((k) => opt(k, k, 'Meeting')).join('')}</select>`)}
+        ${field('Date', `<input name="date" type="date" value="${today()}" max="${today()}">`)}
+      </div>
+      ${field('What happened *', '<input name="summary" required placeholder="e.g. Brokers Brew mixer, quick catch-up">')}
+      ${field('Notes', '<textarea name="notes" rows="3" placeholder="Optional"></textarea>')}
+      <p class="small muted" style="margin:0">Adds it to each partner's history (with their main contact), so their last touch moves to that day: ${esc(names)}.</p>`, (data) => {
+      const summary = data.summary.trim();
+      if (!summary) return false;
+      const now = new Date().toISOString();
+      for (const p of list) {
+        p.activities.push({ id: uid(), date: data.date || today(), kind: data.kind, summary, notes: data.notes, contactId: (partnerContact(p) || {}).id || '', createdAt: now });
+        touch(p);
+      }
+      toast(`${data.kind} logged on ${plural(list.length, 'partner')}`);
+    }, 'Log touch');
+  }
+  function bulkTierForm(list) {
+    openModal(`Set tier · ${plural(list.length, 'partner')}`, `
+      ${field('Tier', `<select name="tier">${opt('', 'Automatic (from referrals and touches)', '')}${['A', 'B', 'C'].map((k) => opt(k, `Tier ${k} · ${TIERS[k].name}`, '')).join('')}</select>`)}
+      <p class="small muted" style="margin:0">A tier you set by hand stays until you set it back to Automatic.</p>`, (data) => {
+      let n = 0;
+      for (const p of list) if ((p.tier || '') !== data.tier) { p.tier = data.tier; touch(p); n += 1; }
+      toast(data.tier ? `${plural(n, 'partner')} set to Tier ${data.tier}` : `${plural(n, 'partner')} back to automatic tiers`);
+    }, 'Set tier');
+  }
+
+  function partnersCsv(only) {
     const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const rows = [['Partner', 'Tier', 'Type', 'Stage', 'Owner', 'Referrals 12 mo', 'Referrals all time', 'Referred pipeline', 'Est. comp won', 'Est. comp open', 'Given 12 mo', 'Got 12 mo', 'Last touch', 'Agreement', 'Agreement ends', 'Next step']];
-    for (const r of partners().map(partnerRowData)) {
+    for (const r of (only || partners()).map(partnerRowData)) {
       rows.push([r.p.name, r.tier, r.p.partnerType, r.p.stage, r.p.owner, r.refs12, r.refsAll, r.pipe, Math.round(r.compWon), Math.round(r.compOpen), r.given, r.got, lastTouchDate(r.p), r.p.agreementStatus, r.p.agreementEnd, r.ns ? `${r.ns.title} (${r.ns.date})` : '']);
     }
     downloadFile(`Partners-${today()}.csv`, rows.map((x) => x.map(cell).join(',')).join('\r\n'), 'text/csv');
@@ -4342,10 +4418,10 @@ Give me the CSV file.`;
     const p = active.find((c) => c.primary) || active[0];
     return p ? [p] : [];
   }
-  function runAction(kind) {
-    const list = actionTargets();
+  function runAction(kind, given, noun) {
+    const list = given || actionTargets();
     if (!list.length) { toast('No accounts here'); return; }
-    const scope = ui.acctSel && ui.acctSel.size ? `${plural(list.length, 'selected account')}` : `${plural(list.length, 'account')} in this view`;
+    const scope = given ? plural(list.length, `selected ${noun || 'account'}`) : ui.acctSel && ui.acctSel.size ? `${plural(list.length, 'selected account')}` : `${plural(list.length, 'account')} in this view`;
     if (kind === 'csv') return accountsCsv(ui.viewId ? (resolveList(ui.viewId) || {}).name || 'accounts' : 'accounts', list);
     if (kind === 'contacts') return contactsCsv(list);
     if (kind === 'enroll') {
@@ -5281,16 +5357,7 @@ Give me the CSV file.`;
             <h2>Build your first cadence</h2>
             <p class="muted" style="margin:0">A cadence is a planned series of calls, emails, LinkedIn touches and visits. Enroll contacts and the app tells you who to touch each day and what to say.</p>
           </div>
-          <div class="tpl-grid">
-            ${CADENCE_TEMPLATES.map((t, i) => `
-              <button type="button" class="tpl-card" data-act="cad-template" data-tpl="${i}" style="--c:${t.color}">
-                <strong>${esc(t.name)}</strong>
-                <span class="small muted">${esc(t.description)}</span>
-                <span class="tpl-steps">${t.steps.map((s) => stepIcon({ type: s[1] })).join('')}</span>
-                <span class="small muted">${plural(t.steps.length, 'step')} · ${plural(t.steps[t.steps.length - 1][0], 'day')}</span>
-              </button>`).join('')}
-            <button type="button" class="tpl-card blank" data-act="cad-new"><strong>+ Blank cadence</strong><span class="small muted">Start from scratch</span></button>
-          </div>
+          ${cadTemplatePicker()}
         </div>`;
       return;
     }
@@ -5331,6 +5398,7 @@ Give me the CSV file.`;
             ${due.length ? `<button class="btn" data-act="session-setup" data-cad="${cad.id}">▶ Work this cadence</button>` : ''}
             <button class="btn ${due.length ? 'ghost' : ''}" data-act="cad-add-people">+ Add people</button>
             <button class="btn ghost" data-act="cad-edit">Edit steps</button>
+            <button class="btn ghost" data-act="cad-save-tpl" title="Keep this cadence's steps, scripts and rules to start new cadences from">Save as template</button>
             <button class="btn danger sm" data-act="cad-delete">Delete</button>
           </div>
         </div>
@@ -5376,13 +5444,120 @@ Give me the CSV file.`;
 
         <div class="card">
           <div class="section-head">
-            <h3 style="margin:0">People <span class="muted small">(${people.length})</span></h3>
+            <div class="row" style="gap:.35rem">${shown.length ? `<label class="pick-hit" title="Select all ${shown.length} shown"><input type="checkbox" id="enr-all" aria-label="Select all ${shown.length} people shown"></label>` : ''}<h3 style="margin:0">People <span class="muted small">(${people.length})</span></h3></div>
             <div class="seg">${Object.entries(filters).map(([k, l]) => `<button type="button" class="${ui.cadFilter === k ? 'active' : ''}" data-act="cad-filter" data-f="${k}">${l}</button>`).join('')}</div>
           </div>
-          ${shown.length ? `<div class="people">${firstTen('cad-people', shown).map(personRow).join('')}</div>${moreBar('cad-people', shown.length)}`
+          <div class="bulk-bar sel-bar" id="enr-bulk" hidden><b id="enr-bulk-n"></b><span class="row enr-bulk-btns" id="enr-bulk-btns"></span><button type="button" class="link-btn small" data-eb="clear">Clear</button></div>
+          ${shown.length ? `<div class="people">${firstTen('cad-people', shown).map((p) => personRow(p, true)).join('')}</div>${moreBar('cad-people', shown.length)}`
             : `<div class="empty">${people.length ? 'Nobody here.' : 'No one enrolled yet. Click "+ Add people" to start.'}</div>`}
         </div>
       </div>`;
+    bindCadPeople(shown);
+  }
+
+  /** Tick boxes on a cadence's people. The bar offers only what fits the ticked people (pause the active, resume the paused…). */
+  function bindCadPeople(shownPeople) {
+    const bar = $('#enr-bulk');
+    if (!bar) return;
+    const esel = ui.enrSel || (ui.enrSel = new Set());
+    const picked = () => shownPeople.filter((p) => esel.has(p.e.id));
+    const sync = () => {
+      const ps = picked();
+      const n = ps.length;
+      bar.hidden = !n;
+      $('#enr-bulk-n').textContent = `${n} selected`;
+      const all = $('#enr-all');
+      if (all) { all.checked = n > 0 && n === shownPeople.length; all.indeterminate = n > 0 && n < shownPeople.length; }
+      $$('.enr-pick').forEach((cb) => { cb.checked = esel.has(cb.dataset.eid); const row = cb.closest('.person-row'); if (row) row.classList.toggle('picked', cb.checked); });
+      const act = ps.filter((p) => p.e.status === 'active');
+      const paused = ps.filter((p) => p.e.status === 'paused');
+      const fin = ps.filter((p) => p.e.status === 'finished');
+      const due = act.filter((p) => isDue(p.e));
+      const btn = (k, l, main) => `<button type="button" class="btn sm ${main ? '' : 'ghost'}" data-eb="${k}">${l}</button>`;
+      $('#enr-bulk-btns').innerHTML = [
+        due.length ? btn('session', `▶ Work ${due.length} due`, true) : '',
+        act.length ? btn('pause', `Pause${act.length < n ? ` ${act.length}` : ''}`) : '',
+        paused.length ? btn('resume', `Resume${paused.length < n ? ` ${paused.length}` : ''}`) : '',
+        act.length ? btn('skip', 'Skip step') : '',
+        act.length + paused.length ? btn('resched', 'Reschedule…') : '',
+        act.length + paused.length ? btn('finish', 'Finish…') : '',
+        fin.length ? btn('restart', `Restart${fin.length < n ? ` ${fin.length}` : ''}`) : '',
+        btn('export', 'Export'),
+        '<button type="button" class="btn sm danger" data-eb="remove">Remove</button>',
+      ].join('');
+    };
+    $$('.enr-pick').forEach((cb) => cb.addEventListener('change', () => { if (cb.checked) esel.add(cb.dataset.eid); else esel.delete(cb.dataset.eid); sync(); }));
+    const all = $('#enr-all');
+    if (all) all.addEventListener('change', () => { shownPeople.forEach((p) => (all.checked ? esel.add(p.e.id) : esel.delete(p.e.id))); sync(); });
+    bar.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-eb]');
+      if (!b) return;
+      if (b.dataset.eb === 'clear') { esel.clear(); sync(); return; }
+      cadPeopleBulk(b.dataset.eb, picked());
+    });
+    sync();
+  }
+
+  function cadPeopleBulk(kind, ps) {
+    if (!ps.length) return;
+    const t = today();
+    const cad = ps[0].cad;
+    const act = ps.filter((p) => p.e.status === 'active');
+    const open = ps.filter((p) => p.e.status !== 'finished');
+    const who = (n) => plural(n, 'person', 'people');
+    const done = (msg) => { save(); rerender(); toast(msg); };
+    if (kind === 'session') {
+      const due = act.filter((p) => isDue(p.e)).sort((a, b) => a.e.dueDate.localeCompare(b.e.dueDate));
+      if (!due.length) { toast('None of these has a step due'); return; }
+      session = { filter: { type: 'all', cadenceId: cad.id, stepNo: '' }, queue: due.map((p) => p.e.id), idx: 0, results: [], startedAt: new Date().toISOString() };
+      saveSession(); go('session'); return;
+    }
+    if (kind === 'pause') { for (const p of act) Object.assign(p.e, { status: 'paused', pausedAt: t }); done(`${who(act.length)} paused`); return; }
+    if (kind === 'resume') {
+      const ps2 = ps.filter((p) => p.e.status === 'paused');
+      for (const p of ps2) { p.e.status = 'active'; p.e.pauseReason = ''; if (p.e.dueDate < t) p.e.dueDate = p.cad.skipWeekends ? nextWorkday(t) : t; }
+      done(`${who(ps2.length)} resumed`); return;
+    }
+    if (kind === 'skip') {
+      for (const p of act) { p.e.history.push({ stepId: p.step.id, date: t, skipped: true }); advance(p, t); }
+      done(`Skipped the current step for ${who(act.length)}`); return;
+    }
+    if (kind === 'restart') {
+      const fin = ps.filter((p) => p.e.status === 'finished');
+      for (const p of fin) Object.assign(p.e, { step: 0, status: 'active', outcome: '', finishedAt: '', dueDate: p.cad.skipWeekends ? nextWorkday(t) : t });
+      done(`${who(fin.length)} restarted from step 1`); return;
+    }
+    if (kind === 'export') { contactsCsvRows(ps.map((p) => ({ a: p.acct, c: p.contact }))); return; }
+    if (kind === 'remove') {
+      if (!confirm(`Remove ${who(ps.length)} from ${cad.name}? Their logged activities stay in the account history.`)) return;
+      const ids = new Set(ps.map((p) => p.e.id));
+      state.enrollments = state.enrollments.filter((x) => !ids.has(x.id));
+      ids.forEach((id) => ui.enrSel.delete(id));
+      done(`${who(ps.length)} removed from ${cad.name}`); return;
+    }
+    if (kind === 'resched') {
+      openModal(`Reschedule · ${who(open.length)}`, `
+        ${field('Current step due', `<input name="d" type="date" required min="${t}" value="${addDays(t, 1)}">`)}
+        <p class="small muted" style="margin:0">Moves each person's current step to this day${cad.skipWeekends ? ' (a weekend moves to Monday)' : ''}; the steps after it keep their spacing. Paused people stay paused.</p>`, (data) => {
+        const d = data.d && data.d >= t ? data.d : t;
+        for (const p of open) p.e.dueDate = p.cad.skipWeekends ? nextWorkday(d) : d;
+        toast(`${who(open.length)} moved to ${fmtDate(open[0].e.dueDate, { weekday: 'short', month: 'short', day: 'numeric' })}`);
+      }, 'Reschedule');
+      return;
+    }
+    if (kind === 'finish') {
+      openModal(`Finish · ${who(open.length)}`, `
+        ${field('Outcome', `<select name="outcome">${Object.entries(FINISH_LABELS).filter(([k]) => k !== 'removed').map(([k, l]) => opt(k, l, 'notinterested')).join('')}</select>`)}
+        ${field('Note', '<input name="note" placeholder="Optional">')}
+        <p class="small muted" style="margin:0">Ends the cadence for each of them and notes it on their account.</p>`, (data) => {
+        for (const p of open) {
+          finishEnrollment(p.e, data.outcome);
+          p.acct.activities.push({ id: uid(), date: t, kind: 'Note', summary: `${p.cad.name}: finished (${FINISH_LABELS[data.outcome]})`, notes: data.note, contactId: p.contact.id, createdAt: new Date().toISOString() });
+          touch(p.acct);
+        }
+        toast(`${who(open.length)} finished: ${FINISH_LABELS[data.outcome]}`);
+      }, 'Finish');
+    }
   }
 
   function progressBar(p) {
@@ -5402,11 +5577,13 @@ Give me the CSV file.`;
     : isDue(e) ? `<span class="pill ${e.dueDate < today() ? 'overdue' : 'today'}">${e.dueDate < today() ? 'Overdue' : 'Due today'}</span>`
     : '<span class="pill active-pill">Active</span>';
 
-  function personRow(p) {
+  function personRow(p, pickable = false) {
     const last = lastTouch(p);
     const finished = p.e.status === 'finished';
+    const on = pickable && ui.enrSel && ui.enrSel.has(p.e.id);
     return `
-      <div class="person-row" data-act="enr-open" data-eid="${p.e.id}">
+      <div class="person-row ${pickable ? 'pickable' : ''} ${on ? 'picked' : ''}" data-act="enr-open" data-eid="${p.e.id}">
+        ${pickable ? `<label class="pick-hit"><input type="checkbox" class="enr-pick" data-eid="${p.e.id}" ${on ? 'checked' : ''} aria-label="Select ${esc(p.contact.name)}"></label>` : ''}
         <div class="avatar" style="--c:${p.cad.color}">${esc(initials(p.contact.name))}</div>
         <div class="p-main">
           <strong>${esc(p.contact.name)} ${contactLinkIcons(p.contact, p.acct)}</strong>
@@ -5662,11 +5839,96 @@ Give me the CSV file.`;
     }, 'Add');
   }
 
-  function cadenceForm(existing, template) {
+  // ----- cadence templates: the built-in starters, your own saved ones, or a copy of a cadence -----
+  /** Steps as objects, whether they come from a built-in template ([day, type, …]) or a saved one / a cadence. */
+  const tplSteps = (t) => t.steps.map((x) => (Array.isArray(x) ? { day: x[0], type: x[1], title: x[2], subject: x[3], body: x[4] }
+    : { day: x.day, type: x.type, title: x.title || '', subject: x.subject || '', body: x.body || '' }));
+  const freeCadColor = () => CADENCE_COLORS.find((c) => !state.cadences.some((x) => x.color === c)) || CADENCE_COLORS[state.cadences.length % CADENCE_COLORS.length];
+  /** "Insperity Renewal" → "Insperity Renewal 2" when a cadence already has that name. */
+  const freeCadName = (name) => {
+    const taken = new Set(state.cadences.map((c) => c.name.trim().toLowerCase()));
+    if (!taken.has(name.trim().toLowerCase())) return name;
+    let n = 2; while (taken.has(`${name} ${n}`.toLowerCase())) n += 1;
+    return `${name} ${n}`;
+  };
+  const cadTplById = (id) => state.cadTemplates.find((t) => t.id === id);
+  const tplCard = (t, attrs, extra = '') => {
+    const st = tplSteps(t);
+    return `<div class="tpl-wrap">
+      <button type="button" class="tpl-card" ${attrs} style="--c:${t.color}">
+        <strong>${esc(t.name)}</strong>
+        ${t.description ? `<span class="small muted">${esc(t.description)}</span>` : ''}
+        <span class="tpl-steps">${st.map((x) => stepIcon({ type: x.type })).join('')}</span>
+        <span class="small muted">${plural(st.length, 'step')} · ${plural(Math.max(1, ...st.map((x) => x.day)), 'day')}</span>
+      </button>${extra}</div>`;
+  };
+  /** Pick a starting point: your templates, a copy of one of your cadences, a starter, or blank. */
+  function cadTemplatePicker() {
+    const mine = [...state.cadTemplates].sort((a, b) => a.name.localeCompare(b.name));
+    return `<div class="tpl-pick" id="cad-pick">
+      ${mine.length ? `<section><h3>Your templates</h3><div class="tpl-grid">${mine.map((t) => tplCard(t, `data-act="cad-mytpl" data-tid="${t.id}"`,
+        `<button type="button" class="icon-btn tpl-del" data-act="cad-tpl-del" data-tid="${t.id}" title="Delete this template" aria-label="Delete template ${esc(t.name)}">✕</button>`)).join('')}</div></section>` : ''}
+      ${state.cadences.length ? `<section><h3>Copy one of your cadences</h3><p class="small muted">Same steps, scripts and smart rules; nobody enrolled.</p><div class="tpl-grid">${state.cadences.map((c) => tplCard(c, `data-act="cad-copy" data-cad="${c.id}"`)).join('')}</div></section>` : ''}
+      <section><h3>Starter templates</h3><div class="tpl-grid">
+        ${CADENCE_TEMPLATES.map((t, i) => tplCard(t, `data-act="cad-template" data-tpl="${i}"`)).join('')}
+        <div class="tpl-wrap"><button type="button" class="tpl-card blank" data-act="cad-blank"><strong>+ Blank cadence</strong><span class="small muted">Start from scratch</span></button></div>
+      </div></section>
+      ${mine.length ? '' : '<p class="small muted tpl-tip">Tip: open a cadence and choose <b>Save as template</b> to reuse it here.</p>'}
+    </div>`;
+  }
+  /** "+ New cadence": the picker in a dialog. */
+  function newCadencePicker() {
+    openModal('New cadence', `<p class="small muted" style="margin:0">Start from a template, a copy of one of your cadences, or a blank cadence. You can change anything before you create it.</p>${cadTemplatePicker()}`, null, 'Create', { wide: true });
+    $('.modal-actions [type=submit]', modalForm).remove();
+    $('#cad-pick').addEventListener('click', (e) => { const el = e.target.closest('[data-act]'); if (el) cadPickAct(el.dataset.act, el); });
+  }
+  /** A choice in the picker (on the empty Cadences page or in the dialog). Returns true when handled. */
+  function cadPickAct(act, el) {
+    if (act === 'cad-template') { cadenceForm(null, CADENCE_TEMPLATES[Number(el.dataset.tpl)]); return true; }
+    if (act === 'cad-blank') { cadenceForm(null, null); return true; }
+    if (act === 'cad-mytpl') { const t = cadTplById(el.dataset.tid); if (t) cadenceForm(null, t); return true; }
+    if (act === 'cad-copy') { const c = cadenceById(el.dataset.cad); if (c) cadenceForm(null, c, { name: freeCadName(`${c.name} (copy)`), color: freeCadColor() }); return true; }
+    if (act === 'cad-tpl-del') {
+      const t = cadTplById(el.dataset.tid);
+      if (!t || !confirm(`Delete the template "${t.name}"? Cadences you made from it stay as they are.`)) return true;
+      state.cadTemplates = state.cadTemplates.filter((x) => x !== t);
+      save(); toast('Template deleted');
+      if (modal.open) newCadencePicker(); else rerender();
+      return true;
+    }
+    return false;
+  }
+  /** Save a cadence's steps, scripts, color, weekends and smart rules as a template (same name replaces it). */
+  function saveCadTemplateForm(cad) {
+    const sameAs = (name) => state.cadTemplates.find((t) => t.name.trim().toLowerCase() === name.trim().toLowerCase());
+    openModal('Save as template', `
+      <p class="small muted" style="margin:0">Keeps the ${plural(cad.steps.length, 'step')} with their subjects and scripts, the color, skip weekends and smart rules. The people enrolled aren't part of it. Use it from <b>+ New cadence</b>.</p>
+      ${field('Template name *', `<input name="name" required value="${esc(cad.name)}">`)}
+      ${field('Description', `<input name="description" value="${esc(cad.description || '')}" placeholder="Who it's for and the angle">`)}
+      <div class="small muted" id="tpl-same"></div>`, (data) => {
+      const name = data.name.trim();
+      if (!name) return false;
+      const fields = { name, description: data.description.trim(), color: cad.color, skipWeekends: !!cad.skipWeekends, rules: { ...cadRules(cad) },
+        steps: tplSteps(cad), from: cad.name, savedAt: today() };
+      const ex = sameAs(name);
+      if (ex) Object.assign(ex, fields); else state.cadTemplates.push({ id: uid(), ...fields });
+      toast(ex ? `Template "${name}" updated` : `Saved "${name}" as a template`);
+    }, 'Save template');
+    const hint = () => {
+      const ex = sameAs($('#modal [name=name]').value);
+      $('#tpl-same').textContent = ex ? `You already have a template called "${ex.name}". Saving replaces it.` : '';
+      $('.modal-actions [type=submit]', modalForm).textContent = ex ? 'Replace template' : 'Save template';
+    };
+    modalForm.oninput = hint;
+    hint();
+  }
+
+  function cadenceForm(existing, template, opts = {}) {
     const src = existing || (template ? {
-      name: template.name, description: template.description, color: template.color, skipWeekends: true,
-      steps: template.steps.map(([day, type, title, subject, body]) => ({ id: uid(), day, type, title, subject, body })),
-    } : { name: '', description: '', color: CADENCE_COLORS.find((c) => !state.cadences.some((x) => x.color === c)) || CADENCE_COLORS[state.cadences.length % CADENCE_COLORS.length], skipWeekends: true, steps: [{ id: uid(), day: 1, type: 'email', title: 'Intro email', subject: '', body: '' }] });
+      name: opts.name || freeCadName(template.name), description: template.description || '', color: opts.color || template.color || freeCadColor(),
+      skipWeekends: template.skipWeekends !== false, rules: template.rules ? { ...template.rules } : undefined,
+      steps: tplSteps(template).map((x) => ({ id: uid(), ...x })),
+    } : { name: '', description: '', color: freeCadColor(), skipWeekends: true, steps: [{ id: uid(), day: 1, type: 'email', title: 'Intro email', subject: '', body: '' }] });
     const stepRow = (s) => `
       <div class="step-edit">
         <input type="hidden" name="s_id" value="${esc(s.id || uid())}">
@@ -10513,7 +10775,7 @@ Give me the CSV file.`;
         }
         return;
       case 'open-account':
-        if (e.target.closest('a, select, input')) return;
+        if (e.target.closest('a, select, input, .pick-hit')) return;
         return go(`account/${id}`);
       case 'back': return ui.navs > 0 ? history.back() : go('accounts');
       case 'set-view': ui.accountView = el.dataset.mode; savePrefs(); return rerender();
@@ -10884,8 +11146,9 @@ Give me the CSV file.`;
       case 'route-optimize': return optimizeRoute(ui.routeDate);
       case 'route-day': return go(`map/route/${addDays(ui.routeDate, Number(el.dataset.n))}`);
       case 'set-home': return homeBaseForm();
-      case 'cad-template': return cadenceForm(null, CADENCE_TEMPLATES[Number(el.dataset.tpl)]);
-      case 'cad-new': return cadenceForm(null, null);
+      case 'cad-template': case 'cad-blank': case 'cad-mytpl': case 'cad-copy': case 'cad-tpl-del': return cadPickAct(act, el);
+      case 'cad-new': return newCadencePicker();
+      case 'cad-save-tpl': { const cad = cadenceById(ui.cadenceId); if (cad) saveCadTemplateForm(cad); return; }
       case 'cad-open': ui.cadenceId = el.dataset.cad; return go(`cadences/${el.dataset.cad}`);
       case 'cad-edit': return cadenceForm(cadenceById(ui.cadenceId));
       case 'cad-add-people': return addPeopleForm(cadenceById(ui.cadenceId));
@@ -10949,7 +11212,7 @@ Give me the CSV file.`;
         ui.cadenceId = null; save(); return go('cadences');
       }
       case 'enr-open':
-        if (e.target.closest('a')) return;
+        if (e.target.closest('a, input, .pick-hit')) return;
         return enrollmentDetail(el.dataset.eid);
       case 'enr-log': return logStepForm(el.dataset.eid);
       case 'enr-skip': return enrollmentAction(el.dataset.eid, 'skip');

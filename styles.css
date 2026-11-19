@@ -459,6 +459,15 @@ dialog.wide { width: min(880px, calc(100vw - 32px)); }
 .tpl-card.blank { border-style: dashed; justify-content: center; align-items: center; }
 .tpl-steps { display: flex; gap: .25rem; flex-wrap: wrap; }
 .tpl-steps .st-icon { width: 22px; height: 22px; font-size: .62rem; }
+/* Template picker: your templates, copies of your cadences, starters. */
+.tpl-pick { display: flex; flex-direction: column; gap: 1rem; }
+.tpl-pick section > h3 { margin: 0 0 .5rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.tpl-pick section > p { margin: -.3rem 0 .5rem; }
+.tpl-wrap { position: relative; display: flex; }
+.tpl-wrap > .tpl-card { flex: 1; min-width: 0; }
+.tpl-wrap > .tpl-del { position: absolute; top: .45rem; right: .45rem; width: 28px; height: 28px; font-size: .8rem; }
+.tpl-wrap:has(.tpl-del) > .tpl-card strong { padding-right: 1.8rem; }
+.tpl-tip { margin: 0; }
 
 .cad-switch { display: flex; gap: .5rem; overflow-x: auto; padding-bottom: .5rem; margin-bottom: .5rem; scrollbar-width: thin; }
 .cad-chip {
@@ -2615,4 +2624,38 @@ tr.qa-open .qa-panel { position: sticky; left: .75rem; max-width: calc(100vw - 3
   .pa-btns { width: 100%; }
   .pa-btns .btn { min-height: 42px; }
   .pa-btns .btn:first-child { flex: 1; }
+}
+
+/* Tick boxes on rows (Partners, cadence people) and the bar of actions for the ticked ones. */
+.pick-hit { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-width: 30px; min-height: 30px; cursor: pointer; flex: none; }
+.pick-hit input { width: 18px; height: 18px; margin: 0; cursor: pointer; accent-color: var(--accent); }
+.sel-bar { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; gap: .5rem; }
+.sel-bar[hidden] { display: none; }
+.sel-bar .btn.sm { white-space: nowrap; }
+.enr-bulk-btns { gap: .4rem; flex-wrap: wrap; }
+.pt-h-name { white-space: nowrap; }
+.pt-h-name .pick-hit { vertical-align: middle; margin-right: .1rem; }
+.ptt-table td.pt-c-name .nm-cell { gap: .45rem; }
+.ptt-table tr.picked td { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.pt-selrow { display: none; }
+.person-row.pickable { grid-template-columns: 30px 38px minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, .9fr) minmax(0, 1.3fr) auto; }
+.person-row.picked { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+@media (max-width: 1100px) {
+  .pt-selrow { display: flex; margin: .2rem 0 .1rem; }
+  .pt-all-m { font-size: .85rem; color: var(--muted); }
+  .ptt-table tr.ptt-row.picked { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); border-radius: 10px; }
+  .ptt-table tr.picked td { background: none; }
+}
+@media (max-width: 700px) {
+  .person-row.pickable { grid-template-columns: 30px 36px minmax(0, 1fr) auto; grid-template-areas: "pk av main status" "pk av prog prog" "pk av last last" "pk av next next"; }
+  .person-row.pickable .pick-hit { grid-area: pk; align-self: start; }
+  /* Phone: one row pinned above the tab bar (slides sideways if it has many buttons), so it's in reach wherever you tick. */
+  .sel-bar { position: fixed; top: auto; left: calc(.5rem + env(safe-area-inset-left)); right: calc(.5rem + env(safe-area-inset-right)); bottom: calc(4.7rem + env(safe-area-inset-bottom)); z-index: 29;
+    margin: 0; padding: .5rem .6rem; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; background: var(--surface); box-shadow: 0 8px 28px rgba(16, 24, 40, .22); }
+  .sel-bar::-webkit-scrollbar { display: none; }
+  .sel-bar > *, .enr-bulk-btns > * { flex: none; }
+  .enr-bulk-btns { flex-wrap: nowrap; }
+  .sel-bar select { max-width: 8.5rem; }
+  main:has(.sel-bar:not([hidden])) { padding-bottom: calc(9.5rem + env(safe-area-inset-bottom)); }
+  body:has(.sel-bar:not([hidden])) .toast { bottom: calc(9rem + env(safe-area-inset-bottom)); }
 }

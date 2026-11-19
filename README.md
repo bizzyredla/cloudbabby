@@ -80,6 +80,14 @@ No install, no build step: open `index.html` in a browser.
   "7 of 22", the place is kept if the app reloads after a call, and a summary shows at the end
 - Multiple cadences, e.g. Insperity Renewal, ADP TotalSource Nurture, New Prospect Intro. Starter
   templates are included and every step is editable
+- **Cadence templates**: **Save as template** on a cadence keeps its steps (with subjects and
+  scripts), color, skip weekends and smart rules, not the people enrolled. Saving again under the
+  same name replaces that template. **+ New cadence** opens a picker: **Your templates** (✕ deletes
+  one; cadences made from it stay as they are), **Copy one of your cadences** (same steps and
+  rules, nobody enrolled, "… (copy)" in a free color), the three **Starter templates**, or
+  **Blank**. Everything can be changed before you create it; a name already in use gets a number.
+  Templates sync across devices and stay even if you delete every cadence (the empty Cadences page
+  shows them)
 - Steps have a day, type (Email, Call, LinkedIn, Visit, Text, Task), name, email subject and
   script, with merge fields: {{first_name}}, {{company}}, {{vendor}}, {{title}}, {{industry}},
   {{employees}}, {{renewal_date}}. Weekends can be skipped automatically
@@ -88,6 +96,13 @@ No install, no build step: open `index.html` in a browser.
   people a day (8 to start; remembered), keeping people at the same company on the same day. The
   form previews it ("33 people start over 5 workdays, Nov 12 – Nov 18")
 - **Steps | Calendar | Results** switch at the top of the Cadences page (remembered on each device)
+- **Tick people in a cadence** (a box on each person; the box by **People** ticks everyone in the
+  tab you're on: Active, Due, Paused, Finished or All). The bar offers only what fits who's
+  ticked: **▶ Work N due** (a call session with just them), **Pause**, **Resume** (an overdue step
+  comes due today), **Skip step**, **Reschedule…** (their current step to a day you pick; later
+  steps keep their spacing), **Finish…** (an outcome, noted on each account), **Restart** (finished
+  ones from step 1), **Export** (their contacts) and **Remove**. Counts show when only some of them
+  apply ("Pause 3"). Ticking never opens the person; tapping the name still does
 - **Steps**: each cadence's stats (active, due, overdue, paused, engaged, engage rate), its smart
   rules, a visual step track with how many people are at each step and each step's hit rate, a
   "Due now" queue, and everyone's progress bar, last touch, next touch and status
@@ -542,6 +557,14 @@ value first, then spends your time by tier
     column to sort (default: tier, then referrals). Quick filters: tier, past touch target,
     agreement ending. Red = past the tier's touch target, getting without giving, or nothing
     planned for an A/B partner. Export to CSV
+  - **Tick partners** (a box on each row or card; the box in the Partner header, or **Select all**
+    on a phone, ticks every one shown). A bar shows how many and what you can do with them: **Log
+    a touch** (one event, lunch or round of calls logged on each, with their main contact, so their
+    last touch moves), **Enroll in a cadence**, **Set tier** (A, B, C or back to automatic), and
+    under **More…**: add to a route, move to Active / Reserve, add a tag, add to a hand-picked
+    list, set the channel stage, export them (CSV) or export their contacts. Ticks stay while you
+    search, filter or sort, and actions apply to the ticked partners shown. On a phone the bar sits
+    above the tab bar in one row (slide it for more)
   - **Reciprocity**: given (green) vs received (gold) per partner, last 12 months, with one-tap
     logging of a client intro, co-marketing, event invite, benchmark report or referral out. Each
     is saved as an activity on the partner (it counts as a touch)
