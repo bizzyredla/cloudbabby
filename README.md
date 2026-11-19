@@ -80,6 +80,14 @@ No install, no build step: open `index.html` in a browser.
   "7 of 22", the place is kept if the app reloads after a call, and a summary shows at the end
 - Multiple cadences, e.g. Insperity Renewal, ADP TotalSource Nurture, New Prospect Intro. Starter
   templates are included and every step is editable
+- **Cadence templates**: **Save as template** on a cadence keeps its steps (with subjects and
+  scripts), color, skip weekends and smart rules, not the people enrolled. Saving again under the
+  same name replaces that template. **+ New cadence** opens a picker: **Your templates** (✕ deletes
+  one; cadences made from it stay as they are), **Copy one of your cadences** (same steps and
+  rules, nobody enrolled, "… (copy)" in a free color), the three **Starter templates**, or
+  **Blank**. Everything can be changed before you create it; a name already in use gets a number.
+  Templates sync across devices and stay even if you delete every cadence (the empty Cadences page
+  shows them)
 - Steps have a day, type (Email, Call, LinkedIn, Visit, Text, Task), name, email subject and
   script, with merge fields: {{first_name}}, {{company}}, {{vendor}}, {{title}}, {{industry}},
   {{employees}}, {{renewal_date}}. Weekends can be skipped automatically

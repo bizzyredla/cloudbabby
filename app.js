@@ -274,7 +274,7 @@
   }
   applyTheme();
 
-  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], colleagues: [], watchlist: [], importLists: [], listItems: [], contactViews: [], deleted: {} }; }
+  function emptyState() { return { accounts: [], tasks: [], days: {}, lists: [], cadences: [], enrollments: [], flows: [], compPlans: [], categories: [], territories: [], routeTemplates: [], colleagues: [], watchlist: [], importLists: [], listItems: [], contactViews: [], cadTemplates: [], deleted: {} }; }
 
   /** Fill in missing collections and move the old single-contact fields into `contacts`. */
   function migrateAccount(a) {
@@ -304,6 +304,7 @@
     if (!Array.isArray(st.importLists)) st.importLists = [];
     if (!Array.isArray(st.listItems)) st.listItems = [];
     if (!Array.isArray(st.contactViews)) st.contactViews = [];
+    if (!Array.isArray(st.cadTemplates)) st.cadTemplates = [];
     if (!st.compPlans.length) st.compPlans = defaultCompPlans().filter((x) => !(st.deleted || {})['cp:' + x.id]);
     // Planner rows used to store only the account name; link each to its account where the name is unique.
     const byName = new Map();
@@ -334,7 +335,7 @@
   let booted = false;
   // Device-only sync bookkeeping: records waiting to upload, and how far we have read the cloud.
   const local = { dirty: new Set(), cursor: 0, user: '', seen: {} };
-  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:'], ['colleagues', 'col:'], ['watchlist', 'wl:'], ['importLists', 'imp:'], ['listItems', 'imr:'], ['contactViews', 'cv:']];
+  const COLLECTIONS = [['accounts', 'a:'], ['tasks', 't:'], ['lists', 'l:'], ['cadences', 'cad:'], ['enrollments', 'enr:'], ['flows', 'flw:'], ['compPlans', 'cp:'], ['categories', 'cat:'], ['territories', 'ter:'], ['routeTemplates', 'rtpl:'], ['colleagues', 'col:'], ['watchlist', 'wl:'], ['importLists', 'imp:'], ['listItems', 'imr:'], ['contactViews', 'cv:'], ['cadTemplates', 'ctpl:']];
 
   function loadLegacy() {
     try {
@@ -5281,16 +5282,7 @@ Give me the CSV file.`;
             <h2>Build your first cadence</h2>
             <p class="muted" style="margin:0">A cadence is a planned series of calls, emails, LinkedIn touches and visits. Enroll contacts and the app tells you who to touch each day and what to say.</p>
           </div>
-          <div class="tpl-grid">
-            ${CADENCE_TEMPLATES.map((t, i) => `
-              <button type="button" class="tpl-card" data-act="cad-template" data-tpl="${i}" style="--c:${t.color}">
-                <strong>${esc(t.name)}</strong>
-                <span class="small muted">${esc(t.description)}</span>
-                <span class="tpl-steps">${t.steps.map((s) => stepIcon({ type: s[1] })).join('')}</span>
-                <span class="small muted">${plural(t.steps.length, 'step')} · ${plural(t.steps[t.steps.length - 1][0], 'day')}</span>
-              </button>`).join('')}
-            <button type="button" class="tpl-card blank" data-act="cad-new"><strong>+ Blank cadence</strong><span class="small muted">Start from scratch</span></button>
-          </div>
+          ${cadTemplatePicker()}
         </div>`;
       return;
     }
@@ -5331,6 +5323,7 @@ Give me the CSV file.`;
             ${due.length ? `<button class="btn" data-act="session-setup" data-cad="${cad.id}">▶ Work this cadence</button>` : ''}
             <button class="btn ${due.length ? 'ghost' : ''}" data-act="cad-add-people">+ Add people</button>
             <button class="btn ghost" data-act="cad-edit">Edit steps</button>
+            <button class="btn ghost" data-act="cad-save-tpl" title="Keep this cadence's steps, scripts and rules to start new cadences from">Save as template</button>
             <button class="btn danger sm" data-act="cad-delete">Delete</button>
           </div>
         </div>
@@ -5662,11 +5655,96 @@ Give me the CSV file.`;
     }, 'Add');
   }
 
-  function cadenceForm(existing, template) {
+  // ----- cadence templates: the built-in starters, your own saved ones, or a copy of a cadence -----
+  /** Steps as objects, whether they come from a built-in template ([day, type, …]) or a saved one / a cadence. */
+  const tplSteps = (t) => t.steps.map((x) => (Array.isArray(x) ? { day: x[0], type: x[1], title: x[2], subject: x[3], body: x[4] }
+    : { day: x.day, type: x.type, title: x.title || '', subject: x.subject || '', body: x.body || '' }));
+  const freeCadColor = () => CADENCE_COLORS.find((c) => !state.cadences.some((x) => x.color === c)) || CADENCE_COLORS[state.cadences.length % CADENCE_COLORS.length];
+  /** "Insperity Renewal" → "Insperity Renewal 2" when a cadence already has that name. */
+  const freeCadName = (name) => {
+    const taken = new Set(state.cadences.map((c) => c.name.trim().toLowerCase()));
+    if (!taken.has(name.trim().toLowerCase())) return name;
+    let n = 2; while (taken.has(`${name} ${n}`.toLowerCase())) n += 1;
+    return `${name} ${n}`;
+  };
+  const cadTplById = (id) => state.cadTemplates.find((t) => t.id === id);
+  const tplCard = (t, attrs, extra = '') => {
+    const st = tplSteps(t);
+    return `<div class="tpl-wrap">
+      <button type="button" class="tpl-card" ${attrs} style="--c:${t.color}">
+        <strong>${esc(t.name)}</strong>
+        ${t.description ? `<span class="small muted">${esc(t.description)}</span>` : ''}
+        <span class="tpl-steps">${st.map((x) => stepIcon({ type: x.type })).join('')}</span>
+        <span class="small muted">${plural(st.length, 'step')} · ${plural(Math.max(1, ...st.map((x) => x.day)), 'day')}</span>
+      </button>${extra}</div>`;
+  };
+  /** Pick a starting point: your templates, a copy of one of your cadences, a starter, or blank. */
+  function cadTemplatePicker() {
+    const mine = [...state.cadTemplates].sort((a, b) => a.name.localeCompare(b.name));
+    return `<div class="tpl-pick" id="cad-pick">
+      ${mine.length ? `<section><h3>Your templates</h3><div class="tpl-grid">${mine.map((t) => tplCard(t, `data-act="cad-mytpl" data-tid="${t.id}"`,
+        `<button type="button" class="icon-btn tpl-del" data-act="cad-tpl-del" data-tid="${t.id}" title="Delete this template" aria-label="Delete template ${esc(t.name)}">✕</button>`)).join('')}</div></section>` : ''}
+      ${state.cadences.length ? `<section><h3>Copy one of your cadences</h3><p class="small muted">Same steps, scripts and smart rules; nobody enrolled.</p><div class="tpl-grid">${state.cadences.map((c) => tplCard(c, `data-act="cad-copy" data-cad="${c.id}"`)).join('')}</div></section>` : ''}
+      <section><h3>Starter templates</h3><div class="tpl-grid">
+        ${CADENCE_TEMPLATES.map((t, i) => tplCard(t, `data-act="cad-template" data-tpl="${i}"`)).join('')}
+        <div class="tpl-wrap"><button type="button" class="tpl-card blank" data-act="cad-blank"><strong>+ Blank cadence</strong><span class="small muted">Start from scratch</span></button></div>
+      </div></section>
+      ${mine.length ? '' : '<p class="small muted tpl-tip">Tip: open a cadence and choose <b>Save as template</b> to reuse it here.</p>'}
+    </div>`;
+  }
+  /** "+ New cadence": the picker in a dialog. */
+  function newCadencePicker() {
+    openModal('New cadence', `<p class="small muted" style="margin:0">Start from a template, a copy of one of your cadences, or a blank cadence. You can change anything before you create it.</p>${cadTemplatePicker()}`, null, 'Create', { wide: true });
+    $('.modal-actions [type=submit]', modalForm).remove();
+    $('#cad-pick').addEventListener('click', (e) => { const el = e.target.closest('[data-act]'); if (el) cadPickAct(el.dataset.act, el); });
+  }
+  /** A choice in the picker (on the empty Cadences page or in the dialog). Returns true when handled. */
+  function cadPickAct(act, el) {
+    if (act === 'cad-template') { cadenceForm(null, CADENCE_TEMPLATES[Number(el.dataset.tpl)]); return true; }
+    if (act === 'cad-blank') { cadenceForm(null, null); return true; }
+    if (act === 'cad-mytpl') { const t = cadTplById(el.dataset.tid); if (t) cadenceForm(null, t); return true; }
+    if (act === 'cad-copy') { const c = cadenceById(el.dataset.cad); if (c) cadenceForm(null, c, { name: freeCadName(`${c.name} (copy)`), color: freeCadColor() }); return true; }
+    if (act === 'cad-tpl-del') {
+      const t = cadTplById(el.dataset.tid);
+      if (!t || !confirm(`Delete the template "${t.name}"? Cadences you made from it stay as they are.`)) return true;
+      state.cadTemplates = state.cadTemplates.filter((x) => x !== t);
+      save(); toast('Template deleted');
+      if (modal.open) newCadencePicker(); else rerender();
+      return true;
+    }
+    return false;
+  }
+  /** Save a cadence's steps, scripts, color, weekends and smart rules as a template (same name replaces it). */
+  function saveCadTemplateForm(cad) {
+    const sameAs = (name) => state.cadTemplates.find((t) => t.name.trim().toLowerCase() === name.trim().toLowerCase());
+    openModal('Save as template', `
+      <p class="small muted" style="margin:0">Keeps the ${plural(cad.steps.length, 'step')} with their subjects and scripts, the color, skip weekends and smart rules. The people enrolled aren't part of it. Use it from <b>+ New cadence</b>.</p>
+      ${field('Template name *', `<input name="name" required value="${esc(cad.name)}">`)}
+      ${field('Description', `<input name="description" value="${esc(cad.description || '')}" placeholder="Who it's for and the angle">`)}
+      <div class="small muted" id="tpl-same"></div>`, (data) => {
+      const name = data.name.trim();
+      if (!name) return false;
+      const fields = { name, description: data.description.trim(), color: cad.color, skipWeekends: !!cad.skipWeekends, rules: { ...cadRules(cad) },
+        steps: tplSteps(cad), from: cad.name, savedAt: today() };
+      const ex = sameAs(name);
+      if (ex) Object.assign(ex, fields); else state.cadTemplates.push({ id: uid(), ...fields });
+      toast(ex ? `Template "${name}" updated` : `Saved "${name}" as a template`);
+    }, 'Save template');
+    const hint = () => {
+      const ex = sameAs($('#modal [name=name]').value);
+      $('#tpl-same').textContent = ex ? `You already have a template called "${ex.name}". Saving replaces it.` : '';
+      $('.modal-actions [type=submit]', modalForm).textContent = ex ? 'Replace template' : 'Save template';
+    };
+    modalForm.oninput = hint;
+    hint();
+  }
+
+  function cadenceForm(existing, template, opts = {}) {
     const src = existing || (template ? {
-      name: template.name, description: template.description, color: template.color, skipWeekends: true,
-      steps: template.steps.map(([day, type, title, subject, body]) => ({ id: uid(), day, type, title, subject, body })),
-    } : { name: '', description: '', color: CADENCE_COLORS.find((c) => !state.cadences.some((x) => x.color === c)) || CADENCE_COLORS[state.cadences.length % CADENCE_COLORS.length], skipWeekends: true, steps: [{ id: uid(), day: 1, type: 'email', title: 'Intro email', subject: '', body: '' }] });
+      name: opts.name || freeCadName(template.name), description: template.description || '', color: opts.color || template.color || freeCadColor(),
+      skipWeekends: template.skipWeekends !== false, rules: template.rules ? { ...template.rules } : undefined,
+      steps: tplSteps(template).map((x) => ({ id: uid(), ...x })),
+    } : { name: '', description: '', color: freeCadColor(), skipWeekends: true, steps: [{ id: uid(), day: 1, type: 'email', title: 'Intro email', subject: '', body: '' }] });
     const stepRow = (s) => `
       <div class="step-edit">
         <input type="hidden" name="s_id" value="${esc(s.id || uid())}">
@@ -10884,8 +10962,9 @@ Give me the CSV file.`;
       case 'route-optimize': return optimizeRoute(ui.routeDate);
       case 'route-day': return go(`map/route/${addDays(ui.routeDate, Number(el.dataset.n))}`);
       case 'set-home': return homeBaseForm();
-      case 'cad-template': return cadenceForm(null, CADENCE_TEMPLATES[Number(el.dataset.tpl)]);
-      case 'cad-new': return cadenceForm(null, null);
+      case 'cad-template': case 'cad-blank': case 'cad-mytpl': case 'cad-copy': case 'cad-tpl-del': return cadPickAct(act, el);
+      case 'cad-new': return newCadencePicker();
+      case 'cad-save-tpl': { const cad = cadenceById(ui.cadenceId); if (cad) saveCadTemplateForm(cad); return; }
       case 'cad-open': ui.cadenceId = el.dataset.cad; return go(`cadences/${el.dataset.cad}`);
       case 'cad-edit': return cadenceForm(cadenceById(ui.cadenceId));
       case 'cad-add-people': return addPeopleForm(cadenceById(ui.cadenceId));
