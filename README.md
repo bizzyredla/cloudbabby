@@ -195,6 +195,32 @@ No install, no build step: open `index.html` in a browser.
   90 days, last field day, days since the last touch, and the top 10 **field day picks** with
   their reasons, for any day you pick; add them all to that day's route, **Choose stops…**, or
   **Open in the day planner** with the territory picked
+  (Burbank & Studio City and Palos Verdes Peninsula used to carry stray outlines in San Jose and
+  near Fresno, which stretched their map zoom across the state; those are gone.)
+- **3D map** (Map → 3D map; the Accounts map stays the default): satellite imagery with hills and,
+  at street level, 3D buildings (Mapbox Standard Satellite with the app's Mapbox key).
+  - **Southern California**: one count per territory with its name ("17 Arcadia"); where two
+    would overlap, the one underneath shows "+N". **Tap a territory** for a card with the CRM's
+    numbers (prospects, partners, clients, renewing within 90 days, due, last field day) and
+    **Plan a field day**, which opens the territory scorecard.
+  - **Neighborhood**: offices as pins (circle = prospect, blue = client, diamond = partner, amber =
+    renewing within 90 days). Pins that would sit on top of each other show "+N" on the one
+    underneath; tap it to zoom in and pull them apart. Every pinned account shows, including ones
+    in an unincorporated pocket (they count toward the territory next door, as everywhere else);
+    the footer says how many are outside all 124 territories.
+  - **An office** (tap a pin or pick it from the list): a verified street address tilts to about
+    55° over the buildings, with the pin kept above a small card: type, stage, territory, address,
+    the next renewal ("Benefits renews Jan 3 · in 46 d"), the last drop, and **Navigate** (Apple
+    Maps on iPhone), **Log drop** (the usual drop form), **Route** (today's route) and **Open**. A
+    city-only pin stays flat at neighborhood level and offers **Confirm street address**.
+  - Lists: **Accounts** (search looks across every account), **Today** (today's route, reorder or
+    remove stops, **Drive route** in Google Maps, **Day planner** for other days, start point, times
+    and the optimizer) and **Territories**. **2D / 3D** flattens or tilts; **Near me**; territory
+    outlines; Fit. On a phone the lists sit under **Show list** so the map gets the screen, and the
+    office card is a short sheet along the bottom.
+  - Needs a connection and a browser with WebGL 2 (current iPhone Safari and desktop browsers);
+    otherwise it says why, with **Open the Accounts map** and **Try again**. Accounts that aren't
+    pinned yet get pinned on the Accounts map.
 - **Numbers on territories** (Accounts map): each territory is shaded darker the more it has,
   with its number on it, so you can read the map on a phone without hovering. Pick what the
   number is: **Accounts** (prospects + clients, the default), **Partners**, **Open pipeline**,

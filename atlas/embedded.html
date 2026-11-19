@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Bbars OS 3D map</title>
+    <link rel="stylesheet" href="./atlas.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { mountAtlas } from './app.js';
+      window.startFieldAtlas = (options) => mountAtlas(document.querySelector('#app'), options);
+      window.dispatchEvent(new Event('atlas-ready'));
+    </script>
+  </body>
+</html>
