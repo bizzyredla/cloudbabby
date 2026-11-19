@@ -15,6 +15,12 @@ No install, no build step: open `index.html` in a browser.
     talked with us) → Met (meeting held, partnership discussed) → Committed (agreed to refer, no
     referral yet) → Producing (referral in the last 6 months) → Dormant (open or signed, no referral
     in 6+ months) → Closed (declined, or exclusive elsewhere)
+  - **The stage is optional.** A new account (or partner) starts with **no stage yet** and no
+    follow-up date: pick a stage once there's an opportunity. A blank stage shows as "No stage",
+    has its own **No stage yet** filter on Accounts and a **No stage** column first on the board,
+    and isn't in open pipeline. Picking one later is logged ("Stage changed: No stage → S1 …").
+    Logging an activity on such an account leaves the stage blank unless you pick one. Imports
+    still start rows without a stage at S1
   - Open pipeline counts prospects in S1–S5 only. Older stage names convert automatically
     (e.g. Proposal → S4, Won → Closed Won, Active → Producing, At Risk → Dormant)
   - Spreadsheet imports accept the full name, just "S3", the words after the dash, or an old name
@@ -527,7 +533,12 @@ value first, then spends your time by tier
     with est. comp. Click a tile to filter
   - **Partner table**: tier, type, referrals (12 mo), referred pipeline, est. comp won / open,
     given / got (with the last thing you gave them, or "Last give: none"), last touch and next step
-    (a task, or the cadence step they're on). Click any
+    (a task, or the cadence step they're on). Rows stay one line tall: the next step and last
+    give are one line each (hover for the full text) and the next step leaves out the partner's
+    own name ("Re-engage · today"); headers are short (hover a header for what it counts). On a
+    small laptop, Type shows under the partner's name and Est. comp is left out, so Next step
+    stays in view. On a tablet or phone each partner is a compact card (name and tier, the row
+    actions, then labelled figures and the next step), so there's no sideways scrolling. Click any
     column to sort (default: tier, then referrals). Quick filters: tier, past touch target,
     agreement ending. Red = past the tier's touch target, getting without giving, or nothing
     planned for an A/B partner. Export to CSV
