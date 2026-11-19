@@ -3166,7 +3166,7 @@
     if (view === 'report') ui.reportWeek = weekStart(/^\d{4}-\d{2}-\d{2}$/.test(arg || '') ? arg : today());
     if (view === 'map') {
       const parts = location.hash.split('/');
-      ui.mapMode = parts[1] === 'route' ? 'route' : parts[1] === 'territories' ? 'territories' : 'accounts';
+      ui.mapMode = parts[1] === 'route' ? 'route' : parts[1] === 'territories' ? 'territories' : parts[1] === '3d' ? '3d' : 'accounts';
       if (ui.mapMode === 'route') ui.routeDate = /^\d{4}-\d{2}-\d{2}$/.test(parts[2] || '') ? parts[2] : (ui.routeDate || today());
     } else if (mapState.map) unmountMap(false);
     if (ui.lastView !== view) ui.showAll = false;
@@ -8909,8 +8909,9 @@ Give me the CSV file.`;
         <button type="button" class="${mode === 'accounts' ? 'active' : ''}" data-act="map-mode" data-mode="accounts">Accounts</button>
         <button type="button" class="${mode === 'route' ? 'active' : ''}" data-act="map-mode" data-mode="route">Route<span class="hide-sm"> planner</span></button>
         <button type="button" class="${mode === 'territories' ? 'active' : ''}" data-act="map-mode" data-mode="territories">Territories</button>
+        <button type="button" class="${mode === '3d' ? 'active' : ''}" data-act="map-mode" data-mode="3d">3D<span class="hide-sm"> map</span></button>
       </div>
-      <button type="button" class="btn sm near-btn" data-act="map-near">📍 Near me</button>
+      ${mode === '3d' ? '' : '<button type="button" class="btn sm near-btn" data-act="map-near">📍 Near me</button>'}
     </div>`;
   }
 
@@ -9593,7 +9594,113 @@ Give me the CSV file.`;
     }
   }
 
+  // ----- the 3D map (Map → 3D map): atlas/ runs in an iframe on this page and gets everything from here -----
+  // Every pinned account goes in with the territory the CRM gives it (an account in an unincorporated pocket
+  // belongs to the territory next to it, as everywhere else); actions come back here: Log drop, today's
+  // route, Open, fix an address, plan a field day.
+  function atlasAccounts(d) {
+    return state.accounts.filter(hasGeo).map((a) => {
+      const t = socalOf(a);
+      const r = renewalsOf(a, d)[0];
+      let visit = '';
+      for (const h of a.activities) if (h.kind === 'Visit' && h.date <= d && h.date > visit) visit = h.date;
+      return {
+        id: a.id, name: a.name, city: a.location || '', industry: a.industry || '', coords: [a.geo.lng, a.geo.lat], address: geoQuery(a),
+        type: a.type === 'partner' ? 'partner' : isClient(a) ? 'client' : 'prospect', stage: a.stage || '',
+        approx: !a.geo.manual && !!(a.geo.approx || a.geo.check), noDrop: noDrop(a), reserve: isReserve(a),
+        renewal: r ? r.date : '', renewWhat: r ? r.what : '', visit, terr: t ? t.n : 0, nav: navUrl(ll(a)),
+      };
+    });
+  }
+  function atlasData(withZones) {
+    const d = today();
+    return {
+      accounts: atlasAccounts(d), route: routeStops(d).map((x) => x.a.id),
+      todayLabel: `Today · ${fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' })}`,
+      ...(withZones ? { zones: socalData.map((t) => ({ n: t.n, name: t.name, region: t.region, county: t.county, rings: t.rings })) } : {}),
+    };
+  }
+  const ATLAS_FAIL = {
+    nogl: 'This browser can\'t draw 3D maps (WebGL 2 is off or not supported).',
+    notoken: 'No Mapbox key is set up for this app.',
+    'Mapbox key refused': 'Mapbox turned down the key for this site.',
+  };
+  function atlasFail(e) {
+    const box = $('.atlas-box');
+    if (!box) return;
+    const why = ATLAS_FAIL[e && e.message] || 'Mapbox didn\'t answer. Check your connection and try again.';
+    box.outerHTML = `<div class="card empty atlas-fail"><b>The 3D map can't open here.</b> ${esc(why)}<div class="row" style="justify-content:center;margin-top:.6rem"><a class="btn" href="#map/accounts">Open the Accounts map</a><button type="button" class="btn ghost" data-act="atlas-retry">Try again</button></div></div>`;
+  }
+  /** Fill the screen between the page header and the phone's tab bar. */
+  function sizeAtlas() {
+    const box = $('.atlas-box');
+    if (!box) return;
+    const tabs = $('#tabs');
+    const below = tabs && getComputedStyle(tabs).position === 'fixed' ? tabs.offsetHeight : 0;
+    const top = box.getBoundingClientRect().top + window.scrollY;
+    box.style.height = `${Math.max(420, window.innerHeight - top - below - 14)}px`;
+  }
+  window.addEventListener('resize', () => { if (ui.mapMode === '3d' && location.hash.startsWith('#map')) sizeAtlas(); });
+  const atlasRouteUrl = (ids) => {
+    const pts = ids.map(getAccount).filter((a) => a && hasGeo(a)).map(ll);
+    if (!pts.length) return '';
+    const f = (x) => `${x[0].toFixed(6)},${x[1].toFixed(6)}`;
+    const mids = pts.slice(0, -1).slice(0, 9);
+    return `https://www.google.com/maps/dir/?api=1&destination=${f(pts[pts.length - 1])}${mids.length ? `&waypoints=${encodeURIComponent(mids.map(f).join('|'))}` : ''}&travelmode=driving`;
+  };
+  function renderMap3d() {
+    const fr = $('#field-atlas');
+    if (fr) { if (fr.atlas) fr.atlas.update(atlasData(false)); return; } // still on the 3D map: just refresh its data
+    const unpinned = state.accounts.filter(needsGeo).length;
+    $('#view').innerHTML = `${mapHead('3d')}
+      ${unpinned ? `<div class="atlas-note small muted">${plural(unpinned, 'account')} with an address ${unpinned === 1 ? 'isn\'t' : 'aren\'t'} pinned yet. Open the <a href="#map/accounts">Accounts map</a> to pin ${unpinned === 1 ? 'it' : 'them'}.</div>` : ''}
+      <div class="atlas-box"><iframe id="field-atlas" title="3D map of Southern California" allow="geolocation"></iframe><div class="atlas-msg" id="atlas-msg">Loading the 3D map…</div></div>`;
+    const frame = $('#field-atlas');
+    sizeAtlas();
+    frame.addEventListener('load', async () => {
+      if (!frame.isConnected || !frame.contentWindow.startFieldAtlas) return;
+      try {
+        frame.atlas = await frame.contentWindow.startFieldAtlas({
+          data: atlasData(true), token: MAPBOX_TOKEN,
+          host: (action, id) => {
+            const a = id && getAccount(id);
+            if (action === 'record' && a) go(`account/${id}`);
+            if (action === 'fixaddr' && a) accountForm(a);
+            if (action === 'planner') go(`map/route/${today()}`);
+            if (action === 'terr') { const t = terrByN(id); if (t) socalCard(t); }
+          },
+          onDrop: (row) => { const a = getAccount(row.id); if (a && !noDrop(a)) visitLogForm(a); },
+          onRoute: (ids, prior) => {
+            const d = today(); const cur = getRoute(d);
+            const added = ids.filter((id) => !prior.includes(id) && getAccount(id));
+            const dropped = prior.filter((id) => !ids.includes(id));
+            const seen = new Set([...prior, ...ids]);
+            setRoute(d, {
+              extra: [...new Set([...cur.extra.filter((id) => !dropped.includes(id)), ...added])],
+              removed: [...new Set([...cur.removed.filter((id) => !added.includes(id)), ...dropped])],
+              order: [...ids, ...cur.order.filter((id) => !seen.has(id))],
+            });
+          },
+          terrStats: (n) => {
+            const t = terrByN(n);
+            if (!t) return null;
+            const st = socalStats(t, state.accounts.filter((a) => socalOf(a) === t && !isReserve(a)));
+            return { pros: st.pros, ptn: st.ptn, cli: st.cli, renew: st.renew.length, due: st.due.length, lastVisit: st.lastVisit ? relDays(st.lastVisit) : '' };
+          },
+          routeUrl: atlasRouteUrl,
+        });
+        const msg = $('#atlas-msg'); if (msg) msg.remove();
+      } catch (e) { atlasFail(e); }
+    }, { once: true });
+    loadSocal().then(() => { if (frame.isConnected) frame.src = 'atlas/embedded.html'; }).catch(() => atlasFail(new Error('The territories didn\'t load.')));
+  }
+
   function renderMap() {
+    if (ui.mapMode === '3d') {
+      if (mapState.map) unmountMap(false);
+      mapState.screen = '3d'; mapState.view = '3d';
+      return renderMap3d();
+    }
     const screen = ui.mapMode === 'route' ? `route:${ui.routeDate}` : 'accounts';
     unmountMap(mapState.screen === screen);
     mapState.screen = screen;
@@ -11107,7 +11214,8 @@ Give me the CSV file.`;
         return;
       }
       case 'map-geo-retry': mapState.geoPausedUntil = 0; return rerender();
-      case 'map-mode': return go(el.dataset.mode === 'route' ? `map/route/${ui.routeDate || today()}` : el.dataset.mode === 'territories' ? 'map/territories' : 'map');
+      case 'atlas-retry': return rerender();
+      case 'map-mode': return go(el.dataset.mode === 'route' ? `map/route/${ui.routeDate || today()}` : el.dataset.mode === 'territories' ? 'map/territories' : el.dataset.mode === '3d' ? 'map/3d' : 'map');
       case 'terr-open': { const t = (socalData || []).find((x) => String(x.n) === el.dataset.n); return t ? socalCard(t) : undefined; }
       case 'terr-plan': { const t = terrByN(el.dataset.n); return t ? planTerritory(t, planDay()) : undefined; }
       case 'terr-view': ui.terrView = el.dataset.v; savePrefs(); return rerender();

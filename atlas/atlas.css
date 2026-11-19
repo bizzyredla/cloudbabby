@@ -1,0 +1,825 @@
+:root {
+  font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  color: #1a3029;
+  background: #f2f4ed;
+  font-size: 16px;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button,
+a {
+  touch-action: manipulation;
+}
+button {
+  cursor: pointer;
+  color: inherit;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid #cf8c25;
+  outline-offset: 2px;
+}
+button {
+  border: 0;
+  background: transparent;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+button svg {
+  flex-shrink: 0;
+}
+a {
+  color: inherit;
+}
+button[hidden],
+[hidden] {
+  display: none !important;
+}
+html,
+body,
+#app {
+  height: 100%;
+}
+.shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.work {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.side {
+  width: 337px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #f7f8f2;
+  border-right: 1px solid #d4dbce;
+  z-index: 2;
+}
+.sidehead {
+  padding: 24px 20px 13px;
+}
+.side h1 {
+  font-size: 30px;
+  line-height: 1.06;
+  letter-spacing: -1.5px;
+  margin: 0 0 12px;
+}
+.tabs {
+  display: flex;
+  background: #e7ebe1;
+  border: 1px solid #dbe1d4;
+  padding: 3px;
+  border-radius: 9px;
+}
+.tabs button {
+  min-width: 0;
+  flex: 1;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 9px 3px;
+  border-radius: 6px;
+}
+.tabs .active {
+  background: #fff;
+  box-shadow: 0 1px 3px #18352627;
+  color: #155840;
+}
+.filters {
+  padding: 0 20px 12px;
+  border-bottom: 1px solid #dce2d6;
+}
+.search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 12px;
+  background: #fff;
+  border: 1px solid #c7d2c4;
+  border-radius: 8px;
+}
+.search input {
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: 0;
+  font-size: 14px;
+  color: #192e26;
+}
+.chips {
+  display: flex;
+  gap: 5px;
+  margin-top: 9px;
+  flex-wrap: wrap;
+}
+.chips button {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 9px;
+  border-radius: 20px;
+  background: #eef1e9;
+  border: 1px solid #d6ded3;
+}
+.chips button[aria-pressed='true'] {
+  background: #d7e8d4;
+  border-color: #95b19a;
+  color: #154d35;
+}
+.listtitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 19px 9px;
+  color: #445a4d;
+  font-size: 13px;
+  font-weight: 650;
+}
+.rows {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding: 0 10px 15px;
+}
+.row {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  min-height: 62px;
+  border-bottom: 1px solid #dce1d6;
+  padding: 11px 9px;
+}
+.row:hover,
+.row.selected {
+  background: #e4eddf;
+  border-radius: 8px;
+}
+.rowbody {
+  min-width: 0;
+  flex: 1;
+}
+.row strong,
+.row small {
+  display: block;
+}
+.row strong {
+  font-size: 15px;
+  line-height: 1.3;
+}
+.row small {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #53685d;
+}
+.row .arrow {
+  color: #718174;
+}
+.tagicon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #e3ebdf;
+  color: #38634b;
+  flex: none;
+}
+.shape {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #368059;
+  display: inline-block;
+}
+.partner .shape,
+.shape.partner {
+  border-radius: 2px;
+  transform: rotate(45deg);
+  background: #a36a1e;
+}
+.sidefoot {
+  padding: 11px 20px;
+  border-top: 1px solid #d9e0d3;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  color: #52665a;
+}
+.mapframe {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: #224c52;
+}
+.basemap,
+.pins {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.pins {
+  pointer-events: none;
+  overflow: hidden;
+}
+.mark {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  white-space: nowrap;
+  font-weight: 650;
+  box-shadow: 0 2px 7px #08231f55;
+}
+.cluster {
+  background: #f4f6e9;
+  color: #173d2e;
+  border-radius: 20px;
+  padding: 4px 11px 4px 4px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #ffffff99;
+}
+.cluster b {
+  display: grid;
+  place-items: center;
+  background: #234f3b;
+  color: #fff;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  font-size: 12px;
+}
+.dot {
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: #287952;
+  border: 3px solid #fff6d8;
+}
+.diamond {
+  border-radius: 5px;
+  background: #a16922;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.picked {
+  outline: 4px solid #fbd484a8;
+}
+.seq {
+  border-radius: 50%;
+  background: #114a37;
+  color: white;
+  width: 32px;
+  height: 32px;
+  border: 2px solid #fff;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+}
+.mapbar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 15px;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+  align-items: start;
+  gap: 8px;
+}
+.mapbar > * {
+  pointer-events: auto;
+}
+.maptools,
+.mapmode,
+.legend {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  background: #f8fbf1f6;
+  border: 1px solid #ffffffa8;
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 2px 14px #162b2240;
+}
+.mapbar button,
+.maptools button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 660;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 7px;
+}
+.mapmode button[aria-pressed='true'] {
+  background: #204a37;
+  color: white;
+}
+.zoomtools {
+  position: absolute;
+  right: 16px;
+  top: 73px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.zoomtools button {
+  width: 39px;
+  height: 39px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #f7f9f0f5;
+  box-shadow: 0 1px 6px #12261f55;
+}
+.legend {
+  position: absolute;
+  bottom: 33px;
+  left: 17px;
+  padding: 7px 11px;
+  gap: 11px;
+  font-size: 11px;
+  font-weight: 650;
+  color: #19382b;
+}
+.legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.cardwrap {
+  position: absolute;
+  left: 18px;
+  bottom: 86px;
+  width: min(330px, calc(100% - 36px));
+  pointer-events: none;
+}
+.info {
+  pointer-events: auto;
+  background: #fbfcf6;
+  border: 1px solid #fff;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 10px 40px #10241d55;
+}
+.cardtop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #4a6657;
+}
+.info h2 {
+  font-size: 21px;
+  letter-spacing: -0.7px;
+  margin: 5px 0;
+}
+.info p {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 5px 0;
+  color: #465f50;
+}
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.actions button,
+.actions a,
+.primary,
+.light {
+  padding: 9px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: #e6ede1;
+  color: #254936;
+}
+.actions .primary,
+.primary {
+  background: #22573e;
+  color: #fff;
+}
+.actions button:disabled {
+  opacity: 0.6;
+}
+.controls-mini {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.controls-mini button,
+.xbtn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: #e7ede1;
+}
+.empty {
+  color: #506358;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 14px;
+}
+.status {
+  position: absolute;
+  bottom: 35px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #163828;
+  color: white;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  max-width: 85%;
+  z-index: 5;
+}
+.sheetbutton {
+  display: none;
+}
+.daycount {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #53695b;
+}
+@media (max-width: 780px) {
+  .work {
+    flex-direction: column;
+  }
+  .side {
+    display: contents;
+  }
+  .sidehead {
+    padding: 10px 12px 8px;
+    background: #f6f8f1;
+  }
+  .sidehead h1 {
+    display: none;
+  }
+  .tabs {
+    max-width: 500px;
+    margin: auto;
+  }
+  .tabs button {
+    font-size: 13px;
+    padding: 8px;
+  }
+  .mapframe {
+    order: 2;
+    min-height: 165px;
+  }
+  .sheetbutton {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 14px;
+    width: 100%;
+    font-weight: 650;
+    font-size: 14px;
+    border-top: 1px solid #cfd9cc;
+    background: #f7f9f4;
+    order: 3;
+  }
+  .sheetbutton svg {
+    width: 17px;
+  }
+  .filters,
+  .listtitle,
+  .rows,
+  .sidefoot {
+    display: none;
+  }
+  .shell.expanded .filters,
+  .shell.expanded .listtitle,
+  .shell.expanded .rows {
+    display: block;
+    order: 4;
+    background: #f8faf4;
+  }
+  .shell.expanded .filters {
+    padding: 3px 15px 8px;
+  }
+  .shell.expanded .listtitle {
+    display: none;
+  }
+  .shell.expanded .rows {
+    order: 5;
+    max-height: 22dvh;
+    min-height: 75px;
+    flex: 0 1 auto;
+  }
+  .mapbar {
+    top: 10px;
+    left: 9px;
+    right: 9px;
+  }
+  .mapbar button {
+    font-size: 12px;
+    min-height: 32px;
+    padding: 4px 7px;
+  }
+  .zoomtools {
+    right: 10px;
+    top: 62px;
+  }
+  .zoomtools button {
+    width: 34px;
+    height: 34px;
+  }
+  .legend {
+    bottom: 25px;
+    left: 8px;
+    font-size: 10px;
+    padding: 5px 8px;
+  }
+  .cardwrap {
+    left: 9px;
+    bottom: 55px;
+    width: min(330px, calc(100% - 54px));
+  }
+  .info {
+    padding: 12px;
+  }
+  .info h2 {
+    font-size: 18px;
+  }
+  .sidefoot {
+    display: none;
+  }
+  .actions {
+    margin-top: 8px;
+  }
+  .sheetbutton {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+  .shell.expanded .cardwrap {
+    bottom: 26px;
+  }
+  .shell.expanded:has(.info) .legend {
+    display: none;
+  }
+}
+@media (max-width: 375px) {
+  .maptools .neartext {
+    display: none;
+  }
+}
+.routepick {
+  display: flex;
+  align-items: center;
+  text-align: left;
+  gap: 10px;
+  padding: 0;
+}
+.routeactions {
+  margin: 4px 8px;
+}
+.routenote {
+  font-size: 12px;
+  color: #53665b;
+  margin: 7px 10px 12px;
+}
+.cardtop button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+}
+.maptools button[aria-pressed='true'] {
+  background: #cfdfc9;
+}
+@media (max-width: 780px) {
+  .mapbar button,
+  .zoomtools button {
+    min-width: 37px;
+    min-height: 38px;
+  }
+  .actions button,
+  .actions a {
+    min-height: 38px;
+  }
+}
+
+/* ---- Bbars additions: client / renewing pins, "+N" counts, territory card figures, phone layout ---- */
+.shape.client,
+.dot.client {
+  background: #2563eb;
+}
+.shape.renew,
+.dot.renew {
+  background: #f59e0b;
+}
+.tagicon.client {
+  background: #dbe7fb;
+}
+.dot.renew {
+  border-color: #fff3d6;
+}
+.mark .more {
+  position: absolute;
+  top: -10px;
+  right: -14px;
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 750;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 10px;
+  background: #102c22;
+  color: #fff;
+  border: 1.5px solid #fff;
+  pointer-events: none;
+}
+.diamond .more {
+  transform: rotate(-45deg);
+}
+.cluster.has-more .more {
+  top: -8px;
+  right: -8px;
+}
+.cluster.bare {
+  padding: 3px;
+}
+.figs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0 2px;
+  font-size: 13px;
+  color: #3f5649;
+}
+.figs b {
+  font-size: 15px;
+  color: #173d2e;
+}
+.info .soon {
+  color: #a15c00;
+  background: #fff1d6;
+  padding: 0 5px;
+  border-radius: 5px;
+}
+.info .warn {
+  color: #9a3412;
+}
+.linkish {
+  padding: 0;
+  text-decoration: underline;
+  color: #1d5c3f;
+  font-weight: 650;
+  font-size: 13px;
+}
+.info.acct.is-soon {
+  border-top: 4px solid #f59e0b;
+}
+.info .addr {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* the legend sits above the Mapbox logo, not on it */
+.legend {
+  bottom: 34px;
+  left: 10px;
+}
+.mapboxgl-ctrl-logo {
+  margin: 0 0 4px 6px !important;
+}
+@media (max-width: 780px) {
+  .sidehead {
+    padding: 6px 10px;
+  }
+  .tabs button {
+    padding: 7px 4px;
+  }
+  /* pinch to zoom and twist to rotate on a phone; only Fit stays, so the buttons don't sit on the counts */
+  .zoomtools .zbtn {
+    display: none;
+  }
+  .zoomtools {
+    top: 58px;
+  }
+  .legend {
+    bottom: 30px;
+    left: 6px;
+    gap: 7px;
+    font-size: 9.5px;
+    padding: 4px 7px;
+  }
+  .legend span:last-child {
+    display: none;
+  }
+  .shell:has(.info) .legend {
+    display: none;
+  }
+  /* the office card is a short sheet along the bottom, so the tilted view stays visible above it */
+  .cardwrap {
+    left: 6px;
+    right: 6px;
+    bottom: 34px; /* above the Mapbox logo, which has to stay visible */
+    width: auto;
+  }
+  .info {
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
+  .info h2 {
+    font-size: 17px;
+    margin: 2px 0;
+  }
+  .info p {
+    font-size: 12px;
+    margin: 2px 0;
+  }
+  .info .addr,
+  .info .meta {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cardtop {
+    font-size: 11px;
+  }
+  .cardtop span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .info .actions {
+    flex-wrap: nowrap;
+    gap: 5px;
+    margin-top: 7px;
+  }
+  .info .actions > * {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 8px 4px;
+    font-size: 12.5px;
+  }
+  .figs {
+    font-size: 12px;
+    gap: 2px 9px;
+  }
+  .figs b {
+    font-size: 14px;
+  }
+  .shell.expanded .rows {
+    max-height: 30dvh;
+  }
+}
+@media (max-width: 780px) {
+  /* Phone: the Accounts / Today / Territories tabs move into the list sheet, so the map gets the room */
+  .sidehead {
+    display: none;
+  }
+  .shell.expanded .sidehead {
+    display: block;
+    order: 4;
+    background: #f8faf4;
+    padding: 6px 12px 2px;
+  }
+  .shell.expanded .filters {
+    order: 5;
+  }
+  .shell.expanded .rows {
+    order: 6;
+  }
+  .legend {
+    bottom: 40px;
+  }
+}

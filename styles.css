@@ -2659,3 +2659,13 @@ tr.qa-open .qa-panel { position: sticky; left: .75rem; max-width: calc(100vw - 3
   main:has(.sel-bar:not([hidden])) { padding-bottom: calc(9.5rem + env(safe-area-inset-bottom)); }
   body:has(.sel-bar:not([hidden])) .toast { bottom: calc(9rem + env(safe-area-inset-bottom)); }
 }
+
+/* Map → 3D map: the iframe fills the screen between the page header and the tab bar. */
+.atlas-box { position: relative; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); background: #1d3f45; min-height: 420px; }
+.atlas-box iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+.atlas-msg { position: absolute; inset: 0; display: grid; place-items: center; color: #e7f0ea; font-size: .95rem; pointer-events: none; }
+.atlas-note { margin: -.2rem 0 .5rem; }
+.atlas-fail { text-align: center; padding: 1.5rem 1rem; }
+@media (max-width: 700px) {
+  .atlas-box { border-radius: 12px; margin: 0 -.25rem; }
+}
